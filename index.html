@@ -221,39 +221,6 @@ body {
 }
 #link-colors-reset:hover { background: #1a3a6a; color: #ccc; }
 
-/* ── 3D TIMELINE AXIS ── */
-#timeline-3d {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 54px;
-  pointer-events: none;
-  z-index: 5;
-  display: none;
-}
-#timeline-3d .tl-line {
-  position: absolute;
-  left: 44px; top: 0; bottom: 0;
-  width: 1px;
-  background: rgba(80,110,170,0.35);
-}
-#timeline-3d .tl-tick {
-  position: absolute;
-  right: 0;
-  width: 9px;
-  height: 1px;
-  background: rgba(80,110,170,0.5);
-}
-#timeline-3d .tl-label {
-  position: absolute;
-  right: 12px;
-  transform: translateY(-50%);
-  font-size: 9px;
-  color: rgba(130,155,200,0.7);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  font-family: monospace;
-}
-
 /* ── GRAPH ── */
 #graph-wrapper {
   position: relative;
@@ -732,9 +699,21 @@ body {
         <input type="checkbox" id="fam-nodes-toggle" checked>
         <span>Familien-Knoten anzeigen</span>
       </label>
-      <label class="sidebar-toggle" id="timeline-toggle-row" style="display:none;border-top:none;padding-top:2px">
-        <input type="checkbox" id="timeline-3d-toggle">
-        <span>Zeitachse (3D)</span>
+      <label class="sidebar-toggle" id="sort-time-3d-row" style="display:none;border-top:none;padding-top:2px">
+        <input type="checkbox" id="sort-time-3d-toggle">
+        <span>Nach Zeit sortieren (3D)</span>
+      </label>
+      <div id="time-spread-row" style="display:none;padding:4px 2px 2px 2px;border-top:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
+          <span>Zeitachsen-Spreizung</span>
+          <span id="time-spread-val">250</span>
+        </div>
+        <input type="range" id="time-spread-slider" min="80" max="700" step="10" value="250"
+               style="width:100%;accent-color:#4a7abf;cursor:pointer">
+      </div>
+      <label class="sidebar-toggle" id="show-names-3d-row" style="display:none;border-top:none;padding-top:2px">
+        <input type="checkbox" id="show-names-3d-toggle">
+        <span>Namen anzeigen (3D)</span>
       </label>
       <button class="sidebar-btn" onclick="toggleAllSurnames(true)">Alle einblenden</button>
       <button class="sidebar-btn" onclick="toggleAllSurnames(false)">Alle ausblenden</button>
@@ -885,7 +864,6 @@ body {
       <svg id="graph-svg"></svg>
     </div>
     <div id="graph-3d-container" style="display:none"></div>
-    <div id="timeline-3d"><div class="tl-line"></div></div>
   </div>
 
   <div id="detail-panel">
@@ -907,6 +885,7 @@ body {
 <div id="tooltip"></div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.137.5/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.5/dist/3d-force-graph.min.js"></script>
 <script>
 'use strict';
@@ -972,8 +951,10 @@ let _3dMousePos    = { x: 0, y: 0 };
 
 // Display mode flags
 let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
-let showTimeline3D = false;  // show year axis overlay in 3D view
-let _simH          = 700;    // SVG height used by buildAndRunSimulation (for timeline mapping)
+let sortByTime3D   = false;  // Y-stratify 3D sim by birth year + show 3D timeline
+let show3DNames    = false;  // render name sprites instead of spheres in 3D
+let _timeline3DObj = null;   // THREE.Group holding timeline meshes in the 3D scene
+let _3dYHalfSpan   = 250;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
 
 // Link colors (user-configurable)
 const LINK_COLOR_DEFAULTS = {
@@ -1233,6 +1214,68 @@ function isNodeVisible(n) {
   return n.type === 'INDI' ? isIndiVisible(n.id) : isFamVisible(n.id);
 }
 
+// ── Family average birth year (used by both 2D sim and 3D forceY) ──
+function famAvgYear(fam) {
+  const ys = [fam.husb, fam.wife, ...fam.chil]
+    .filter(Boolean)
+    .map(id => individuals.get(id)?.birthYear)
+    .filter(Boolean);
+  return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null;
+}
+
+// ── Shared 3D Y mapping — used by BOTH fy pinning and build3DTimeline so rings are exact ──
+function yearTo3DY(yr) {
+  if (!yr || !_birthYearRange) return null; // null = no pin (unknown year)
+  const { min, max } = _birthYearRange;
+  const frac = (yr - min) / Math.max(max - min, 1);
+  // older → +_3dYHalfSpan (top), newer → -_3dYHalfSpan (bottom)
+  return _3dYHalfSpan - frac * 2 * _3dYHalfSpan;
+}
+
+// ── Estimate birth year for a node that has none, via parents/children ──
+function estimateBirthYear(n) {
+  if (n.type !== 'INDI') {
+    return famAvgYear(n.data) || null;
+  }
+  if (n.data.birthYear) return n.data.birthYear;
+  const indi = n.data;
+  // Try parents: look for families this person is a child of
+  for (const famId of (indi.famc || [])) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+    const parentYears = [fam.husb, fam.wife]
+      .filter(Boolean)
+      .map(pid => individuals.get(pid)?.birthYear)
+      .filter(Boolean);
+    if (parentYears.length) return Math.round(parentYears.reduce((a, b) => a + b, 0) / parentYears.length) + 30;
+  }
+  // Try children: look for families this person is a spouse of
+  for (const famId of (indi.fams || [])) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+    const childYears = (fam.chil || [])
+      .map(cid => individuals.get(cid)?.birthYear)
+      .filter(Boolean);
+    if (childYears.length) return Math.round(childYears.reduce((a, b) => a + b, 0) / childYears.length) - 30;
+  }
+  return null;
+}
+
+// ── Pin / unpin Y positions for all 3D graph nodes ──
+function applyTimelineYFix() {
+  if (!graph3d) return;
+  const gd = graph3d.graphData();
+  if (sortByTime3D && _birthYearRange) {
+    gd.nodes.forEach(n => {
+      const yr = estimateBirthYear(n);
+      const y = yearTo3DY(yr);
+      n.fy = (y !== null) ? y : undefined; // pin if we have a year, float otherwise
+    });
+  } else {
+    gd.nodes.forEach(n => { n.fy = undefined; });
+  }
+}
+
 // ── Link style helpers ──
 function linkColor(l) {
   return linkColors[l.ltype] ?? linkColors.parent;
@@ -1295,7 +1338,9 @@ function applyFilter() {
       ltype: l.ltype,
     }));
     graph3d.graphData({ nodes: gNodes, links: gLinks });
-    apply3DPhysics();
+    apply3DPhysics();  // calls applyTimelineYFix internally after graphData is set
+    build3DTimeline();
+    update3DNames();
   }
 }
 
@@ -1444,7 +1489,6 @@ function buildAndRunSimulation() {
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth  || 1100;
   const H = svgEl.clientHeight || 700;
-  _simH = H;
 
   const birthYears = nodes
     .filter(n => n.type === 'INDI' && n.data.birthYear)
@@ -1458,14 +1502,6 @@ function buildAndRunSimulation() {
   const yearToY = yr => {
     if (!yr) return H / 2;
     return 30 + ((yr - minY) / ySpan) * (H - 60);
-  };
-
-  const famAvgYear = (fam) => {
-    const ys = [fam.husb, fam.wife, ...fam.chil]
-      .filter(Boolean)
-      .map(id => individuals.get(id)?.birthYear)
-      .filter(Boolean);
-    return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null;
   };
 
   // Spread initial positions by birth year to help simulation converge faster
@@ -2411,19 +2447,19 @@ function toggleView() {
     c2d.style.display = 'none';
     c3d.style.display = 'block';
     btn.textContent = '◨ 2D'; btn.classList.add('active-3d');
-    document.getElementById('timeline-toggle-row').style.display = 'flex';
+    document.getElementById('sort-time-3d-row').style.display = 'flex';
+    document.getElementById('time-spread-row').style.display = sortByTime3D ? 'block' : 'none';
+    document.getElementById('show-names-3d-row').style.display = 'flex';
     if (!graph3d) initGraph3D();
     else { graph3d.resumeAnimation(); resize3D(); }
-    buildTimeline3D();
   } else {
     currentView = '2d';
     c3d.style.display = 'none';
     c2d.style.display = 'block';
     btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
-    const tlRow = document.getElementById('timeline-toggle-row');
-    if (tlRow) tlRow.style.display = 'none';
-    const tl3d = document.getElementById('timeline-3d');
-    if (tl3d) tl3d.style.display = 'none';
+    document.getElementById('sort-time-3d-row').style.display = 'none';
+    document.getElementById('time-spread-row').style.display = 'none';
+    document.getElementById('show-names-3d-row').style.display = 'none';
     if (graph3d) graph3d.pauseAnimation();
   }
 }
@@ -2432,7 +2468,6 @@ function resize3D() {
   if (!graph3d) return;
   const el = document.getElementById('graph-3d-container');
   graph3d.width(el.clientWidth).height(el.clientHeight);
-  buildTimeline3D();
 }
 
 function compute3DNodeColor(n) {
@@ -2506,7 +2541,11 @@ function initGraph3D() {
   // Delay physics setup so the library's internal controls finish initialising
   // before d3ReheatSimulation() is called (avoids the .tick() undefined error)
   setTimeout(() => {
-    if (graph3d) apply3DPhysics();
+    if (graph3d) {
+      apply3DPhysics();
+      build3DTimeline();
+      update3DNames();
+    }
     setTimeout(() => graph3d?.zoomToFit(800, 60), 2500);
   }, 150);
 }
@@ -2528,6 +2567,13 @@ function apply3DPhysics() {
 
   graph3d.d3AlphaDecay(0.028);
   graph3d.d3VelocityDecay(p.velocityDecay);
+
+  // Pin nodes to exact Y positions based on (estimated) birth year.
+  // Using node.fy is exact — unlike forceY which fights link/charge forces.
+  // Remove any leftover soft forceY from previous sessions.
+  graph3d.d3Force('fy3d', null);
+  applyTimelineYFix();
+
   graph3d.d3ReheatSimulation();
 }
 
@@ -2567,43 +2613,171 @@ function resetLinkColors() {
   updateLinkColors();
 }
 
-// ── 3D Timeline Axis ──
-function buildTimeline3D() {
-  const el = document.getElementById('timeline-3d');
-  if (!el) return;
-  // Remove old ticks/labels, keep the axis line
-  Array.from(el.querySelectorAll('.tl-tick, .tl-label')).forEach(n => n.remove());
+// ── 3D Timeline (Three.js scene objects) ──
 
-  if (!showTimeline3D || !_birthYearRange) {
-    el.style.display = 'none';
-    return;
+// Polyfill roundRect for browsers that don't support it
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    const R = Math.min(r, w / 2, h / 2);
+    this.moveTo(x + R, y);
+    this.lineTo(x + w - R, y);
+    this.arcTo(x + w, y, x + w, y + R, R);
+    this.lineTo(x + w, y + h - R);
+    this.arcTo(x + w, y + h, x + w - R, y + h, R);
+    this.lineTo(x + R, y + h);
+    this.arcTo(x, y + h, x, y + h - R, R);
+    this.lineTo(x, y + R);
+    this.arcTo(x, y, x + R, y, R);
+    this.closePath();
+    return this;
+  };
+}
+
+// Helper: make a sharp canvas sprite. Renders at DPR× resolution for crisp WebGL text.
+function makeTextSprite3D(drawFn, logicalW, logicalH) {
+  const DPR = 4;
+  const canvas = document.createElement('canvas');
+  canvas.width  = logicalW * DPR;
+  canvas.height = logicalH * DPR;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(DPR, DPR);
+  drawFn(ctx, logicalW, logicalH);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, sizeAttenuation: true });
+  const sprite = new THREE.Sprite(mat);
+  return sprite;
+}
+
+// Creates a canvas-texture sprite for a year label
+function makeYearSprite(yr) {
+  const LW = 88, LH = 28;
+  const sprite = makeTextSprite3D((ctx, w, h) => {
+    // Dark pill background
+    ctx.fillStyle = 'rgba(8, 16, 48, 0.88)';
+    ctx.beginPath();
+    ctx.roundRect(1, 1, w - 2, h - 2, 5);
+    ctx.fill();
+    // Bright border
+    ctx.strokeStyle = 'rgba(100, 160, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Year text
+    ctx.font = 'bold 16px monospace';
+    ctx.fillStyle = '#c8e0ff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(yr), w / 2, h / 2);
+  }, LW, LH);
+  sprite.scale.set(LW * 0.22, LH * 0.22, 1); // ~19 × 6 world units
+  return sprite;
+}
+
+function build3DTimeline() {
+  if (!graph3d) return;
+  // Remove any existing timeline
+  if (_timeline3DObj) {
+    graph3d.scene().remove(_timeline3DObj);
+    _timeline3DObj = null;
   }
-  el.style.display = 'block';
+  if (!sortByTime3D || !_birthYearRange) return;
 
-  const containerH = document.getElementById('graph-3d-container').clientHeight || _simH;
   const { min: minYr, max: maxYr } = _birthYearRange;
-  const ySpan = Math.max(maxYr - minYr, 1);
+  const span = Math.max(maxYr - minYr, 1);
+  // topY/botY derived from the SAME yearTo3DY function — exact match with forceY targets
+  const topY = yearTo3DY(minYr); // oldest → positive Y
+  const botY = yearTo3DY(maxYr); // newest → negative Y
+  const totalH = topY - botY;    // = 2 * _3dYHalfSpan
 
-  // Tick interval based on span
-  const step = ySpan > 200 ? 50 : ySpan > 80 ? 25 : 10;
+  const group = new THREE.Group();
+
+  // ── Vertical spine ──
+  const spineGeo = new THREE.CylinderGeometry(0.6, 0.6, totalH, 8);
+  const spineMat = new THREE.MeshBasicMaterial({ color: 0x4466bb, transparent: true, opacity: 0.75 });
+  const spine = new THREE.Mesh(spineGeo, spineMat);
+  spine.position.set(0, (topY + botY) / 2, 0);
+  group.add(spine);
+
+  // ── Year ticks + labels ──
+  const step = span > 200 ? 50 : span > 80 ? 25 : 10;
   const startYr = Math.ceil(minYr / step) * step;
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide });
 
   for (let yr = startYr; yr <= maxYr; yr += step) {
-    const frac = (yr - minYr) / ySpan;
-    // Map through the same yearToY formula used in the simulation
-    const simY = 30 + frac * (_simH - 60);
-    const screenY = (simY / _simH) * containerH;
+    const y = yearTo3DY(yr); // exact same function → rings sit at node level
 
-    const tick = document.createElement('div');
-    tick.className = 'tl-tick';
-    tick.style.top = screenY + 'px';
-    el.appendChild(tick);
+    // Horizontal ring (torus lying flat)
+    const ringGeo = new THREE.TorusGeometry(14, 0.5, 8, 40);
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, y, 0);
+    group.add(ring);
 
-    const label = document.createElement('div');
-    label.className = 'tl-label';
-    label.style.top = screenY + 'px';
-    label.textContent = yr;
-    el.appendChild(label);
+    // Year label sprite — placed just outside the ring
+    const sprite = makeYearSprite(yr);
+    sprite.position.set(22, y, 0);
+    group.add(sprite);
+  }
+
+  _timeline3DObj = group;
+  graph3d.scene().add(group);
+}
+
+// ── 3D name sprites (replace spheres with name text) ──
+function _nameTextColor(n) {
+  // Use bright readable colors regardless of highlight state
+  const indi = n.data;
+  if (indi.sex === 'M') return indi.deceased ? '#7aaad4' : '#8dc8ff';
+  if (indi.sex === 'F') return indi.deceased ? '#c888a0' : '#ffaaca';
+  return indi.deceased ? '#909090' : '#c8c8c8';
+}
+
+function makeNameSprite3D(n) {
+  if (n.type !== 'INDI') return null;
+  const name = n.data.displayName || n.data.name || n.id;
+  const textColor = _nameTextColor(n);
+
+  // Measure text to size the canvas
+  const FONT_SIZE = 15;
+  const PAD_X = 9, PAD_Y = 5;
+  const tmpC = document.createElement('canvas');
+  tmpC.getContext('2d').font = `bold ${FONT_SIZE}px Arial`;
+  const textW = tmpC.getContext('2d').measureText(name).width;
+  const LW = Math.ceil(textW) + PAD_X * 2;
+  const LH = FONT_SIZE + PAD_Y * 2;
+
+  const sprite = makeTextSprite3D((ctx, w, h) => {
+    // Dark rounded background
+    ctx.fillStyle = 'rgba(8, 14, 40, 0.85)';
+    ctx.beginPath();
+    ctx.roundRect(1, 1, w - 2, h - 2, 4);
+    ctx.fill();
+    // Subtle border in the node's color
+    ctx.strokeStyle = textColor + '88'; // hex color + 50% alpha
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Name text
+    ctx.font = `bold ${FONT_SIZE}px Arial`;
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, w / 2, h / 2);
+  }, LW, LH);
+
+  // Scale so text is readable but not giant — ~0.55 world units per logical px
+  sprite.scale.set(LW * 0.55, LH * 0.55, 1);
+  return sprite;
+}
+
+function update3DNames() {
+  if (!graph3d) return;
+  if (show3DNames) {
+    graph3d
+      .nodeThreeObject(n => makeNameSprite3D(n) || undefined)
+      .nodeThreeObjectExtend(false);
+  } else {
+    graph3d
+      .nodeThreeObject(null)
+      .nodeThreeObjectExtend(false);
   }
 }
 
@@ -2661,10 +2835,32 @@ document.addEventListener('DOMContentLoaded', () => {
     applyFilter();
   });
 
-  // 3D Zeitachse toggle
-  document.getElementById('timeline-3d-toggle').addEventListener('change', function () {
-    showTimeline3D = this.checked;
-    buildTimeline3D();
+  // 3D: sort by time + show timeline
+  document.getElementById('sort-time-3d-toggle').addEventListener('change', function () {
+    sortByTime3D = this.checked;
+    document.getElementById('time-spread-row').style.display = sortByTime3D ? 'block' : 'none';
+    if (graph3d) {
+      applyTimelineYFix();        // pin/unpin Y positions immediately
+      graph3d.d3ReheatSimulation(); // let X/Z settle
+      build3DTimeline();
+    }
+  });
+
+  // 3D: time axis spread slider
+  document.getElementById('time-spread-slider').addEventListener('input', function () {
+    _3dYHalfSpan = +this.value;
+    document.getElementById('time-spread-val').textContent = this.value;
+    if (graph3d && sortByTime3D) {
+      applyTimelineYFix();          // recalculate Y pins with new halfSpan
+      graph3d.d3ReheatSimulation();
+      build3DTimeline();            // rebuild rings at new positions
+    }
+  });
+
+  // 3D: show names instead of spheres
+  document.getElementById('show-names-3d-toggle').addEventListener('change', function () {
+    show3DNames = this.checked;
+    update3DNames();
   });
 
   // Link color pickers
