@@ -158,9 +158,17 @@ body {
 .sidebar-btn:hover { background: #1a3a6a; color: #e0e0e0; }
 
 /* ── GRAPH ── */
-#graph-container {
+#graph-wrapper {
   position: relative;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+#graph-container,
+#graph-3d-container {
+  position: absolute;
+  inset: 0;
   background: #1a1a2e;
 }
 
@@ -169,6 +177,20 @@ body {
   height: 100%;
   display: block;
 }
+
+#view-toggle-btn {
+  background: #0f3460;
+  color: #7ac;
+  border: 1px solid #2a4a8a;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+#view-toggle-btn:hover:not(:disabled) { background: #1a3a6a; color: #adf; }
+#view-toggle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#view-toggle-btn.active-3d { background: #1a3a6a; color: #e94560; border-color: #e94560; }
 
 /* ── DETAIL PANEL ── */
 #detail-panel {
@@ -420,6 +442,175 @@ body {
   margin-top: 3px;
 }
 #phys-reset-btn:hover { color: #ccc; }
+
+/* ── PHYSICS PRESETS ── */
+#preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  max-height: 110px;
+  overflow-y: auto;
+}
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #0f2040;
+  border-radius: 3px;
+  padding: 3px 5px;
+}
+.preset-row.builtin { border-left: 2px solid #4e79a7; }
+.preset-row.user    { border-left: 2px solid #e94560; }
+.preset-name {
+  flex: 1;
+  font-size: 11px;
+  color: #7ac;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preset-name:hover { color: #adf; text-decoration: underline; }
+.preset-del {
+  background: transparent;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.preset-del:hover { color: #e74c3c; }
+.preset-save-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+.preset-name-input {
+  flex: 1;
+  min-width: 0;
+  background: #0f3460;
+  border: 1px solid #2a4a8a;
+  color: #e0e0e0;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.preset-name-input:focus { outline: none; border-color: #e94560; }
+.preset-name-input::placeholder { color: #555; }
+.preset-save-btn {
+  background: #0f3460;
+  border: 1px solid #e94560;
+  color: #e94560;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.preset-save-btn:hover { background: #e94560; color: #fff; }
+
+/* ── EDIT FORM ── */
+#detail-edit-bar {
+  display: none;
+  margin-bottom: 8px;
+}
+.edit-bar-btn {
+  background: #0f3460;
+  color: #aaa;
+  border: 1px solid #2a4a8a;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.edit-bar-btn:hover { background: #1a5a9a; color: #e0e0e0; }
+.edit-section { margin-bottom: 8px; }
+.edit-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 3px;
+}
+.edit-input, .edit-select {
+  width: 100%;
+  background: #0f3460;
+  border: 1px solid #2a4a8a;
+  color: #e0e0e0;
+  padding: 5px 7px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.edit-input:focus, .edit-select:focus { outline: none; border-color: #e94560; }
+.edit-select option { background: #0f3460; }
+.edit-textarea {
+  width: 100%;
+  background: #0f3460;
+  border: 1px solid #2a4a8a;
+  color: #e0e0e0;
+  padding: 5px 7px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 55px;
+}
+.edit-textarea:focus { outline: none; border-color: #e94560; }
+.edit-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #ccc;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.edit-checkbox-row input { cursor: pointer; }
+.edit-form-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #0f3460;
+}
+.edit-save-btn {
+  flex: 1;
+  background: #e94560;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.edit-save-btn:hover { background: #c73550; }
+.edit-cancel-btn {
+  flex: 1;
+  background: #0f3460;
+  color: #ccc;
+  border: 1px solid #2a4a8a;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.edit-cancel-btn:hover { background: #1a3a6a; }
+#dl-btn {
+  background: #0f3460;
+  color: #7ac;
+  border: 1px solid #2a4a8a;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  display: none;
+}
+#dl-btn:hover { background: #1a3a6a; color: #adf; }
 </style>
 </head>
 <body>
@@ -428,6 +619,8 @@ body {
   <h1>&#127795; Stammbaum</h1>
   <button id="load-btn" onclick="document.getElementById('file-input').click()">GEDCOM Datei laden</button>
   <input type="file" id="file-input" accept=".ged">
+  <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled>&#x25A6; 3D</button>
+  <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; GEDCOM speichern</button>
   <div id="status">Keine Datei geladen &mdash; bitte GEDCOM Datei laden</div>
 </div>
 
@@ -546,21 +739,34 @@ body {
 
         <button id="phys-reheat-btn" onclick="reheatSimulation()">&#9654; Neu starten</button>
         <button id="phys-reset-btn" onclick="resetPhysics()">Standardwerte</button>
+
+        <div class="phys-section-label" style="margin-top:10px">Presets</div>
+        <div id="preset-list"></div>
+        <div class="preset-save-row">
+          <input class="preset-name-input" type="text" id="preset-name-input" placeholder="Name eingeben…" maxlength="40">
+          <button class="preset-save-btn" onclick="savePreset()" title="Aktuelle Einstellungen speichern">&#x1F4BE;</button>
+        </div>
       </div>
     </details>
   </div>
 
-  <div id="graph-container">
-    <div id="loading-overlay">
-      <div class="spinner"></div>
-      <span>Simulation läuft...</span>
+  <div id="graph-wrapper">
+    <div id="graph-container">
+      <div id="loading-overlay">
+        <div class="spinner"></div>
+        <span>Simulation läuft...</span>
+      </div>
+      <svg id="graph-svg"></svg>
     </div>
-    <svg id="graph-svg"></svg>
+    <div id="graph-3d-container" style="display:none"></div>
   </div>
 
   <div id="detail-panel">
     <button id="close-panel-btn" onclick="closeDetailPanel()" title="Schliessen">&#x2715;</button>
     <h2 id="detail-name">—</h2>
+    <div id="detail-edit-bar">
+      <button class="edit-bar-btn" onclick="startEdit()">&#x270E; Bearbeiten</button>
+    </div>
     <div id="detail-content"></div>
     <div id="detail-buttons">
       <button class="highlight-btn" id="btn-ancestors" onclick="highlightMode('ancestors')" disabled>&#x2191; Vorfahren anzeigen</button>
@@ -574,6 +780,7 @@ body {
 <div id="tooltip"></div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.5/dist/3d-force-graph.min.js"></script>
 <script>
 'use strict';
 
@@ -582,8 +789,11 @@ body {
 // ═══════════════════════════════════════════════════════════════
 let individuals = new Map();   // id -> indi object
 let families    = new Map();   // id -> fam object
-let nodes = [];
-let links = [];
+let allNodes = [];   // complete dataset (all INDI + FAM nodes)
+let allLinks = [];   // complete dataset (links with _src/_tgt string IDs, never mutated by D3)
+let nodes = [];      // currently active (filtered) nodes passed to simulation
+let links = [];      // currently active (filtered) links passed to simulation
+let _firstLoad = true;  // controls auto-fit + auto-open on first load only
 
 let simulation  = null;
 let svgSel      = null;   // d3 selection of <svg>
@@ -626,6 +836,12 @@ const PHYSICS_DEFAULTS = {
 };
 
 let physicsParams = { ...PHYSICS_DEFAULTS };
+
+// 3D state
+let graph3d        = null;
+let currentView    = '2d';   // '2d' | '3d'
+let _birthYearRange = null;  // { min, max } saved for 3D stratification
+let _3dMousePos    = { x: 0, y: 0 };
 
 // ═══════════════════════════════════════════════════════════════
 // 1. GEDCOM PARSER
@@ -793,30 +1009,32 @@ function parseGEDCOM(raw) {
 // 2. GRAPH DATA BUILDER  (bipartite INDI + FAM nodes)
 // ═══════════════════════════════════════════════════════════════
 function buildGraphData() {
-  nodes = [];
-  links = [];
+  allNodes = [];
+  allLinks = [];
   const nodeById = new Map();
 
   for (const [id, indi] of individuals) {
-    const n = { id, type: 'INDI', data: indi, x: undefined, y: undefined };
-    nodes.push(n);
+    const n = { id, type: 'INDI', data: indi };
+    allNodes.push(n);
     nodeById.set(id, n);
   }
 
   for (const [id, fam] of families) {
-    const n = { id, type: 'FAM', data: fam, x: undefined, y: undefined };
-    nodes.push(n);
+    const n = { id, type: 'FAM', data: fam };
+    allNodes.push(n);
     nodeById.set(id, n);
 
     if (fam.husb && nodeById.has(fam.husb))
-      links.push({ source: fam.husb, target: id, ltype: 'spouse' });
+      allLinks.push({ _src: fam.husb, _tgt: id, ltype: 'spouse' });
     if (fam.wife && nodeById.has(fam.wife))
-      links.push({ source: fam.wife, target: id, ltype: 'spouse' });
+      allLinks.push({ _src: fam.wife, _tgt: id, ltype: 'spouse' });
     for (const cid of fam.chil) {
       if (nodeById.has(cid))
-        links.push({ source: id, target: cid, ltype: 'parent' });
+        allLinks.push({ _src: id, _tgt: cid, ltype: 'parent' });
     }
   }
+
+  computeActiveData();  // initialise nodes/links from current filter state
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -824,9 +1042,11 @@ function buildGraphData() {
 // ═══════════════════════════════════════════════════════════════
 function buildSurnameColorMap() {
   const counts = new Map();
+  let noSurnCount = 0;
   for (const [, indi] of individuals) {
     const s = indi.surn;
     if (s) counts.set(s, (counts.get(s) || 0) + 1);
+    else noSurnCount++;
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
 
@@ -836,6 +1056,11 @@ function buildSurnameColorMap() {
     surnameColors.set(surn, PALETTE[i % PALETTE.length]);
     surnameEnabled.set(surn, true);
   });
+  // Persons with no surname — key null, shown at end of list
+  if (noSurnCount > 0) {
+    surnameEnabled.set(null, true);
+    sorted.push([null, noSurnCount]);
+  }
   return sorted;
 }
 
@@ -843,10 +1068,59 @@ function nodeBaseColor(n) {
   if (n.type === 'FAM') return n.data.div ? '#c0392b' : '#27ae60';
   const indi = n.data;
   const s = indi.surn;
-  if (s && surnameColors.has(s) && surnameEnabled.get(s)) return surnameColors.get(s);
+  if (s && surnameColors.has(s)) return surnameColors.get(s);
   if (indi.sex === 'M') return '#3a6ea5';
   if (indi.sex === 'F') return '#9e3a6e';
   return '#4a5568';
+}
+
+// ── Visibility helpers (surname filter) ──
+function isIndiVisible(id) {
+  const indi = individuals.get(id);
+  if (!indi) return true;
+  const key = indi.surn || null;  // null = no surname
+  return surnameEnabled.get(key) !== false;
+}
+function isFamVisible(id) {
+  const fam = families.get(id);
+  if (!fam) return true;
+  const members = [fam.husb, fam.wife, ...fam.chil].filter(Boolean);
+  if (!members.length) return true;
+  return members.some(pid => isIndiVisible(pid));
+}
+function isNodeVisible(n) {
+  return n.type === 'INDI' ? isIndiVisible(n.id) : isFamVisible(n.id);
+}
+
+// ── Active data: filter allNodes/allLinks by current visibility ──
+function computeActiveData() {
+  const visIds = new Set(allNodes.filter(n => isNodeVisible(n)).map(n => n.id));
+  nodes = allNodes.filter(n => visIds.has(n.id));
+  // Create fresh link objects (string IDs) so D3 re-resolves them cleanly
+  links = allLinks
+    .filter(l => visIds.has(l._src) && visIds.has(l._tgt))
+    .map(l => ({ source: l._src, target: l._tgt, ltype: l.ltype }));
+}
+
+// ── Full filter apply: recompute active data + restart simulation ──
+function applyFilter() {
+  // Close detail panel if selected person became hidden
+  if (selectedIndiId && !isIndiVisible(selectedIndiId)) closeDetailPanel();
+  computeActiveData();
+  renderGraph();
+  applyHighlight();          // re-apply any active ancestor/descendant highlight
+  buildAndRunSimulation();   // restart physics on active nodes only
+  // Update 3D graph data if the 3D view is initialized
+  if (graph3d) {
+    const gNodes = nodes.map(n => ({ id: n.id, type: n.type, data: n.data }));
+    const gLinks = links.map(l => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      ltype: l.ltype,
+    }));
+    graph3d.graphData({ nodes: gNodes, links: gLinks });
+    apply3DPhysics();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1002,6 +1276,7 @@ function buildAndRunSimulation() {
   const minY = birthYears.length ? Math.min(...birthYears) : 1750;
   const maxY = birthYears.length ? Math.max(...birthYears) : 2025;
   const ySpan = Math.max(maxY - minY, 1);
+  _birthYearRange = { min: minY, max: maxY };
 
   const yearToY = yr => {
     if (!yr) return H / 2;
@@ -1080,6 +1355,7 @@ function applyPhysicsParams() {
     .restart();
 
   document.getElementById('loading-overlay').style.display = 'none';
+  if (graph3d) apply3DPhysics();
 }
 
 function reheatSimulation() {
@@ -1107,9 +1383,12 @@ function tick() {
 
 function onSimEnd() {
   document.getElementById('loading-overlay').style.display = 'none';
-  zoomToFit();
-  if (individuals.has('@I1@')) {
-    setTimeout(() => showIndiDetail('@I1@'), 300);
+  if (_firstLoad) {
+    _firstLoad = false;
+    zoomToFit();
+    if (individuals.has('@I1@')) {
+      setTimeout(() => showIndiDetail('@I1@'), 300);
+    }
   }
 }
 
@@ -1262,6 +1541,8 @@ function showIndiDetail(id) {
   }
 
   document.getElementById('detail-content').innerHTML = html;
+  document.getElementById('detail-edit-bar').style.display = 'block';
+  document.getElementById('detail-buttons').style.display = 'flex';
   openPanel();
   updateHLButtons();
   flashNode(id);
@@ -1270,6 +1551,7 @@ function showIndiDetail(id) {
 function showFamDetail(id) {
   const fam = families.get(id);
   if (!fam) return;
+  _lastShownFamId = id;
   selectedIndiId = null;
 
   const names = [fam.husb, fam.wife].filter(Boolean)
@@ -1299,6 +1581,8 @@ function showFamDetail(id) {
   }
 
   document.getElementById('detail-content').innerHTML = html;
+  document.getElementById('detail-edit-bar').style.display = 'block';
+  document.getElementById('detail-buttons').style.display = 'flex';
   openPanel();
   updateHLButtons();
 }
@@ -1308,6 +1592,7 @@ function openPanel() {
 }
 function closeDetailPanel() {
   document.getElementById('main-layout').classList.remove('panel-open');
+  document.getElementById('detail-edit-bar').style.display = 'none';
   selectedIndiId = null;
   resetHighlight();
 }
@@ -1406,6 +1691,7 @@ function applyHighlight() {
   });
 
   labelSel?.attr('opacity', d => (!hasHL || hlSet.has(d.id)) ? 1 : 0.07);
+  refresh3D();
 }
 
 function resetHighlight() {
@@ -1425,6 +1711,7 @@ function refreshNodeColors() {
       d3.select(this).select('polygon').attr('fill', d.data.div ? '#c0392b' : '#1a6e3a');
     }
   });
+  refresh3D();
 }
 
 function updateHLButtons() {
@@ -1446,17 +1733,20 @@ function buildSurnameList(sorted) {
   const container = document.getElementById('surname-list');
   container.innerHTML = '';
   for (const [surn, count] of sorted) {
-    const color = surnameColors.get(surn);
+    const isNoSurn = surn === null;
+    const color    = isNoSurn ? '#888' : surnameColors.get(surn);
+    const label    = isNoSurn ? '(kein Nachname)' : surn;
+    const title    = isNoSurn ? 'Personen ohne Nachname' : escAttr(surn);
     const div = document.createElement('div');
     div.className = 'surname-item';
     div.innerHTML = `
-      <input type="checkbox" checked data-surn="${escAttr(surn)}">
-      <span class="surname-dot" style="background:${color}"></span>
-      <span class="surname-label" title="${escAttr(surn)}">${escHtml(surn)}</span>
+      <input type="checkbox" checked>
+      <span class="surname-dot" style="background:${color}${isNoSurn ? ';border:1px solid #666' : ''}"></span>
+      <span class="surname-label" title="${title}" style="${isNoSurn ? 'font-style:italic;color:#999' : ''}">${escHtml(label)}</span>
       <span class="surname-count">${count}</span>`;
     div.querySelector('input').addEventListener('change', e => {
-      surnameEnabled.set(surn, e.target.checked);
-      refreshNodeColors();
+      surnameEnabled.set(isNoSurn ? null : surn, e.target.checked);
+      applyFilter();
     });
     container.appendChild(div);
   }
@@ -1465,7 +1755,7 @@ function buildSurnameList(sorted) {
 function toggleAllSurnames(state) {
   surnameEnabled.forEach((_, k) => surnameEnabled.set(k, state));
   document.querySelectorAll('#surname-list input[type=checkbox]').forEach(cb => { cb.checked = state; });
-  refreshNodeColors();
+  applyFilter();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1542,7 +1832,21 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       buildGraphData();
       initSVG();
       renderGraph();
+      // Reset 3D state if re-loading
+      if (graph3d) { graph3d.pauseAnimation(); graph3d = null; }
+      if (currentView === '3d') {
+        document.getElementById('graph-3d-container').style.display = 'none';
+        document.getElementById('graph-container').style.display = 'block';
+        currentView = '2d';
+        const btn = document.getElementById('view-toggle-btn');
+        btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
+      }
+
+      _firstLoad = true;
       buildAndRunSimulation();
+      document.getElementById('dl-btn').style.display = 'inline-block';
+      document.getElementById('view-toggle-btn').disabled = false;
+      window._gedcomFilename = file.name;
 
     } catch (err) {
       document.getElementById('loading-overlay').style.display = 'none';
@@ -1577,6 +1881,492 @@ function escAttr(s) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// GEDCOM SERIALIZER + DOWNLOAD
+// ═══════════════════════════════════════════════════════════════
+function serializeGEDCOM() {
+  const lines = [];
+
+  lines.push('0 HEAD');
+  lines.push('1 SOUR Stammbaum Vis');
+  lines.push('1 GEDC');
+  lines.push('2 VERS 5.5.1');
+  lines.push('2 FORM LINEAGE-LINKED');
+  lines.push('1 CHAR UTF-8');
+
+  for (const [id, i] of individuals) {
+    lines.push(`0 ${id} INDI`);
+
+    // NAME line: "Givn /Surn/" or just "/Surn/" or givn
+    if (i.givn || i.surn) {
+      const nameLine = (i.givn ? i.givn + ' ' : '') + '/' + (i.surn || '') + '/';
+      lines.push(`1 NAME ${nameLine}`);
+      if (i.givn) lines.push(`2 GIVN ${i.givn}`);
+      if (i.surn) lines.push(`2 SURN ${i.surn}`);
+    } else if (i.name) {
+      lines.push(`1 NAME ${i.name}`);
+    }
+
+    if (i.sex && i.sex !== 'U') lines.push(`1 SEX ${i.sex}`);
+
+    if (i.birth.date || i.birth.plac) {
+      lines.push('1 BIRT');
+      if (i.birth.date) lines.push(`2 DATE ${i.birth.date}`);
+      if (i.birth.plac) lines.push(`2 PLAC ${i.birth.plac}`);
+    }
+
+    if (i.deceased || i.death.date || i.death.plac || i.death.caus) {
+      if (i.death.date || i.death.plac || i.death.caus) {
+        lines.push('1 DEAT');
+        if (i.death.date) lines.push(`2 DATE ${i.death.date}`);
+        if (i.death.plac) lines.push(`2 PLAC ${i.death.plac}`);
+        if (i.death.caus) lines.push(`2 CAUS ${i.death.caus}`);
+      } else {
+        lines.push('1 DEAT Y');
+      }
+    }
+
+    for (const famId of i.famc) lines.push(`1 FAMC ${famId}`);
+    for (const famId of i.fams) lines.push(`1 FAMS ${famId}`);
+
+    if (i.occu) lines.push(`1 OCCU ${i.occu}`);
+
+    if (i.note) {
+      const noteLines = i.note.split('\n');
+      lines.push(`1 NOTE ${noteLines[0]}`);
+      for (let k = 1; k < noteLines.length; k++) lines.push(`2 CONT ${noteLines[k]}`);
+    }
+  }
+
+  for (const [id, f] of families) {
+    lines.push(`0 ${id} FAM`);
+    if (f.husb) lines.push(`1 HUSB ${f.husb}`);
+    if (f.wife) lines.push(`1 WIFE ${f.wife}`);
+    for (const cid of f.chil) lines.push(`1 CHIL ${cid}`);
+    if (f.marr.date || f.marr.plac) {
+      lines.push('1 MARR');
+      if (f.marr.date) lines.push(`2 DATE ${f.marr.date}`);
+      if (f.marr.plac) lines.push(`2 PLAC ${f.marr.plac}`);
+    }
+    if (f.div) lines.push('1 DIV Y');
+  }
+
+  lines.push('0 TRLR');
+  return lines.join('\r\n');
+}
+
+function downloadGEDCOM() {
+  const text = serializeGEDCOM();
+  const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const base = (window._gedcomFilename || 'stammbaum').replace(/\.ged$/i, '');
+  a.href     = url;
+  a.download = base + '_edited.ged';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GEDCOM EDIT FORMS
+// ═══════════════════════════════════════════════════════════════
+let _editingId   = null;   // INDI or FAM id currently being edited
+let _editingType = null;   // 'INDI' | 'FAM'
+
+
+function showIndiEditForm(id) {
+  const i = individuals.get(id);
+  if (!i) return;
+
+  document.getElementById('detail-edit-bar').style.display = 'none';
+  document.getElementById('detail-buttons').style.display = 'none';
+
+  document.getElementById('detail-content').innerHTML = `
+    <div class="edit-section">
+      <div class="edit-label">Vorname</div>
+      <input class="edit-input" id="ef-givn" value="${escAttr(i.givn)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Familienname</div>
+      <input class="edit-input" id="ef-surn" value="${escAttr(i.surn)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Geschlecht</div>
+      <select class="edit-select" id="ef-sex">
+        <option value="M"${i.sex==='M'?' selected':''}>männlich</option>
+        <option value="F"${i.sex==='F'?' selected':''}>weiblich</option>
+        <option value="U"${i.sex==='U'||!i.sex?' selected':''}>unbekannt</option>
+      </select>
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Geburtsdatum</div>
+      <input class="edit-input" id="ef-bdate" placeholder="z.B. 15 MAY 1996" value="${escAttr(i.birth.date)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Geburtsort</div>
+      <input class="edit-input" id="ef-bplac" value="${escAttr(i.birth.plac)}">
+    </div>
+    <label class="edit-checkbox-row">
+      <input type="checkbox" id="ef-dead"${i.deceased?' checked':''}>
+      Verstorben
+    </label>
+    <div class="edit-section">
+      <div class="edit-label">Sterbedatum</div>
+      <input class="edit-input" id="ef-ddate" placeholder="z.B. 20 JUL 2024" value="${escAttr(i.death.date)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Sterbeort</div>
+      <input class="edit-input" id="ef-dplac" value="${escAttr(i.death.plac)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Todesursache</div>
+      <input class="edit-input" id="ef-dcaus" value="${escAttr(i.death.caus)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Beruf</div>
+      <input class="edit-input" id="ef-occu" value="${escAttr(i.occu)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Notiz</div>
+      <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
+    </div>
+    <div class="edit-form-buttons">
+      <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; Speichern</button>
+      <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
+    </div>`;
+}
+
+function commitIndiEdit() {
+  const i = individuals.get(_editingId);
+  if (!i) return;
+
+  const givn = document.getElementById('ef-givn').value.trim();
+  const surn = document.getElementById('ef-surn').value.trim();
+
+  i.givn = givn;
+  i.surn = surn;
+  // Rebuild name from parts
+  i.name = (givn ? givn + ' ' : '') + (surn ? surn : '');
+  if (!i.name.trim()) i.name = _editingId.replace(/@/g, '');
+  // Rebuild displayName
+  i.displayName = i.name.length > 24
+    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : i.name.slice(0, 22) + '…')
+    : i.name;
+
+  i.sex        = document.getElementById('ef-sex').value;
+  i.birth.date = document.getElementById('ef-bdate').value.trim();
+  i.birth.plac = document.getElementById('ef-bplac').value.trim();
+  i.deceased   = document.getElementById('ef-dead').checked;
+  i.death.date = document.getElementById('ef-ddate').value.trim();
+  i.death.plac = document.getElementById('ef-dplac').value.trim();
+  i.death.caus = document.getElementById('ef-dcaus').value.trim();
+  i.occu       = document.getElementById('ef-occu').value.trim();
+  i.note       = document.getElementById('ef-note').value;
+
+  // Re-extract birth year
+  const ym = i.birth.date.match(/\b(\d{4})\b/);
+  i.birthYear = ym ? +ym[1] : null;
+
+  // Update label on graph
+  if (labelSel) {
+    labelSel.filter(d => d.id === _editingId).text(i.displayName);
+  }
+
+  const id = _editingId;
+  _editingId = null; _editingType = null;
+  showIndiDetail(id);
+}
+
+function showFamEditForm(id) {
+  const f = families.get(id);
+  if (!f) return;
+
+  document.getElementById('detail-edit-bar').style.display = 'none';
+  document.getElementById('detail-buttons').style.display = 'none';
+
+  document.getElementById('detail-content').innerHTML = `
+    <div class="edit-section">
+      <div class="edit-label">Heiratsdatum</div>
+      <input class="edit-input" id="ef-mdate" placeholder="z.B. 5 JUN 1965" value="${escAttr(f.marr.date)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Heiratsort</div>
+      <input class="edit-input" id="ef-mplac" value="${escAttr(f.marr.plac)}">
+    </div>
+    <label class="edit-checkbox-row">
+      <input type="checkbox" id="ef-div"${f.div?' checked':''}>
+      Geschieden
+    </label>
+    <div class="edit-form-buttons">
+      <button class="edit-save-btn" onclick="commitFamEdit()">&#x2713; Speichern</button>
+      <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
+    </div>`;
+}
+
+function commitFamEdit() {
+  const f = families.get(_editingId);
+  if (!f) return;
+
+  f.marr.date = document.getElementById('ef-mdate').value.trim();
+  f.marr.plac = document.getElementById('ef-mplac').value.trim();
+  f.div       = document.getElementById('ef-div').checked;
+
+  // Update diamond color
+  if (nodeSel) {
+    nodeSel.filter(d => d.id === _editingId)
+      .select('polygon')
+      .attr('fill',         f.div ? '#c0392b' : '#1a6e3a')
+      .attr('stroke',       f.div ? '#e74c3c' : '#27ae60')
+      .attr('stroke-dasharray', f.div ? '3 2' : null);
+  }
+
+  const id = _editingId;
+  _editingId = null; _editingType = null;
+  showFamDetail(id);
+}
+
+function cancelEdit() {
+  const id = _editingId;
+  _editingId = null; _editingType = null;
+  if (id) {
+    if (individuals.has(id)) showIndiDetail(id);
+    else showFamDetail(id);
+  } else {
+    closeDetailPanel();
+  }
+}
+
+function startEdit() {
+  const famId = _lastShownFamId;
+  const indiId = selectedIndiId;
+  if (indiId && individuals.has(indiId)) {
+    _editingId = indiId; _editingType = 'INDI';
+    showIndiEditForm(indiId);
+  } else if (famId && families.has(famId)) {
+    _editingId = famId; _editingType = 'FAM';
+    showFamEditForm(famId);
+  }
+}
+let _lastShownFamId = null;
+
+// ═══════════════════════════════════════════════════════════════
+// PHYSICS PRESETS
+// ═══════════════════════════════════════════════════════════════
+const PRESETS_KEY = 'stammbaum_physics_presets_v1';
+
+const BUILTIN_PRESETS = {
+  'Kompakt':   { spouseDist:30, parentDist:40, spouseStrength:0.7, parentStrength:0.8,  chargeIndi:80,  chargeFam:10, chargeDistMax:200, collideRadius:10, yStrength:0.08, centerStrength:0.06, velocityDecay:0.45 },
+  'Locker':    { spouseDist:90, parentDist:110,spouseStrength:0.3, parentStrength:0.35, chargeIndi:300, chargeFam:50, chargeDistMax:600, collideRadius:26, yStrength:0.08, centerStrength:0.02, velocityDecay:0.35 },
+  'Zeitlinie': { spouseDist:50, parentDist:65, spouseStrength:0.3, parentStrength:0.5,  chargeIndi:150, chargeFam:20, chargeDistMax:350, collideRadius:16, yStrength:0.55, centerStrength:0.03, velocityDecay:0.42 },
+};
+
+function getUserPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function savePreset() {
+  const name = document.getElementById('preset-name-input').value.trim();
+  if (!name) return;
+  const all = getUserPresets();
+  all[name] = { ...physicsParams };
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(all));
+  document.getElementById('preset-name-input').value = '';
+  renderPresetList();
+}
+
+function deletePreset(name) {
+  const all = getUserPresets();
+  delete all[name];
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(all));
+  renderPresetList();
+}
+
+function applyPreset(name, builtin) {
+  const src = builtin ? BUILTIN_PRESETS[name] : getUserPresets()[name];
+  if (!src) return;
+  physicsParams = { ...PHYSICS_DEFAULTS, ...src };
+  syncPhysicsUI();
+  applyPhysicsParams();
+}
+
+function renderPresetList() {
+  const container = document.getElementById('preset-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Built-in presets
+  for (const name of Object.keys(BUILTIN_PRESETS)) {
+    const row = document.createElement('div');
+    row.className = 'preset-row builtin';
+    row.innerHTML = `<span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escAttr(name)}',true)">${escHtml(name)}</span>`;
+    container.appendChild(row);
+  }
+
+  // User presets
+  const user = getUserPresets();
+  const names = Object.keys(user);
+  for (const name of names) {
+    const row = document.createElement('div');
+    row.className = 'preset-row user';
+    row.innerHTML = `
+      <span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escAttr(name)}',false)">${escHtml(name)}</span>
+      <button class="preset-del" onclick="deletePreset('${escAttr(name)}')" title="Löschen">&#x2715;</button>`;
+    container.appendChild(row);
+  }
+
+  if (!names.length && !Object.keys(BUILTIN_PRESETS).length) {
+    container.innerHTML = '<div style="color:#555;font-size:11px;font-style:italic;padding:2px 4px">Keine Presets</div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3D VIEW
+// ═══════════════════════════════════════════════════════════════
+
+function toggleView() {
+  if (!nodes.length) return;
+  const btn = document.getElementById('view-toggle-btn');
+  const c2d = document.getElementById('graph-container');
+  const c3d = document.getElementById('graph-3d-container');
+
+  if (currentView === '2d') {
+    currentView = '3d';
+    c2d.style.display = 'none';
+    c3d.style.display = 'block';
+    btn.textContent = '◨ 2D'; btn.classList.add('active-3d');
+    if (!graph3d) initGraph3D();
+    else { graph3d.resumeAnimation(); resize3D(); }
+  } else {
+    currentView = '2d';
+    c3d.style.display = 'none';
+    c2d.style.display = 'block';
+    btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
+    if (graph3d) graph3d.pauseAnimation();
+  }
+}
+
+function resize3D() {
+  if (!graph3d) return;
+  const el = document.getElementById('graph-3d-container');
+  graph3d.width(el.clientWidth).height(el.clientHeight);
+}
+
+function compute3DNodeColor(n) {
+  const hasHL = hlSet.size > 0;
+  if (hasHL && !hlSet.has(n.id)) return '#0d0d1a';
+  return nodeBaseColor(n);
+}
+
+
+function initGraph3D() {
+  const container = document.getElementById('graph-3d-container');
+  container.innerHTML = '';
+
+  // Build 3D node and link arrays (keep data references intact)
+  const gNodes = nodes.map(n => ({
+    id:   n.id,
+    type: n.type,
+    data: n.data,
+  }));
+  const gLinks = links.map(l => ({
+    source: typeof l.source === 'object' ? l.source.id : l.source,
+    target: typeof l.target === 'object' ? l.target.id : l.target,
+    ltype:  l.ltype,
+  }));
+
+  // Track mouse for tooltip positioning
+  container.addEventListener('mousemove', e => {
+    _3dMousePos.x = e.clientX;
+    _3dMousePos.y = e.clientY;
+  });
+
+  graph3d = ForceGraph3D()(container)
+    .backgroundColor('#1a1a2e')
+    .width(container.clientWidth)
+    .height(container.clientHeight)
+    .graphData({ nodes: gNodes, links: gLinks })
+    // ── Nodes ──
+    .nodeColor(n => compute3DNodeColor(n))
+    .nodeVal(n => n.type === 'FAM' ? 1.2 : (n.data.deceased ? 2 : 3))
+    .nodeOpacity(0.9)
+    .nodeResolution(12)
+    .nodeLabel(n => {
+      if (n.type !== 'INDI') return '';
+      const i = n.data;
+      const born = i.birthYear ? ` *${i.birthYear}` : '';
+      const died = i.deceased
+        ? (i.death.date ? ` †${i.death.date.match(/\d{4}/)?.[0] || ''}` : ' †')
+        : '';
+      return `<span style="background:rgba(10,20,50,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}</span>`;
+    })
+    // ── Links ──
+    .linkColor(l => l.ltype === 'spouse' ? '#9b59b6' : '#3498db')
+    .linkWidth(l => l.ltype === 'spouse' ? 0.9 : 0.6)
+    .linkOpacity(0.55)
+    // ── Events ──
+    .onNodeClick((n, evt) => {
+      if (evt) evt.stopPropagation();
+      if (n.type === 'INDI') showIndiDetail(n.id);
+      else showFamDetail(n.id);
+    })
+    .onNodeHover(n => {
+      if (n) {
+        const fakeEvt = { clientX: _3dMousePos.x, clientY: _3dMousePos.y };
+        onHover(fakeEvt, n);
+      } else {
+        onOut();
+      }
+    })
+    .onBackgroundClick(() => closeDetailPanel());
+
+  apply3DPhysics();
+
+  // After initial layout settles, zoom camera to fit
+  setTimeout(() => graph3d?.zoomToFit(800, 60), 2500);
+}
+
+function apply3DPhysics() {
+  if (!graph3d) return;
+  const p = physicsParams;
+
+  // Only modify forces the library already created — don't inject foreign d3-force objects
+  const lf = graph3d.d3Force('link');
+  if (lf) lf
+    .distance(l => l.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+    .strength(l => l.ltype === 'spouse' ? p.spouseStrength : p.parentStrength);
+
+  const cf = graph3d.d3Force('charge');
+  if (cf) cf
+    .strength(n => n.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
+    .distanceMax(p.chargeDistMax);
+
+  graph3d.d3AlphaDecay(0.028);
+  graph3d.d3VelocityDecay(p.velocityDecay);
+  graph3d.d3ReheatSimulation();
+}
+
+function refresh3D() {
+  if (!graph3d) return;
+  const hasHL = hlSet.size > 0;
+
+  // Re-assign color accessor — triggers internal material rebuild for changed nodes
+  graph3d.nodeColor(n => compute3DNodeColor(n));
+
+  graph3d.linkColor(l => {
+    if (!hasHL) return l.ltype === 'spouse' ? '#9b59b6' : '#3498db';
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    return (hlSet.has(sid) && hlSet.has(tid))
+      ? (l.ltype === 'spouse' ? '#9b59b6' : '#3498db')
+      : '#111122';
+  });
+
+}
+
+// Resize 3D view when window resizes
+window.addEventListener('resize', () => { if (currentView === '3d') resize3D(); });
+
+// ═══════════════════════════════════════════════════════════════
 // PHYSICS SLIDERS — wiring
 // ═══════════════════════════════════════════════════════════════
 
@@ -1607,6 +2397,8 @@ function syncPhysicsUI() {
 
 // Attach listeners after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
+  renderPresetList();
+
   for (const { sid, vid, key, fmt } of SLIDER_MAP) {
     const el = document.getElementById(sid);
     if (!el) continue;
@@ -1632,6 +2424,15 @@ window.toggleAllSurnames = toggleAllSurnames;
 window.zoomToFit         = zoomToFit;
 window.reheatSimulation  = reheatSimulation;
 window.resetPhysics      = resetPhysics;
+window.startEdit         = startEdit;
+window.commitIndiEdit    = commitIndiEdit;
+window.commitFamEdit     = commitFamEdit;
+window.cancelEdit        = cancelEdit;
+window.savePreset        = savePreset;
+window.deletePreset      = deletePreset;
+window.applyPreset       = applyPreset;
+window.downloadGEDCOM    = downloadGEDCOM;
+window.toggleView        = toggleView;
 </script>
 </body>
 </html>
