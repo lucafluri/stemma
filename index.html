@@ -157,6 +157,103 @@ body {
 }
 .sidebar-btn:hover { background: #1a3a6a; color: #e0e0e0; }
 
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 2px;
+  border-top: 1px solid #0f3460;
+  margin-top: 2px;
+}
+.sidebar-toggle input { cursor: pointer; flex-shrink: 0; }
+.sidebar-toggle:hover { color: #ccc; }
+
+/* ── LINK COLOR PANEL ── */
+#link-colors-panel {
+  border-top: 1px solid #0f3460;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+#link-colors-panel summary {
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 0;
+  list-style: none;
+}
+#link-colors-panel summary::-webkit-details-marker { display: none; }
+#link-colors-panel summary::before { content: '▶ '; font-size: 10px; }
+#link-colors-panel[open] summary::before { content: '▼ '; font-size: 10px; }
+#link-colors-panel summary:hover { color: #ccc; }
+.link-color-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #aaa;
+}
+.link-color-row input[type=color] {
+  width: 28px;
+  height: 20px;
+  border: 1px solid #2a4a8a;
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+#link-colors-reset {
+  margin-top: 4px;
+  width: 100%;
+  font-size: 11px;
+  background: #0f3460;
+  color: #aaa;
+  border: 1px solid #2a4a8a;
+  border-radius: 3px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+#link-colors-reset:hover { background: #1a3a6a; color: #ccc; }
+
+/* ── 3D TIMELINE AXIS ── */
+#timeline-3d {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 54px;
+  pointer-events: none;
+  z-index: 5;
+  display: none;
+}
+#timeline-3d .tl-line {
+  position: absolute;
+  left: 44px; top: 0; bottom: 0;
+  width: 1px;
+  background: rgba(80,110,170,0.35);
+}
+#timeline-3d .tl-tick {
+  position: absolute;
+  right: 0;
+  width: 9px;
+  height: 1px;
+  background: rgba(80,110,170,0.5);
+}
+#timeline-3d .tl-label {
+  position: absolute;
+  right: 12px;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: rgba(130,155,200,0.7);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-family: monospace;
+}
+
 /* ── GRAPH ── */
 #graph-wrapper {
   position: relative;
@@ -631,11 +728,40 @@ body {
     <div class="sidebar-label">Familiennamen</div>
     <div id="surname-list"></div>
     <div id="sidebar-buttons">
+      <label class="sidebar-toggle">
+        <input type="checkbox" id="fam-nodes-toggle" checked>
+        <span>Familien-Knoten anzeigen</span>
+      </label>
+      <label class="sidebar-toggle" id="timeline-toggle-row" style="display:none;border-top:none;padding-top:2px">
+        <input type="checkbox" id="timeline-3d-toggle">
+        <span>Zeitachse (3D)</span>
+      </label>
       <button class="sidebar-btn" onclick="toggleAllSurnames(true)">Alle einblenden</button>
       <button class="sidebar-btn" onclick="toggleAllSurnames(false)">Alle ausblenden</button>
       <button class="sidebar-btn" onclick="resetHighlight()">Hervorhebung aufheben</button>
       <button class="sidebar-btn" onclick="zoomToFit()">Alles anzeigen</button>
     </div>
+
+    <details id="link-colors-panel">
+      <summary>Verbindungsfarben</summary>
+      <div class="link-color-row">
+        <input type="color" id="lc-spouse" value="#9b59b6">
+        <span>Ehepartner</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="lc-father" value="#5b9bd5">
+        <span>Vater → Kind</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="lc-mother" value="#d5729b">
+        <span>Mutter → Kind</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="lc-parent" value="#3498db">
+        <span>Familie → Kind</span>
+      </div>
+      <button id="link-colors-reset" onclick="resetLinkColors()">Zurücksetzen</button>
+    </details>
 
     <details id="physics-panel">
       <summary>Physik <i class="phys-arrow">&#9654;</i></summary>
@@ -759,6 +885,7 @@ body {
       <svg id="graph-svg"></svg>
     </div>
     <div id="graph-3d-container" style="display:none"></div>
+    <div id="timeline-3d"><div class="tl-line"></div></div>
   </div>
 
   <div id="detail-panel">
@@ -842,6 +969,20 @@ let graph3d        = null;
 let currentView    = '2d';   // '2d' | '3d'
 let _birthYearRange = null;  // { min, max } saved for 3D stratification
 let _3dMousePos    = { x: 0, y: 0 };
+
+// Display mode flags
+let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
+let showTimeline3D = false;  // show year axis overlay in 3D view
+let _simH          = 700;    // SVG height used by buildAndRunSimulation (for timeline mapping)
+
+// Link colors (user-configurable)
+const LINK_COLOR_DEFAULTS = {
+  spouse: '#9b59b6',   // partner / Ehepartner
+  father: '#5b9bd5',   // father → child
+  mother: '#d5729b',   // mother → child
+  parent: '#3498db',   // FAM → child (bipartite mode)
+};
+let linkColors = { ...LINK_COLOR_DEFAULTS };
 
 // ═══════════════════════════════════════════════════════════════
 // 1. GEDCOM PARSER
@@ -1092,14 +1233,49 @@ function isNodeVisible(n) {
   return n.type === 'INDI' ? isIndiVisible(n.id) : isFamVisible(n.id);
 }
 
+// ── Link style helpers ──
+function linkColor(l) {
+  return linkColors[l.ltype] ?? linkColors.parent;
+}
+function linkDash(l)        { return l.ltype === 'spouse' ? '5 3' : null; }
+function linkBaseOpacity(l) { return l.ltype === 'spouse' ? 0.65 : 0.50; }
+function linkWidth(l)       { return l.ltype === 'spouse' ? 1.5 : 1.0; }
+
 // ── Active data: filter allNodes/allLinks by current visibility ──
 function computeActiveData() {
   const visIds = new Set(allNodes.filter(n => isNodeVisible(n)).map(n => n.id));
-  nodes = allNodes.filter(n => visIds.has(n.id));
-  // Create fresh link objects (string IDs) so D3 re-resolves them cleanly
-  links = allLinks
-    .filter(l => visIds.has(l._src) && visIds.has(l._tgt))
-    .map(l => ({ source: l._src, target: l._tgt, ltype: l.ltype }));
+
+  if (showFamNodes) {
+    // Bipartite mode: INDI + FAM nodes
+    nodes = allNodes.filter(n => visIds.has(n.id));
+    links = allLinks
+      .filter(l => visIds.has(l._src) && visIds.has(l._tgt))
+      .map(l => ({ source: l._src, target: l._tgt, ltype: l.ltype }));
+  } else {
+    // Direct mode: only INDI nodes, direct spouse + parent-child links
+    nodes = allNodes.filter(n => n.type === 'INDI' && visIds.has(n.id));
+    const indiIds = new Set(nodes.map(n => n.id));
+    links = [];
+    const spousePairs = new Set();   // prevent duplicate spouse links for remarried couples
+    for (const [, fam] of families) {
+      const hasHusb = fam.husb && indiIds.has(fam.husb);
+      const hasWife = fam.wife && indiIds.has(fam.wife);
+      // Spouse line (deduplicated)
+      if (hasHusb && hasWife) {
+        const key = [fam.husb, fam.wife].sort().join('|');
+        if (!spousePairs.has(key)) {
+          spousePairs.add(key);
+          links.push({ source: fam.husb, target: fam.wife, ltype: 'spouse' });
+        }
+      }
+      // Parent → child lines, shaded by parent sex
+      for (const cid of fam.chil) {
+        if (!indiIds.has(cid)) continue;
+        if (hasHusb) links.push({ source: fam.husb, target: cid, ltype: 'father' });
+        if (hasWife) links.push({ source: fam.wife, target: cid, ltype: 'mother' });
+      }
+    }
+  }
 }
 
 // ── Full filter apply: recompute active data + restart simulation ──
@@ -1168,10 +1344,10 @@ function renderGraph() {
     .selectAll('line')
     .data(links)
     .join('line')
-    .attr('stroke', d => d.ltype === 'spouse' ? '#9b59b6' : '#3498db')
-    .attr('stroke-dasharray', d => d.ltype === 'spouse' ? '5 3' : null)
-    .attr('stroke-width', 1.5)
-    .attr('opacity', d => d.ltype === 'spouse' ? 0.65 : 0.55);
+    .attr('stroke', d => linkColor(d))
+    .attr('stroke-dasharray', d => linkDash(d))
+    .attr('stroke-width', d => linkWidth(d))
+    .attr('opacity', d => linkBaseOpacity(d));
 
   // Nodes layer
   const nodeG = gMain.append('g').attr('class', 'nodes-g');
@@ -1268,6 +1444,7 @@ function buildAndRunSimulation() {
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth  || 1100;
   const H = svgEl.clientHeight || 700;
+  _simH = H;
 
   const birthYears = nodes
     .filter(n => n.type === 'INDI' && n.data.birthYear)
@@ -1684,10 +1861,10 @@ function applyHighlight() {
   });
 
   linkSel?.attr('opacity', d => {
-    if (!hasHL) return d.ltype === 'spouse' ? 0.65 : 0.55;
+    if (!hasHL) return linkBaseOpacity(d);
     const sid = typeof d.source === 'object' ? d.source.id : d.source;
     const tid = typeof d.target === 'object' ? d.target.id : d.target;
-    return (hlSet.has(sid) && hlSet.has(tid)) ? 0.75 : 0.04;
+    return (hlSet.has(sid) && hlSet.has(tid)) ? 0.80 : 0.04;
   });
 
   labelSel?.attr('opacity', d => (!hasHL || hlSet.has(d.id)) ? 1 : 0.07);
@@ -2234,13 +2411,19 @@ function toggleView() {
     c2d.style.display = 'none';
     c3d.style.display = 'block';
     btn.textContent = '◨ 2D'; btn.classList.add('active-3d');
+    document.getElementById('timeline-toggle-row').style.display = 'flex';
     if (!graph3d) initGraph3D();
     else { graph3d.resumeAnimation(); resize3D(); }
+    buildTimeline3D();
   } else {
     currentView = '2d';
     c3d.style.display = 'none';
     c2d.style.display = 'block';
     btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
+    const tlRow = document.getElementById('timeline-toggle-row');
+    if (tlRow) tlRow.style.display = 'none';
+    const tl3d = document.getElementById('timeline-3d');
+    if (tl3d) tl3d.style.display = 'none';
     if (graph3d) graph3d.pauseAnimation();
   }
 }
@@ -2249,6 +2432,7 @@ function resize3D() {
   if (!graph3d) return;
   const el = document.getElementById('graph-3d-container');
   graph3d.width(el.clientWidth).height(el.clientHeight);
+  buildTimeline3D();
 }
 
 function compute3DNodeColor(n) {
@@ -2300,7 +2484,7 @@ function initGraph3D() {
       return `<span style="background:rgba(10,20,50,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}</span>`;
     })
     // ── Links ──
-    .linkColor(l => l.ltype === 'spouse' ? '#9b59b6' : '#3498db')
+    .linkColor(l => linkColor(l))
     .linkWidth(l => l.ltype === 'spouse' ? 0.9 : 0.6)
     .linkOpacity(0.55)
     // ── Events ──
@@ -2319,10 +2503,12 @@ function initGraph3D() {
     })
     .onBackgroundClick(() => closeDetailPanel());
 
-  apply3DPhysics();
-
-  // After initial layout settles, zoom camera to fit
-  setTimeout(() => graph3d?.zoomToFit(800, 60), 2500);
+  // Delay physics setup so the library's internal controls finish initialising
+  // before d3ReheatSimulation() is called (avoids the .tick() undefined error)
+  setTimeout(() => {
+    if (graph3d) apply3DPhysics();
+    setTimeout(() => graph3d?.zoomToFit(800, 60), 2500);
+  }, 150);
 }
 
 function apply3DPhysics() {
@@ -2353,14 +2539,72 @@ function refresh3D() {
   graph3d.nodeColor(n => compute3DNodeColor(n));
 
   graph3d.linkColor(l => {
-    if (!hasHL) return l.ltype === 'spouse' ? '#9b59b6' : '#3498db';
+    if (!hasHL) return linkColor(l);
     const sid = typeof l.source === 'object' ? l.source.id : l.source;
     const tid = typeof l.target === 'object' ? l.target.id : l.target;
-    return (hlSet.has(sid) && hlSet.has(tid))
-      ? (l.ltype === 'spouse' ? '#9b59b6' : '#3498db')
-      : '#111122';
+    return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
   });
 
+}
+
+// ── Link color customization ──
+function updateLinkColors() {
+  // Update SVG links (2D)
+  if (linkSel) {
+    linkSel.attr('stroke', d => linkColor(d));
+  }
+  // Update 3D links
+  refresh3D();
+}
+
+function resetLinkColors() {
+  Object.assign(linkColors, LINK_COLOR_DEFAULTS);
+  // Sync pickers
+  for (const [key, val] of Object.entries(LINK_COLOR_DEFAULTS)) {
+    const el = document.getElementById('lc-' + key);
+    if (el) el.value = val;
+  }
+  updateLinkColors();
+}
+
+// ── 3D Timeline Axis ──
+function buildTimeline3D() {
+  const el = document.getElementById('timeline-3d');
+  if (!el) return;
+  // Remove old ticks/labels, keep the axis line
+  Array.from(el.querySelectorAll('.tl-tick, .tl-label')).forEach(n => n.remove());
+
+  if (!showTimeline3D || !_birthYearRange) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+
+  const containerH = document.getElementById('graph-3d-container').clientHeight || _simH;
+  const { min: minYr, max: maxYr } = _birthYearRange;
+  const ySpan = Math.max(maxYr - minYr, 1);
+
+  // Tick interval based on span
+  const step = ySpan > 200 ? 50 : ySpan > 80 ? 25 : 10;
+  const startYr = Math.ceil(minYr / step) * step;
+
+  for (let yr = startYr; yr <= maxYr; yr += step) {
+    const frac = (yr - minYr) / ySpan;
+    // Map through the same yearToY formula used in the simulation
+    const simY = 30 + frac * (_simH - 60);
+    const screenY = (simY / _simH) * containerH;
+
+    const tick = document.createElement('div');
+    tick.className = 'tl-tick';
+    tick.style.top = screenY + 'px';
+    el.appendChild(tick);
+
+    const label = document.createElement('div');
+    label.className = 'tl-label';
+    label.style.top = screenY + 'px';
+    label.textContent = yr;
+    el.appendChild(label);
+  }
 }
 
 // Resize 3D view when window resizes
@@ -2410,6 +2654,27 @@ document.addEventListener('DOMContentLoaded', () => {
       applyPhysicsParams();
     });
   }
+
+  // Familien-Knoten toggle
+  document.getElementById('fam-nodes-toggle').addEventListener('change', function () {
+    showFamNodes = this.checked;
+    applyFilter();
+  });
+
+  // 3D Zeitachse toggle
+  document.getElementById('timeline-3d-toggle').addEventListener('change', function () {
+    showTimeline3D = this.checked;
+    buildTimeline3D();
+  });
+
+  // Link color pickers
+  for (const key of ['spouse', 'father', 'mother', 'parent']) {
+    const el = document.getElementById('lc-' + key);
+    if (el) el.addEventListener('input', function () {
+      linkColors[key] = this.value;
+      updateLinkColors();
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2421,6 +2686,7 @@ window.highlightMode     = highlightMode;
 window.resetHighlight    = resetHighlight;
 window.closeDetailPanel  = closeDetailPanel;
 window.toggleAllSurnames = toggleAllSurnames;
+window.resetLinkColors   = resetLinkColors;
 window.zoomToFit         = zoomToFit;
 window.reheatSimulation  = reheatSimulation;
 window.resetPhysics      = resetPhysics;
