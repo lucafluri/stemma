@@ -398,7 +398,6 @@ function _fullRebuildGraph() {
     `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
   _firstLoad = true;
   buildAndRunSimulation();
-  setTimeout(autoSettle, 200);
   if (currentView === '3d') applyFilter();
 }
 
