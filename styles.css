@@ -193,12 +193,12 @@ body {
 .sidebar-toggle:hover { color: #ccc; }
 
 /* ── LINK COLOR PANEL ── */
-#link-colors-panel {
+#link-colors-panel, #node-colors-panel, #appearance-panel {
   border-top: 1px solid #0f3460;
   margin-top: 4px;
   padding-top: 4px;
 }
-#link-colors-panel summary {
+#link-colors-panel summary, #node-colors-panel summary, #appearance-panel summary {
   font-size: 12px;
   color: #aaa;
   cursor: pointer;
@@ -206,10 +206,10 @@ body {
   padding: 3px 0;
   list-style: none;
 }
-#link-colors-panel summary::-webkit-details-marker { display: none; }
-#link-colors-panel summary::before { content: '▶ '; font-size: 10px; }
-#link-colors-panel[open] summary::before { content: '▼ '; font-size: 10px; }
-#link-colors-panel summary:hover { color: #ccc; }
+#link-colors-panel summary::-webkit-details-marker, #node-colors-panel summary::-webkit-details-marker, #appearance-panel summary::-webkit-details-marker { display: none; }
+#link-colors-panel summary::before, #node-colors-panel summary::before, #appearance-panel summary::before { content: '▶ '; font-size: 10px; }
+#link-colors-panel[open] summary::before, #node-colors-panel[open] summary::before, #appearance-panel[open] summary::before { content: '▼ '; font-size: 10px; }
+#link-colors-panel summary:hover, #node-colors-panel summary:hover, #appearance-panel summary:hover { color: #ccc; }
 .link-color-row {
   display: flex;
   align-items: center;
@@ -228,7 +228,7 @@ body {
   padding: 0;
   flex-shrink: 0;
 }
-#link-colors-reset {
+#link-colors-reset, #node-colors-reset {
   margin-top: 4px;
   width: 100%;
   font-size: 11px;
@@ -239,7 +239,7 @@ body {
   padding: 4px 0;
   cursor: pointer;
 }
-#link-colors-reset:hover { background: #1a3a6a; color: #ccc; }
+#link-colors-reset:hover, #node-colors-reset:hover { background: #1a3a6a; color: #ccc; }
 
 /* ── GRAPH ── */
 #graph-wrapper {
@@ -255,12 +255,29 @@ body {
   inset: 0;
   background: #1a1a2e;
 }
+#graph-container { display: none; }
+#graph-3d-container { display: block; }
 
 #graph-svg {
   width: 100%;
   height: 100%;
   display: block;
   touch-action: none;
+}
+
+#graph-3d-container,
+#graph-3d-container canvas {
+  touch-action: none;
+}
+
+/* Drag handle for mobile bottom sheet */
+.panel-drag-handle {
+  display: none;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: #3a5a8a;
+  margin: 6px auto 8px;
 }
 
 #view-toggle-btn {
@@ -684,7 +701,69 @@ body {
   font-size: 12px;
 }
 .edit-cancel-btn:hover { background: #1a3a6a; }
-#dl-btn {
+
+/* ── Relationship linking (edit form) ── */
+.ef-rel-add-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ef-rel-add-row .edit-input {
+  flex: 1;
+  min-width: 100px;
+}
+.ef-rel-add-btn {
+  background: #e94560;
+  color: #fff;
+  border: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ef-rel-add-btn:hover { background: #c73550; }
+
+.ef-rel-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: #bbb;
+}
+.ef-rel-type {
+  color: #7ac;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ef-rel-name {
+  flex: 1;
+  color: #ddd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ef-rel-remove {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.ef-rel-remove:hover {
+  background: #2a1a1a;
+}
+
+#dl-btn, #center-view-btn, #center-person-btn {
   background: #0f3460;
   color: #7ac;
   border: 1px solid #2a4a8a;
@@ -695,7 +774,15 @@ body {
   white-space: nowrap;
   display: none;
 }
-#dl-btn:hover { background: #1a3a6a; color: #adf; }
+#dl-btn:hover, #center-view-btn:hover:not(:disabled), #center-person-btn:hover:not(:disabled) {
+  background: #1a3a6a; color: #adf;
+}
+#center-view-btn:disabled, #center-person-btn:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
+#center-person-btn.has-selection {
+  color: #e94560; border-color: #e94560;
+}
 
 /* ══════════════════════════════════════
    MOBILE RESPONSIVE  (≤ 768px)
@@ -716,7 +803,7 @@ body {
     font-size: 13px;
   }
 
-  #load-btn, #view-toggle-btn, #dl-btn {
+  #load-btn, #view-toggle-btn, #dl-btn, #center-view-btn, #center-person-btn {
     padding: 5px 10px;
     font-size: 12px;
   }
@@ -770,10 +857,26 @@ body {
     transform: translateY(100%);
     transition: transform 0.3s ease;
     padding-bottom: env(safe-area-inset-bottom, 12px);
+    overscroll-behavior: contain;
   }
 
   #detail-panel.panel-visible {
     transform: translateY(0);
+  }
+
+  /* Show drag handle on mobile bottom sheet */
+  .panel-drag-handle {
+    display: block;
+  }
+
+  /* Close button — bigger touch target on mobile */
+  #close-panel-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   /* Graph takes full layout column */
@@ -784,11 +887,24 @@ body {
   /* Larger touch targets for surname checkboxes */
   .surname-item {
     padding: 5px 0;
+    min-height: 36px;
   }
 
   .sidebar-btn {
     padding: 8px 10px;
     font-size: 13px;
+    min-height: 40px;
+  }
+
+  .highlight-btn {
+    padding: 10px 10px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+
+  .edit-bar-btn {
+    padding: 8px 12px;
+    min-height: 40px;
   }
 
   /* Slightly larger sliders on mobile */
@@ -797,13 +913,13 @@ body {
   }
 
   .phys-slider::-webkit-slider-thumb {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
   }
 
   .phys-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
   }
 
   /* Highlight buttons: side-by-side on mobile to save space */
@@ -815,6 +931,14 @@ body {
 
   #btn-clear-hl {
     grid-column: 1 / -1;
+  }
+
+  /* Clickable names — bigger touch targets */
+  .clickable-name {
+    display: inline-block;
+    padding: 3px 0;
+    min-height: 28px;
+    line-height: 22px;
   }
 
   /* Tooltip: hide on touch (covered by the detail panel) */

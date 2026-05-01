@@ -13,8 +13,10 @@
   <h1>&#127795; Stammbaum</h1>
   <button id="load-btn" onclick="document.getElementById('file-input').click()">GEDCOM laden</button>
   <input type="file" id="file-input" accept=".ged">
-  <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled>&#x25A6; 3D</button>
+  <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
   <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
+  <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
+  <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
   <div id="status">Keine Datei geladen &mdash; bitte GEDCOM Datei laden</div>
 </div>
 
@@ -27,15 +29,15 @@
     <div class="sidebar-label">Familiennamen</div>
     <div id="surname-list"></div>
     <div id="sidebar-buttons">
-      <label class="sidebar-toggle">
+      <label class="sidebar-toggle" style="display:none">
         <input type="checkbox" id="fam-nodes-toggle" checked>
         <span>Familien-Knoten anzeigen</span>
       </label>
-      <label class="sidebar-toggle" id="sort-time-3d-row" style="display:none;border-top:none;padding-top:2px">
-        <input type="checkbox" id="sort-time-3d-toggle">
+      <label class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px">
+        <input type="checkbox" id="sort-time-3d-toggle" checked>
         <span>Nach Zeit sortieren (3D)</span>
       </label>
-      <div id="time-spread-row" style="display:none;padding:4px 2px 2px 2px;border-top:none">
+      <div id="time-spread-row" style="padding:4px 2px 2px 2px;border-top:none">
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
           <span>Zeitachsen-Spreizung</span>
           <span id="time-spread-val">250</span>
@@ -43,7 +45,7 @@
         <input type="range" id="time-spread-slider" min="80" max="700" step="10" value="250"
                style="width:100%;accent-color:#4a7abf;cursor:pointer">
       </div>
-      <label class="sidebar-toggle" id="show-names-3d-row" style="display:none;border-top:none;padding-top:2px">
+      <label class="sidebar-toggle" id="show-names-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="show-names-3d-toggle" checked>
         <span>Namen anzeigen (3D)</span>
       </label>
@@ -73,6 +75,81 @@
         <span>Familie → Kind</span>
       </div>
       <button id="link-colors-reset" onclick="resetLinkColors()">Zurücksetzen</button>
+    </details>
+
+    <details id="node-colors-panel">
+      <summary>Knotenfarben</summary>
+      <div class="link-color-row">
+        <input type="color" id="nc-male" value="#4a90d9">
+        <span>Männlich</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="nc-female" value="#e0608a">
+        <span>Weiblich</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="nc-unknown" value="#7e8fa8">
+        <span>Unbekannt</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="nc-fam" value="#2ecc71">
+        <span>Familie</span>
+      </div>
+      <div class="link-color-row">
+        <input type="color" id="nc-fam-div" value="#e74c3c">
+        <span>Familie (geschieden)</span>
+      </div>
+      <button id="node-colors-reset" onclick="resetNodeColors()">Zurücksetzen</button>
+    </details>
+
+    <details id="appearance-panel">
+      <summary>3D Darstellung</summary>
+      <div class="link-color-row">
+        <input type="color" id="ap-bg-color" value="#04060f">
+        <span>Hintergrund</span>
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Knoten-Deckkraft</span>
+          <span class="phys-value" id="ap-node-opacity-val">0.85</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-node-opacity" min="0.1" max="1" step="0.05" value="0.85">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Linien-Deckkraft</span>
+          <span class="phys-value" id="ap-link-opacity-val">0.45</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-link-opacity" min="0.05" max="1" step="0.05" value="0.45">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Umgebungslicht</span>
+          <span class="phys-value" id="ap-ambient-val">0.4</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-ambient" min="0.1" max="3" step="0.1" value="0.4">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Punktlicht</span>
+          <span class="phys-value" id="ap-point-val">0.8</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-point" min="0" max="3" step="0.1" value="0.8">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Linien-Breite</span>
+          <span class="phys-value" id="ap-link-width-val">0.8</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-link-width" min="0.1" max="4" step="0.1" value="0.8">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Knotengrösse</span>
+          <span class="phys-value" id="ap-node-size-val">4</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-node-size" min="1" max="12" step="0.5" value="4">
+      </div>
     </details>
 
     <details id="physics-panel">
@@ -208,6 +285,7 @@
   </div>
 
   <div id="detail-panel">
+    <div class="panel-drag-handle"></div>
     <button id="close-panel-btn" onclick="closeDetailPanel()" title="Schliessen">&#x2715;</button>
     <h2 id="detail-name">—</h2>
     <div id="detail-edit-bar">

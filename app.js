@@ -57,19 +57,32 @@ let physicsParams = { ...PHYSICS_DEFAULTS };
 
 // 3D state
 let graph3d        = null;
-let currentView    = '2d';   // '2d' | '3d'
+let currentView    = '3d';   // '2d' | '3d'
 let _birthYearRange = null;  // { min, max } saved for 3D stratification
 let _3dMousePos    = { x: 0, y: 0 };
 
 // Display mode flags
 let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
-let sortByTime3D   = false;  // Y-stratify 3D sim by birth year + show 3D timeline
+let sortByTime3D   = true;   // Y-stratify 3D sim by birth year + show 3D timeline
 let show3DNames    = true;   // render name+year labels above nodes in 3D
 let _timeline3DObj    = null;   // THREE.Group holding timeline meshes in the 3D scene
 let _3dYHalfSpan      = 250;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
 let _orbitControls3d  = null;  // OrbitControls instance (replaces TrackballControls)
 let _orbitTargetAnim  = null;  // { from, to, start, duration } for smooth orbit target transition
 let _orbitTrackNodeId = null;  // node id whose live position the orbit target tracks
+
+// 3D appearance
+let _3dAppearance = {
+  bgColor:     '#04060f',
+  nodeOpacity: 0.85,
+  linkOpacity: 0.45,
+  ambientLight: 0.4,
+  pointLight:  0.8,
+  linkWidth:   0.8,
+  nodeRelSize: 4,
+};
+let _3dAmbientLight = null;
+let _3dPointLight   = null;
 let _isNewRecord      = false; // true while editing a freshly created INDI/FAM
 
 // Link colors (user-configurable)
@@ -81,6 +94,16 @@ const LINK_COLOR_DEFAULTS = {
 };
 let linkColors = { ...LINK_COLOR_DEFAULTS };
 
+// Node colors (user-configurable)
+const NODE_COLOR_DEFAULTS = {
+  male:    '#4a90d9',
+  female:  '#e0608a',
+  unknown: '#7e8fa8',
+  fam:     '#2ecc71',
+  famDiv:  '#e74c3c',
+};
+let nodeColors = { ...NODE_COLOR_DEFAULTS };
+
 // ═══════════════════════════════════════════════════════════════
 // MOBILE SIDEBAR TOGGLE
 // ═══════════════════════════════════════════════════════════════
@@ -88,6 +111,114 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('sidebar-open');
   document.getElementById('sidebar-overlay').classList.toggle('visible');
 }
+
+// ═══════════════════════════════════════════════════════════════
+// TOUCH SUPPORT
+// ═══════════════════════════════════════════════════════════════
+
+// ── 3D pinch-to-zoom (OrbitControls has enableZoom=false) ──
+let _pinch3d = null;  // { dist0, camDist0 }
+
+function _onTouch3DStart(evt) {
+  if (evt.touches.length === 2 && graph3d && _orbitControls3d) {
+    evt.preventDefault();
+    const dx = evt.touches[0].clientX - evt.touches[1].clientX;
+    const dy = evt.touches[0].clientY - evt.touches[1].clientY;
+    const dist0 = Math.hypot(dx, dy);
+    const camDist0 = graph3d.camera().position.distanceTo(_orbitControls3d.target);
+    _pinch3d = { dist0, camDist0 };
+  }
+}
+
+function _onTouch3DMove(evt) {
+  if (!_pinch3d || evt.touches.length !== 2 || !graph3d || !_orbitControls3d) return;
+  evt.preventDefault();
+  const dx = evt.touches[0].clientX - evt.touches[1].clientX;
+  const dy = evt.touches[0].clientY - evt.touches[1].clientY;
+  const dist = Math.hypot(dx, dy);
+  const scale = _pinch3d.dist0 / Math.max(dist, 1);
+  let newDist = _pinch3d.camDist0 * scale;
+  newDist = Math.max(25, Math.min(14000, newDist));
+
+  // Move camera along the line from target to camera
+  const cam = graph3d.camera();
+  const dir = cam.position.clone().sub(_orbitControls3d.target).normalize();
+  cam.position.copy(_orbitControls3d.target).addScaledVector(dir, newDist);
+  _orbitControls3d.update();
+}
+
+function _onTouch3DEnd(evt) {
+  if (evt.touches.length < 2) _pinch3d = null;
+}
+
+// ── Detail panel bottom-sheet swipe-to-dismiss ──
+let _panelSwipe = null;  // { startY, startTranslate }
+
+function _initPanelSwipe() {
+  const panel = document.getElementById('detail-panel');
+  if (!panel) return;
+
+  panel.addEventListener('touchstart', evt => {
+    // Only handle swipe on the drag handle area (top 40px) or if panel is scrolled to top
+    const y = evt.touches[0].clientY;
+    const rect = panel.getBoundingClientRect();
+    const offsetInPanel = y - rect.top;
+    const scrolledToTop = panel.scrollTop <= 0;
+    if (offsetInPanel > 40 && !scrolledToTop) return;
+
+    _panelSwipe = { startY: y, currentY: y };
+    panel.style.transition = 'none';
+  }, { passive: true });
+
+  panel.addEventListener('touchmove', evt => {
+    if (!_panelSwipe) return;
+    _panelSwipe.currentY = evt.touches[0].clientY;
+    const dy = Math.max(0, _panelSwipe.currentY - _panelSwipe.startY);  // only downward
+    panel.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+
+  panel.addEventListener('touchend', () => {
+    if (!_panelSwipe) return;
+    panel.style.transition = '';
+    const dy = _panelSwipe.currentY - _panelSwipe.startY;
+    _panelSwipe = null;
+    if (dy > 80) {
+      closeDetailPanel();
+    } else {
+      // Snap back
+      if (panel.classList.contains('panel-visible')) {
+        panel.style.transform = 'translateY(0)';
+      }
+    }
+  }, { passive: true });
+}
+
+// ── 2D: prevent node click firing after a touch-drag ──
+let _touchDragged = false;
+let _touchStartPos = null;
+
+function _initTouchDragGuard() {
+  const svg = document.getElementById('graph-svg');
+  if (!svg) return;
+  svg.addEventListener('touchstart', evt => {
+    if (evt.touches.length === 1) {
+      _touchDragged = false;
+      _touchStartPos = { x: evt.touches[0].clientX, y: evt.touches[0].clientY };
+    }
+  }, { passive: true });
+  svg.addEventListener('touchmove', evt => {
+    if (_touchStartPos && evt.touches.length === 1) {
+      const dx = evt.touches[0].clientX - _touchStartPos.x;
+      const dy = evt.touches[0].clientY - _touchStartPos.y;
+      if (Math.hypot(dx, dy) > 8) _touchDragged = true;
+    }
+  }, { passive: true });
+  svg.addEventListener('touchend', () => {
+    _touchStartPos = null;
+  }, { passive: true });
+}
+
+function wasTouchDrag() { return _touchDragged; }
 
 // ═══════════════════════════════════════════════════════════════
 // 1. GEDCOM PARSER
@@ -311,13 +442,13 @@ function buildSurnameColorMap() {
 }
 
 function nodeBaseColor(n) {
-  if (n.type === 'FAM') return n.data.div ? '#e74c3c' : '#2ecc71';
+  if (n.type === 'FAM') return n.data.div ? nodeColors.famDiv : nodeColors.fam;
   const indi = n.data;
   const s = indi.surn;
   if (s && surnameColors.has(s)) return surnameColors.get(s);
-  if (indi.sex === 'M') return '#4a90d9';
-  if (indi.sex === 'F') return '#e0608a';
-  return '#7e8fa8';
+  if (indi.sex === 'M') return nodeColors.male;
+  if (indi.sex === 'F') return nodeColors.female;
+  return nodeColors.unknown;
 }
 
 // ── Visibility helpers (surname filter) ──
@@ -637,6 +768,7 @@ function renderGraph() {
     .attr('data-nid', d => d.id)
     .on('click', (evt, d) => {
       evt.stopPropagation();
+      if (wasTouchDrag()) return;
       if (d.type === 'INDI') showIndiDetail(d.id);
       else showFamDetail(d.id);
     })
@@ -681,8 +813,8 @@ function renderGraph() {
       const sz = 7;
       g.append('polygon')
         .attr('points', `0,${-sz} ${sz},0 0,${sz} ${-sz},0`)
-        .attr('fill', d.data.div ? '#c0392b' : '#1a6e3a')
-        .attr('stroke', d.data.div ? '#e74c3c' : '#27ae60')
+        .attr('fill', d.data.div ? nodeColors.famDiv : nodeColors.fam)
+        .attr('stroke', d.data.div ? nodeColors.famDiv : nodeColors.fam)
         .attr('stroke-width', d.data.div ? 1.5 : 1)
         .attr('stroke-dasharray', d.data.div ? '3 2' : null)
         .attr('opacity', 0.88);
@@ -852,7 +984,9 @@ function onSimEnd() {
   document.getElementById('loading-overlay').style.display = 'none';
   if (_firstLoad) {
     _firstLoad = false;
-    zoomToFit();
+    if (currentView === '2d') {
+      zoomToFit();
+    }
     if (individuals.has('@I1@')) {
       setTimeout(() => showIndiDetail('@I1@'), 300);
     }
@@ -893,6 +1027,45 @@ function zoomToNode(nid) {
   const ty = H / 2 - scale * n.y;
   svgSel.transition().duration(550)
     .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
+// ── Center view / center on person (topbar buttons) ──
+function centerView() {
+  if (currentView === '3d' && graph3d) {
+    _setOrbitTarget3D(null);           // orbit back to origin
+    graph3d.zoomToFit(800, 60);
+  } else {
+    zoomToFit();
+  }
+}
+
+function centerOnPerson() {
+  if (!selectedIndiId) return;
+  if (currentView === '3d' && graph3d) {
+    _setOrbitTarget3D(selectedIndiId);
+    // Also move the camera closer to the node
+    const gd = graph3d.graphData();
+    const node = gd.nodes.find(n => n.id === selectedIndiId);
+    if (node && node.x != null) {
+      const cam = graph3d.camera();
+      const target = new THREE.Vector3(node.x, node.y || 0, node.z || 0);
+      const dist = Math.min(cam.position.distanceTo(target), 300);
+      const dir = cam.position.clone().sub(target).normalize();
+      const newPos = target.clone().addScaledVector(dir, dist);
+      // Animate camera position smoothly
+      const start = cam.position.clone();
+      const t0 = performance.now();
+      const dur = 600;
+      (function animCam() {
+        const t = Math.min((performance.now() - t0) / dur, 1);
+        const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+        cam.position.lerpVectors(start, newPos, ease);
+        if (t < 1) requestAnimationFrame(animCam);
+      })();
+    }
+  } else {
+    zoomToNode(selectedIndiId);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -946,10 +1119,18 @@ function positionTooltip(evt) {
 // ═══════════════════════════════════════════════════════════════
 // 9. DETAIL PANEL
 // ═══════════════════════════════════════════════════════════════
+function _updateCenterPersonBtn() {
+  const btn = document.getElementById('center-person-btn');
+  if (!btn) return;
+  btn.disabled = !selectedIndiId;
+  btn.classList.toggle('has-selection', !!selectedIndiId);
+}
+
 function showIndiDetail(id) {
   const indi = individuals.get(id);
   if (!indi) return;
   selectedIndiId = id;
+  _updateCenterPersonBtn();
 
   document.getElementById('detail-name').textContent = indi.name || id;
 
@@ -1067,9 +1248,12 @@ function openPanel() {
 }
 function closeDetailPanel() {
   document.getElementById('main-layout').classList.remove('panel-open');
-  document.getElementById('detail-panel').classList.remove('panel-visible');
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('panel-visible');
+  panel.style.transform = '';   // clear any inline transform from swipe gesture
   document.getElementById('detail-edit-bar').style.display = 'none';
   selectedIndiId = null;
+  _updateCenterPersonBtn();
   resetHighlight();
   if (currentView === '3d') _setOrbitTarget3D(null);
 }
@@ -1185,7 +1369,7 @@ function refreshNodeColors() {
     if (d.type === 'INDI') {
       d3.select(this).select('circle').attr('fill', nodeBaseColor(d));
     } else {
-      d3.select(this).select('polygon').attr('fill', d.data.div ? '#c0392b' : '#1a6e3a');
+      d3.select(this).select('polygon').attr('fill', d.data.div ? nodeColors.famDiv : nodeColors.fam);
     }
   });
   refresh3D();
@@ -1312,19 +1496,22 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       // Reset 3D state if re-loading
       if (_orbitControls3d) { _orbitControls3d.dispose(); _orbitControls3d = null; }
       if (graph3d) { graph3d.pauseAnimation(); graph3d = null; }
-      if (currentView === '3d') {
-        document.getElementById('graph-3d-container').style.display = 'none';
-        document.getElementById('graph-container').style.display = 'block';
-        currentView = '2d';
-        const btn = document.getElementById('view-toggle-btn');
-        btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
-      }
+      _3dAmbientLight = null;
+      _3dPointLight = null;
 
       _firstLoad = true;
       buildAndRunSimulation();
       document.getElementById('dl-btn').style.display = 'inline-block';
-      document.getElementById('view-toggle-btn').disabled = false;
+      document.getElementById('center-view-btn').style.display = 'inline-block';
+      document.getElementById('center-view-btn').disabled = false;
+      document.getElementById('center-person-btn').style.display = 'inline-block';
       window._gedcomFilename = file.name;
+
+      // Ensure we're in 3D view
+      currentView = '3d';
+      document.getElementById('graph-container').style.display = 'none';
+      document.getElementById('graph-3d-container').style.display = 'block';
+      initGraph3D();
 
     } catch (err) {
       document.getElementById('loading-overlay').style.display = 'none';
@@ -1451,12 +1638,88 @@ let _editingId   = null;   // INDI or FAM id currently being edited
 let _editingType = null;   // 'INDI' | 'FAM'
 
 
+// Pending relationships to be committed with the new/edited person
+let _pendingRelations = [];  // [{ targetId, type: 'parent'|'child'|'spouse' }]
+
+function _buildPersonDatalist(excludeId) {
+  let opts = '';
+  for (const [pid, p] of individuals) {
+    if (pid === excludeId) continue;
+    const display = `${p.name || pid}`;
+    opts += `<option value="${escAttr(display)}" data-id="${escAttr(pid)}">`;
+  }
+  return opts;
+}
+
+function _resolvePersonInput(val) {
+  if (!val) return null;
+  val = val.trim();
+  // Direct ID match
+  if (individuals.has(val)) return val;
+  // Match by name (exact or first match)
+  for (const [pid, p] of individuals) {
+    if ((p.name || pid) === val) return pid;
+  }
+  // Partial match
+  const lower = val.toLowerCase();
+  for (const [pid, p] of individuals) {
+    if ((p.name || pid).toLowerCase().includes(lower)) return pid;
+  }
+  return null;
+}
+
+function _renderPendingRelations() {
+  const el = document.getElementById('ef-rel-list');
+  if (!el) return;
+  if (!_pendingRelations.length) {
+    el.innerHTML = '<div style="color:#555;font-size:11px;padding:2px 0">Keine Beziehungen hinzugefügt</div>';
+    return;
+  }
+  const labels = { parent: 'Elternteil von', child: 'Kind von', spouse: 'Ehepartner von' };
+  el.innerHTML = _pendingRelations.map((r, idx) => {
+    const p = individuals.get(r.targetId);
+    const name = p ? escHtml(p.name || r.targetId) : escHtml(r.targetId);
+    return `<div class="ef-rel-item">
+      <span class="ef-rel-type">${labels[r.type]}</span>
+      <span class="ef-rel-name">${name}</span>
+      <button class="ef-rel-remove" onclick="removeRelation(${idx})" title="Entfernen">&#x2715;</button>
+    </div>`;
+  }).join('');
+}
+
+function addRelation() {
+  const input = document.getElementById('ef-rel-person');
+  const typeEl = document.getElementById('ef-rel-type');
+  if (!input || !typeEl) return;
+  const type = typeEl.value;
+  const targetId = _resolvePersonInput(input.value);
+  if (!targetId) {
+    input.style.borderColor = '#e74c3c';
+    setTimeout(() => { input.style.borderColor = ''; }, 1200);
+    return;
+  }
+  // Prevent duplicate
+  if (_pendingRelations.some(r => r.targetId === targetId && r.type === type)) return;
+  _pendingRelations.push({ targetId, type });
+  input.value = '';
+  _renderPendingRelations();
+}
+
+function removeRelation(idx) {
+  _pendingRelations.splice(idx, 1);
+  _renderPendingRelations();
+}
+
 function showIndiEditForm(id) {
   const i = individuals.get(id);
   if (!i) return;
 
+  _pendingRelations = [];
+
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
+
+  const datalistHtml = _buildPersonDatalist(id);
 
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
@@ -1507,6 +1770,22 @@ function showIndiEditForm(id) {
       <div class="edit-label">Notiz</div>
       <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
     </div>
+    <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+      <div class="edit-label">Beziehungen</div>
+      <div id="ef-rel-list" style="margin-bottom:6px">
+        <div style="color:#555;font-size:11px;padding:2px 0">Keine Beziehungen hinzugefügt</div>
+      </div>
+      <div class="ef-rel-add-row">
+        <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="Person suchen…" autocomplete="off">
+        <datalist id="ef-rel-datalist">${datalistHtml}</datalist>
+        <select class="edit-select" id="ef-rel-type" style="width:auto;min-width:100px">
+          <option value="child">Kind von</option>
+          <option value="parent">Elternteil von</option>
+          <option value="spouse">Ehepartner von</option>
+        </select>
+        <button class="ef-rel-add-btn" onclick="addRelation()" title="Beziehung hinzufügen">+</button>
+      </div>
+    </div>
     <div class="edit-form-buttons">
       <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; Speichern</button>
       <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
@@ -1544,6 +1823,54 @@ function commitIndiEdit() {
   const ym = i.birth.date.match(/\b(\d{4})\b/);
   i.birthYear = ym ? +ym[1] : null;
 
+  // ── Process pending relationships ──
+  const needsRebuild = _pendingRelations.length > 0;
+  for (const rel of _pendingRelations) {
+    const target = individuals.get(rel.targetId);
+    if (!target) continue;
+
+    if (rel.type === 'child') {
+      // New person is a CHILD OF target → target is parent
+      // Find an existing family where target is husb or wife that we can add the child to
+      let fam = _findOrCreateFamAsParent(rel.targetId);
+      if (!fam.chil.includes(_editingId)) fam.chil.push(_editingId);
+      if (!i.famc.includes(fam.id)) i.famc.push(fam.id);
+
+    } else if (rel.type === 'parent') {
+      // New person is a PARENT OF target → target is child
+      let fam = _findOrCreateFamAsParent(_editingId);
+      if (!fam.chil.includes(rel.targetId)) fam.chil.push(rel.targetId);
+      if (!target.famc.includes(fam.id)) target.famc.push(fam.id);
+
+    } else if (rel.type === 'spouse') {
+      // Create a new family with both as spouses
+      let existingFam = null;
+      // Check if they already share a family as spouses
+      for (const fid of i.fams) {
+        const f = families.get(fid);
+        if (!f) continue;
+        if (f.husb === rel.targetId || f.wife === rel.targetId) { existingFam = f; break; }
+      }
+      if (!existingFam) {
+        const famId = getNextFamId();
+        const newFam = {
+          id: famId, husb: null, wife: null, chil: [],
+          marr: { date: '', plac: '' }, div: false
+        };
+        // Assign husb/wife based on sex
+        if (i.sex === 'M') { newFam.husb = _editingId; newFam.wife = rel.targetId; }
+        else if (i.sex === 'F') { newFam.wife = _editingId; newFam.husb = rel.targetId; }
+        else if (target.sex === 'M') { newFam.husb = rel.targetId; newFam.wife = _editingId; }
+        else if (target.sex === 'F') { newFam.wife = rel.targetId; newFam.husb = _editingId; }
+        else { newFam.husb = _editingId; newFam.wife = rel.targetId; }
+        families.set(famId, newFam);
+        if (!i.fams.includes(famId)) i.fams.push(famId);
+        if (!target.fams.includes(famId)) target.fams.push(famId);
+      }
+    }
+  }
+  _pendingRelations = [];
+
   // Update label on graph (existing nodes)
   if (labelSel) {
     labelSel.filter(d => d.id === _editingId).text(i.displayName);
@@ -1552,7 +1879,7 @@ function commitIndiEdit() {
   const id = _editingId;
   _editingId = null; _editingType = null;
 
-  if (_isNewRecord) {
+  if (_isNewRecord || needsRebuild) {
     _isNewRecord = false;
     const sorted = buildSurnameColorMap();
     buildSurnameList(sorted);
@@ -1560,6 +1887,9 @@ function commitIndiEdit() {
     if (!svgSel) initSVG();
     renderGraph();
     document.getElementById('dl-btn').style.display = 'inline-block';
+    document.getElementById('center-view-btn').style.display = 'inline-block';
+    document.getElementById('center-view-btn').disabled = false;
+    document.getElementById('center-person-btn').style.display = 'inline-block';
     document.getElementById('view-toggle-btn').disabled = false;
     document.getElementById('status').textContent =
       `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
@@ -1568,6 +1898,27 @@ function commitIndiEdit() {
   }
 
   showIndiDetail(id);
+}
+
+// Helper: find an existing family where personId is husb or wife, or create one
+function _findOrCreateFamAsParent(personId) {
+  const person = individuals.get(personId);
+  // Try to find an existing family where this person is a spouse
+  for (const fid of (person?.fams || [])) {
+    const f = families.get(fid);
+    if (f) return f;
+  }
+  // Create a new family with this person as a spouse
+  const famId = getNextFamId();
+  const fam = {
+    id: famId, husb: null, wife: null, chil: [],
+    marr: { date: '', plac: '' }, div: false
+  };
+  if (person?.sex === 'F') fam.wife = personId;
+  else fam.husb = personId;
+  families.set(famId, fam);
+  if (person && !person.fams.includes(famId)) person.fams.push(famId);
+  return fam;
 }
 
 function showFamEditForm(id) {
@@ -1608,8 +1959,8 @@ function commitFamEdit() {
   if (nodeSel) {
     nodeSel.filter(d => d.id === _editingId)
       .select('polygon')
-      .attr('fill',         f.div ? '#c0392b' : '#1a6e3a')
-      .attr('stroke',       f.div ? '#e74c3c' : '#27ae60')
+      .attr('fill',         f.div ? nodeColors.famDiv : nodeColors.fam)
+      .attr('stroke',       f.div ? nodeColors.famDiv : nodeColors.fam)
       .attr('stroke-dasharray', f.div ? '3 2' : null);
   }
 
@@ -1621,6 +1972,7 @@ function commitFamEdit() {
 function cancelEdit() {
   const id = _editingId;
   _editingId = null; _editingType = null;
+  _pendingRelations = [];
   if (_isNewRecord) {
     _isNewRecord = false;
     // Discard the stub record that was created for this cancelled new entry
@@ -1656,6 +2008,12 @@ function getNextIndiId() {
   let i = 1;
   while (individuals.has(`@I${i}@`)) i++;
   return `@I${i}@`;
+}
+
+function getNextFamId() {
+  let i = 1;
+  while (families.has(`@F${i}@`)) i++;
+  return `@F${i}@`;
 }
 
 function addNewPerson() {
@@ -1813,21 +2171,28 @@ function initGraph3D() {
     ltype:  l.ltype,
   }));
 
-  // Track mouse for tooltip positioning
+  // Track mouse/touch for tooltip positioning
   container.addEventListener('mousemove', e => {
     _3dMousePos.x = e.clientX;
     _3dMousePos.y = e.clientY;
   });
+  container.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      _3dMousePos.x = e.touches[0].clientX;
+      _3dMousePos.y = e.touches[0].clientY;
+    }
+  }, { passive: true });
 
   graph3d = ForceGraph3D()(container)
-    .backgroundColor('#04060f')
+    .backgroundColor(_3dAppearance.bgColor)
     .width(container.clientWidth)
     .height(container.clientHeight)
     .graphData({ nodes: gNodes, links: gLinks })
     // ── Nodes ──
     .nodeColor(n => compute3DNodeColor(n))
-    .nodeVal(n => n.type === 'FAM' ? 1.2 : (n.data.deceased ? 2 : 3))
-    .nodeOpacity(0.9)
+    .nodeVal(n => n.type === 'FAM' ? 0.4 : (n.data.deceased ? 0.7 : 1))
+    .nodeRelSize(_3dAppearance.nodeRelSize)
+    .nodeOpacity(_3dAppearance.nodeOpacity)
     .nodeResolution(12)
     .nodeLabel(n => {
       if (n.type !== 'INDI') return '';
@@ -1841,8 +2206,8 @@ function initGraph3D() {
     })
     // ── Links ──
     .linkColor(l => linkColor(l))
-    .linkWidth(l => l.ltype === 'spouse' ? 0.9 : 0.6)
-    .linkOpacity(0.55)
+    .linkWidth(_3dAppearance.linkWidth)
+    .linkOpacity(_3dAppearance.linkOpacity)
     // ── Events ──
     .onNodeClick((n, evt) => {
       if (evt) evt.stopPropagation();
@@ -1877,16 +2242,45 @@ function initGraph3D() {
     _orbitControls3d.rotateSpeed    = 0.45;
     _orbitControls3d.panSpeed       = 0.9;
     _orbitControls3d.enableZoom     = false;   // zoom handled manually for zoom-to-cursor
+    _orbitControls3d.enablePan      = true;
     _orbitControls3d.minDistance    = 20;
     _orbitControls3d.maxDistance    = 14000;
+    // Touch: 1-finger = ROTATE, 2-finger = PAN (zoom handled by our pinch handler)
+    if (_orbitControls3d.touches) {
+      _orbitControls3d.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_PAN,
+      };
+    }
     cam.up.set(0, 1, 0);
     _orbitControls3d.update();
 
     // Zoom toward cursor position (scroll wheel)
     domEl.addEventListener('wheel', _onWheel3D, { passive: false });
 
+    // Touch pinch-to-zoom (since OrbitControls zoom is disabled for custom cursor-zoom)
+    domEl.addEventListener('touchstart', _onTouch3DStart, { passive: false });
+    domEl.addEventListener('touchmove', _onTouch3DMove, { passive: false });
+    domEl.addEventListener('touchend', _onTouch3DEnd, { passive: true });
+
     // Redirect the render-loop's update() call to our OrbitControls + orbit target tracking
     old.update = () => { _tickOrbitTarget(); _orbitControls3d.update(); };
+
+    // ── Lighting setup — replace ForceGraph3D defaults ──
+    const scene = graph3d.scene();
+    // Remove existing lights
+    const oldLights = [];
+    scene.traverse(obj => { if (obj.isLight) oldLights.push(obj); });
+    oldLights.forEach(l => { if (l.parent) l.parent.remove(l); });
+
+    // Add controllable ambient light
+    _3dAmbientLight = new THREE.AmbientLight(0xffffff, _3dAppearance.ambientLight);
+    scene.add(_3dAmbientLight);
+
+    // Add controllable point light (attached to camera so it follows view)
+    _3dPointLight = new THREE.PointLight(0xffffff, _3dAppearance.pointLight, 0);
+    cam.add(_3dPointLight);
+    scene.add(cam); // ensure camera is part of scene graph so its children render
 
     apply3DPhysics();
     build3DTimeline();
@@ -1926,10 +2320,10 @@ function apply3DPhysics() {
 function refresh3D() {
   if (!graph3d) return;
   const hasHL = hlSet.size > 0;
+  const gd = graph3d.graphData();
 
-  // Re-assign color accessor — triggers internal material rebuild for changed nodes
+  // Update accessors for future mesh creation
   graph3d.nodeColor(n => compute3DNodeColor(n));
-
   graph3d.linkColor(l => {
     if (!hasHL) return linkColor(l);
     const sid = typeof l.source === 'object' ? l.source.id : l.source;
@@ -1937,6 +2331,32 @@ function refresh3D() {
     return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
   });
 
+  // Directly update existing Three.js materials on cached node objects
+  for (const n of gd.nodes) {
+    const obj = n.__threeObj;
+    if (!obj) continue;
+    const color = new THREE.Color(compute3DNodeColor(n));
+    // The default sphere is a Mesh child, or the object itself
+    obj.traverse(child => {
+      if (child.isMesh && child.material && child.material.color) {
+        child.material.color.copy(color);
+      }
+    });
+  }
+
+  // Directly update existing Three.js materials on cached link objects
+  for (const l of gd.links) {
+    const obj = l.__lineObj;
+    if (!obj) continue;
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    const lColor = (!hasHL) ? linkColor(l)
+      : (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
+    const c = new THREE.Color(lColor);
+    obj.traverse(child => {
+      if (child.material && child.material.color) child.material.color.copy(c);
+    });
+  }
 }
 
 // ── Link color customization ──
@@ -1957,6 +2377,21 @@ function resetLinkColors() {
     if (el) el.value = val;
   }
   updateLinkColors();
+}
+
+// ── Node color customization ──
+function updateNodeColors() {
+  refreshNodeColors();
+}
+
+function resetNodeColors() {
+  Object.assign(nodeColors, NODE_COLOR_DEFAULTS);
+  const map = { male: 'nc-male', female: 'nc-female', unknown: 'nc-unknown', fam: 'nc-fam', famDiv: 'nc-fam-div' };
+  for (const [key, id] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el) el.value = NODE_COLOR_DEFAULTS[key];
+  }
+  updateNodeColors();
 }
 
 // ── 3D Timeline (Three.js scene objects) ──
@@ -2242,6 +2677,8 @@ document.addEventListener('keydown', e => {
     case 'a': case 'A': toggleAllSurnames(true);  break;
     case 'n': case 'N': toggleAllSurnames(false); break;
     case 'f': case 'F': zoomToFit();              break;
+    case 'c': case 'C': centerView();             break;
+    case 'p': case 'P': centerOnPerson();         break;
     case 'r': case 'R': resetHighlight();         break;
     case 'Escape':      closeDetailPanel();       break;
     case '+': case '=': if (currentView === '2d' && simulation) reheatSimulation(); break;
@@ -2281,6 +2718,10 @@ function syncPhysicsUI() {
 // Attach listeners after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
   renderPresetList();
+
+  // Touch support
+  _initPanelSwipe();
+  _initTouchDragGuard();
 
   for (const { sid, vid, key, fmt } of SLIDER_MAP) {
     const el = document.getElementById(sid);
@@ -2336,6 +2777,58 @@ document.addEventListener('DOMContentLoaded', () => {
       updateLinkColors();
     });
   }
+
+  // Node color pickers
+  const NC_MAP = { male: 'nc-male', female: 'nc-female', unknown: 'nc-unknown', fam: 'nc-fam', famDiv: 'nc-fam-div' };
+  for (const [key, id] of Object.entries(NC_MAP)) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', function () {
+      nodeColors[key] = this.value;
+      updateNodeColors();
+    });
+  }
+
+  // ── 3D appearance controls ──
+  document.getElementById('ap-bg-color')?.addEventListener('input', function () {
+    _3dAppearance.bgColor = this.value;
+    if (graph3d) graph3d.backgroundColor(this.value);
+  });
+
+  document.getElementById('ap-node-opacity')?.addEventListener('input', function () {
+    _3dAppearance.nodeOpacity = +this.value;
+    document.getElementById('ap-node-opacity-val').textContent = (+this.value).toFixed(2);
+    if (graph3d) graph3d.nodeOpacity(+this.value);
+  });
+
+  document.getElementById('ap-link-opacity')?.addEventListener('input', function () {
+    _3dAppearance.linkOpacity = +this.value;
+    document.getElementById('ap-link-opacity-val').textContent = (+this.value).toFixed(2);
+    if (graph3d) graph3d.linkOpacity(+this.value);
+  });
+
+  document.getElementById('ap-ambient')?.addEventListener('input', function () {
+    _3dAppearance.ambientLight = +this.value;
+    document.getElementById('ap-ambient-val').textContent = (+this.value).toFixed(1);
+    if (_3dAmbientLight) _3dAmbientLight.intensity = +this.value;
+  });
+
+  document.getElementById('ap-point')?.addEventListener('input', function () {
+    _3dAppearance.pointLight = +this.value;
+    document.getElementById('ap-point-val').textContent = (+this.value).toFixed(1);
+    if (_3dPointLight) _3dPointLight.intensity = +this.value;
+  });
+
+  document.getElementById('ap-link-width')?.addEventListener('input', function () {
+    _3dAppearance.linkWidth = +this.value;
+    document.getElementById('ap-link-width-val').textContent = (+this.value).toFixed(1);
+    if (graph3d) graph3d.linkWidth(+this.value);
+  });
+
+  document.getElementById('ap-node-size')?.addEventListener('input', function () {
+    _3dAppearance.nodeRelSize = +this.value;
+    document.getElementById('ap-node-size-val').textContent = (+this.value).toFixed(1);
+    if (graph3d) graph3d.nodeRelSize(+this.value);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2348,6 +2841,7 @@ window.resetHighlight    = resetHighlight;
 window.closeDetailPanel  = closeDetailPanel;
 window.toggleAllSurnames = toggleAllSurnames;
 window.resetLinkColors   = resetLinkColors;
+window.resetNodeColors   = resetNodeColors;
 window.zoomToFit         = zoomToFit;
 window.reheatSimulation  = reheatSimulation;
 window.resetPhysics      = resetPhysics;
@@ -2362,3 +2856,7 @@ window.downloadGEDCOM    = downloadGEDCOM;
 window.toggleView        = toggleView;
 window.toggleSidebar     = toggleSidebar;
 window.addNewPerson      = addNewPerson;
+window.centerView        = centerView;
+window.centerOnPerson    = centerOnPerson;
+window.addRelation       = addRelation;
+window.removeRelation    = removeRelation;
