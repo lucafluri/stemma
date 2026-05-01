@@ -39,18 +39,18 @@ const PALETTE = [
 // PHYSICS PARAMETERS  (single source of truth)
 // ═══════════════════════════════════════════════════════════════
 const PHYSICS_DEFAULTS = {
-  spouseDist:     50,
-  parentDist:     65,
-  spouseStrength: 0.45,
-  parentStrength: 0.65,
-  chargeIndi:     170,
-  chargeFam:      25,
-  chargeDistMax:  380,
-  collideRadius:  16,
-  yStrength:      0.35,
-  centerStrength: 0.04,
-  velocityDecay:  0.40,
-  alphaDecay:     0.028,
+  spouseDist:     31,
+  parentDist:     53,
+  spouseStrength: 1.00,
+  parentStrength: 0.78,
+  chargeIndi:     600,
+  chargeFam:      200,
+  chargeDistMax:  1000,
+  collideRadius:  50,
+  yStrength:      0.00,
+  centerStrength: 0.000,
+  velocityDecay:  0.05,
+  alphaDecay:     0.005,
 };
 
 let physicsParams = { ...PHYSICS_DEFAULTS };
@@ -68,7 +68,7 @@ let show3DNames    = true;   // render name+year labels above nodes in 3D
 let _nodeDragEnabled = false; // node dragging disabled by default
 let _timeline3DObj    = null;   // THREE.Group holding timeline meshes in the 3D scene
 let _3dYHalfSpan      = 500;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
-let _3dFontSize       = 14;    // name label font size in 3D view
+let _3dFontSize       = 18;    // name label font size in 3D view
 let _orbitControls3d  = null;  // OrbitControls instance (replaces TrackballControls)
 let _orbitTargetAnim  = null;  // { from, to, start, duration } for smooth orbit target transition
 let _orbitTrackNodeId = null;  // node id whose live position the orbit target tracks
@@ -80,8 +80,8 @@ let _3dAppearance = {
   linkOpacity: 0.45,
   ambientLight: 0.4,
   pointLight:  0.8,
-  linkWidth:   0.8,
-  nodeRelSize: 4,
+  linkWidth:   2.4,
+  nodeRelSize: 2.0,
 };
 let _3dAmbientLight = null;
 let _3dPointLight   = null;
@@ -769,6 +769,7 @@ function renderGraph() {
     .on('click', (evt, d) => {
       evt.stopPropagation();
       if (wasTouchDrag()) return;
+      if (d.type === 'INDI' && _tryPickRelationPerson(d.id)) return;
       if (d.type === 'INDI') showIndiDetail(d.id);
       else showFamDetail(d.id);
     })
@@ -961,6 +962,57 @@ function applyPhysicsParams() {
 function reheatSimulation() {
   if (!simulation) return;
   simulation.alpha(0.5).restart();
+}
+
+let _autoSettleTimer = null;
+
+function _settleBarStart() {
+  const bar = document.getElementById('settle-bar');
+  if (!bar) return;
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  bar.style.opacity = '1';
+  requestAnimationFrame(() => {
+    bar.style.transition = 'width 3s linear';
+    bar.style.width = '65%';
+  });
+}
+
+function _settleBarFinish() {
+  const bar = document.getElementById('settle-bar');
+  if (!bar) return;
+  bar.style.transition = 'width 4s linear';
+  bar.style.width = '100%';
+  setTimeout(() => { bar.style.transition = 'none'; bar.style.opacity = '0'; bar.style.width = '0%'; }, 4100);
+}
+
+function autoSettle() {
+  if (_autoSettleTimer) { clearTimeout(_autoSettleTimer); _autoSettleTimer = null; }
+
+  _settleBarStart();
+
+  if (currentView === '3d') {
+    if (!graph3d) return;
+    graph3d.d3AlphaDecay(0.04);
+    graph3d.d3ReheatSimulation();
+    _autoSettleTimer = setTimeout(() => {
+      if (graph3d) {
+        graph3d.d3AlphaDecay(physicsParams.alphaDecay);
+        graph3d.d3ReheatSimulation();
+      }
+      _settleBarFinish();
+      _autoSettleTimer = null;
+    }, 3000);
+  } else {
+    if (!simulation) return;
+    const savedDecay = physicsParams.alphaDecay;
+    simulation.alphaDecay(0.04).alpha(1).restart();
+    _autoSettleTimer = setTimeout(() => {
+      if (simulation) simulation.alphaDecay(savedDecay).alpha(0.3).restart();
+      _settleBarFinish();
+      _autoSettleTimer = null;
+    }, 3000);
+  }
 }
 
 function resetPhysics() {
@@ -1541,6 +1593,7 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       document.getElementById('center-view-btn').style.display = 'inline-block';
       document.getElementById('center-view-btn').disabled = false;
       document.getElementById('center-person-btn').style.display = 'inline-block';
+      document.getElementById('relation-tool-btn').disabled = false;
       window._gedcomFilename = file.name;
 
       // Ensure we're in 3D view
@@ -1548,6 +1601,7 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       document.getElementById('graph-container').style.display = 'none';
       document.getElementById('graph-3d-container').style.display = 'block';
       initGraph3D();
+      setTimeout(autoSettle, 400); // let initGraph3D finish before annealing
 
     } catch (err) {
       document.getElementById('loading-overlay').style.display = 'none';
@@ -1926,11 +1980,13 @@ function commitIndiEdit() {
     document.getElementById('center-view-btn').style.display = 'inline-block';
     document.getElementById('center-view-btn').disabled = false;
     document.getElementById('center-person-btn').style.display = 'inline-block';
+    document.getElementById('relation-tool-btn').disabled = false;
     document.getElementById('view-toggle-btn').disabled = false;
     document.getElementById('status').textContent =
       `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
     _firstLoad = true;
     buildAndRunSimulation();
+    setTimeout(autoSettle, 200);
   }
 
   showIndiDetail(id);
@@ -2247,6 +2303,7 @@ function initGraph3D() {
     // ── Events ──
     .onNodeClick((n, evt) => {
       if (evt) evt.stopPropagation();
+      if (n.type === 'INDI' && _tryPickRelationPerson(n.id)) return;
       if (n.type === 'INDI') showIndiDetail(n.id);
       else showFamDetail(n.id);
       _setOrbitTarget3D(n.type === 'INDI' ? n.id : null);
@@ -2681,95 +2738,134 @@ function export3DTopDown() {
 
   const origHalfSpan = _3dYHalfSpan;
 
-  // Flatten all nodes to Y=0 so the top-down view is a true 2D projection
+  // Flatten all nodes to Y=0, let XZ forces settle
   _3dYHalfSpan = 0;
   applyTimelineYFix();
   graph3d.d3ReheatSimulation();
 
-  // Give the simulation time to settle in XZ before capturing
   setTimeout(() => {
-    const renderer = graph3d.renderer();
-    const scene    = graph3d.scene();
-    const camera   = graph3d.camera();
-
-    // Compute graph centroid and XZ extent
     const gd = graph3d.graphData();
-    let cx = 0, cz = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const n of gd.nodes) {
-      const nx = n.x || 0, nz = n.z || 0;
-      cx += nx; cz += nz;
-      x0 = Math.min(x0, nx); x1 = Math.max(x1, nx);
-      z0 = Math.min(z0, nz); z1 = Math.max(z1, nz);
+
+    // Map id → XZ position (top-down projection: x stays x, 3D-z becomes canvas-y)
+    const posMap = new Map();
+    for (const n of gd.nodes) posMap.set(n.id, { x: n.x || 0, y: n.z || 0, n });
+
+    // World-space bounds
+    let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
+    for (const [, p] of posMap) {
+      wx0 = Math.min(wx0, p.x); wx1 = Math.max(wx1, p.x);
+      wy0 = Math.min(wy0, p.y); wy1 = Math.max(wy1, p.y);
     }
-    const count = gd.nodes.length || 1;
-    cx /= count; cz /= count;
 
-    // Choose export canvas size proportional to graph XZ extent (min 2048)
-    const graphW = Math.max(x1 - x0, 1);
-    const graphH = Math.max(z1 - z0, 1);
-    const EXPORT_LONG = Math.min(16384, renderer.capabilities.maxTextureSize);
-    const aspect = graphW / graphH;
-    const EXPORT_W = aspect >= 1 ? EXPORT_LONG : Math.round(EXPORT_LONG * aspect);
-    const EXPORT_H = aspect >= 1 ? Math.round(EXPORT_LONG / aspect) : EXPORT_LONG;
+    // Scale world coords → canvas pixels so the long side hits TARGET_LONG
+    const TARGET_LONG = 8192;
+    const worldW = wx1 - wx0 || 1;
+    const worldH = wy1 - wy0 || 1;
+    const scale  = TARGET_LONG / Math.max(worldW, worldH);
 
-    // Save camera state
-    const savedPos  = camera.position.clone();
-    const savedQuat = camera.quaternion.clone();
-    const savedUp   = camera.up.clone();
-    const savedNear = camera.near;
-    const savedFar  = camera.far;
-    const savedAspect = camera.aspect;
-    const savedFov    = camera.fov;
+    const MARGIN  = 120;
+    const CW = Math.round(worldW * scale) + MARGIN * 2;
+    const CH = Math.round(worldH * scale) + MARGIN * 2;
+    const toX = p => (p.x - wx0) * scale + MARGIN;
+    const toY = p => (p.y - wy0) * scale + MARGIN;
 
-    // Position camera directly above looking down; up = -Z so graph top = older gens
-    const CAM_HEIGHT = 5000;
-    camera.position.set(cx, CAM_HEIGHT, cz);
-    camera.up.set(0, 0, -1);
-    camera.lookAt(cx, 0, cz);
-    camera.near  = 1;
-    camera.far   = CAM_HEIGHT * 2;
-    camera.aspect = EXPORT_W / EXPORT_H;
-    camera.fov   = 2 * Math.atan((Math.max(graphW, graphH) * 0.6) / CAM_HEIGHT) * (180 / Math.PI);
-    camera.updateProjectionMatrix();
+    // Font sizes scale with world→canvas ratio
+    const FONT_NAME = Math.round(_3dFontSize * scale * 0.45);   // matches sprite scale
+    const FONT_YEAR = Math.round(FONT_NAME * 0.72);
+    const PAD_X = Math.round(FONT_NAME * 0.6);
+    const PAD_Y = Math.round(FONT_NAME * 0.3);
+    const FAM_R  = Math.max(4, Math.round(scale * 1.5));
 
-    // Render into an offscreen WebGLRenderTarget — doesn't touch the visible canvas
-    const rt = new THREE.WebGLRenderTarget(EXPORT_W, EXPORT_H, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-    });
-    renderer.setRenderTarget(rt);
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
+    const canvas = document.createElement('canvas');
+    canvas.width  = CW;
+    canvas.height = CH;
+    const ctx = canvas.getContext('2d');
 
-    // Read pixels (WebGL is Y-flipped relative to canvas)
-    const pixBuf = new Uint8Array(EXPORT_W * EXPORT_H * 4);
-    renderer.readRenderTargetPixels(rt, 0, 0, EXPORT_W, EXPORT_H, pixBuf);
-    rt.dispose();
+    ctx.fillStyle = _3dAppearance.bgColor || '#04060f';
+    ctx.fillRect(0, 0, CW, CH);
 
-    // Flip Y and write into a 2D canvas for download
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width  = EXPORT_W;
-    outCanvas.height = EXPORT_H;
-    const ctx2d  = outCanvas.getContext('2d');
-    const imgData = ctx2d.createImageData(EXPORT_W, EXPORT_H);
-    for (let row = 0; row < EXPORT_H; row++) {
-      const src = (EXPORT_H - 1 - row) * EXPORT_W * 4;
-      imgData.data.set(pixBuf.subarray(src, src + EXPORT_W * 4), row * EXPORT_W * 4);
+    // Draw links
+    ctx.lineWidth = Math.max(1, scale * 0.4);
+    for (const lk of gd.links) {
+      const srcId = typeof lk.source === 'object' ? lk.source.id : (lk._src || lk.source);
+      const tgtId = typeof lk.target === 'object' ? lk.target.id : (lk._tgt || lk.target);
+      const s = posMap.get(srcId);
+      const t = posMap.get(tgtId);
+      if (!s || !t) continue;
+      const col = lk.ltype === 'spouse' ? linkColors.spouse
+                : lk.ltype === 'father' ? linkColors.father
+                : lk.ltype === 'mother' ? linkColors.mother
+                : linkColors.parent;
+      ctx.strokeStyle = col + 'aa';
+      ctx.beginPath();
+      ctx.moveTo(toX(s), toY(s));
+      ctx.lineTo(toX(t), toY(t));
+      ctx.stroke();
     }
-    ctx2d.putImageData(imgData, 0, 0);
 
-    // Restore camera
-    camera.position.copy(savedPos);
-    camera.quaternion.copy(savedQuat);
-    camera.up.copy(savedUp);
-    camera.near   = savedNear;
-    camera.far    = savedFar;
-    camera.aspect = savedAspect;
-    camera.fov    = savedFov;
-    camera.updateProjectionMatrix();
+    // Draw FAM diamonds
+    for (const [, p] of posMap) {
+      if (p.n.type !== 'FAM') continue;
+      const cx = toX(p), cy = toY(p);
+      const col = p.n.data?.div ? nodeColors.famDiv : nodeColors.fam;
+      ctx.fillStyle = col + 'cc';
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx,         cy - FAM_R);
+      ctx.lineTo(cx + FAM_R, cy);
+      ctx.lineTo(cx,         cy + FAM_R);
+      ctx.lineTo(cx - FAM_R, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
 
-    // Restore spread and Y pins
+    // Draw INDI label boxes
+    const tmpCtx = document.createElement('canvas').getContext('2d');
+    for (const [, p] of posMap) {
+      if (p.n.type !== 'INDI') continue;
+      const indi = p.n.data;
+      const name = indi.displayName || indi.name || p.n.id;
+      let born = indi.birthYear ? `*${indi.birthYear}` : '';
+      if (!born && _estimatedYears?.has(p.n.id)) born = `~${_estimatedYears.get(p.n.id)}`;
+      const died = indi.deceased ? '†' + (indi.death.date?.match(/\d{4}/)?.[0] ?? '') : '';
+      const yearLine = [born, died].filter(Boolean).join('  ');
+
+      tmpCtx.font = `bold ${FONT_NAME}px Arial`;
+      const nameW = tmpCtx.measureText(name).width;
+      tmpCtx.font = `${FONT_YEAR}px Arial`;
+      const yearW = yearLine ? tmpCtx.measureText(yearLine).width : 0;
+
+      const boxW = Math.ceil(Math.max(nameW, yearW)) + PAD_X * 2;
+      const boxH = FONT_NAME + (yearLine ? FONT_YEAR + Math.round(FONT_NAME * 0.15) : 0) + PAD_Y * 2;
+      const cx = toX(p), cy = toY(p);
+      const bx = cx - boxW / 2, by = cy - boxH / 2;
+
+      const textColor = _nameTextColor(p.n);
+
+      ctx.fillStyle = 'rgba(6,12,36,0.92)';
+      ctx.strokeStyle = textColor + '66';
+      ctx.lineWidth = Math.max(1, scale * 0.15);
+      ctx.beginPath();
+      ctx.roundRect(bx, by, boxW, boxH, Math.round(FONT_NAME * 0.3));
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.font = `bold ${FONT_NAME}px Arial`;
+      ctx.fillStyle = textColor;
+      ctx.fillText(name, cx, by + PAD_Y);
+
+      if (yearLine) {
+        ctx.font = `${FONT_YEAR}px Arial`;
+        ctx.fillStyle = textColor + 'bb';
+        ctx.fillText(yearLine, cx, by + PAD_Y + FONT_NAME + Math.round(FONT_NAME * 0.15));
+      }
+    }
+
+    // Restore
     _3dYHalfSpan = origHalfSpan;
     applyTimelineYFix();
     graph3d.d3ReheatSimulation();
@@ -2778,9 +2874,8 @@ function export3DTopDown() {
 
     const a = document.createElement('a');
     a.download = 'stammbaum_export.png';
-    a.href = outCanvas.toDataURL('image/png');
+    a.href = canvas.toDataURL('image/png');
     a.click();
-
   }, 2500);
 }
 
@@ -3035,6 +3130,253 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// RELATION TOOL
+// ═══════════════════════════════════════════════════════════════
+let _relSlotWaiting = null;   // 'A' | 'B' | null — which slot is awaiting a click
+let _relPersonA = null;
+let _relPersonB = null;
+
+function openRelationTool() {
+  document.getElementById('relation-panel').classList.add('panel-visible');
+  _renderRelationPanel();
+}
+
+function closeRelationTool() {
+  document.getElementById('relation-panel').classList.remove('panel-visible');
+  _relSlotWaiting = null;
+  document.body.classList.remove('relation-picking');
+}
+
+// Called by node clicks when the relation tool is waiting for a pick
+function _tryPickRelationPerson(id) {
+  if (!_relSlotWaiting) return false;
+  if (_relSlotWaiting === 'A') _relPersonA = id;
+  else                          _relPersonB = id;
+  _relSlotWaiting = null;
+  document.body.classList.remove('relation-picking');
+  _renderRelationPanel();
+  if (_relPersonA && _relPersonB) _computeAndShowRelation();
+  return true;
+}
+
+function _renderRelationPanel() {
+  const nameA = _relPersonA ? (individuals.get(_relPersonA)?.displayName || _relPersonA) : '—';
+  const nameB = _relPersonB ? (individuals.get(_relPersonB)?.displayName || _relPersonB) : '—';
+  document.getElementById('rel-name-a').textContent = nameA;
+  document.getElementById('rel-name-b').textContent = nameB;
+  document.getElementById('rel-pick-a').classList.toggle('rel-picking', _relSlotWaiting === 'A');
+  document.getElementById('rel-pick-b').classList.toggle('rel-picking', _relSlotWaiting === 'B');
+}
+
+function relPickSlot(slot) {
+  _relSlotWaiting = _relSlotWaiting === slot ? null : slot;
+  document.body.classList.toggle('relation-picking', !!_relSlotWaiting);
+  _renderRelationPanel();
+}
+
+// ── Relationship algorithm ────────────────────────────────────
+function _computeAndShowRelation() {
+  const idA = _relPersonA, idB = _relPersonB;
+  const result = document.getElementById('rel-result');
+  if (!idA || !idB) { result.textContent = ''; return; }
+  if (idA === idB)  { result.textContent = 'Dieselbe Person'; return; }
+
+  const indiA = individuals.get(idA);
+  const indiB = individuals.get(idB);
+  if (!indiA || !indiB) { result.textContent = 'Person nicht gefunden'; return; }
+
+  // --- Check spouse ---
+  for (const famId of indiA.fams) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+    if (fam.husb === idB || fam.wife === idB) {
+      result.innerHTML = _relLine('💍', 'Ehepartner/in');
+      return;
+    }
+  }
+
+  // --- Collect ancestors with generation depth ---
+  // Returns Map<id, number>  (0 = self, 1 = parent, …)
+  function ancestors(startId) {
+    const map = new Map([[startId, 0]]);
+    const queue = [[startId, 0]];
+    while (queue.length) {
+      const [id, gen] = queue.shift();
+      const indi = individuals.get(id);
+      if (!indi) continue;
+      for (const famId of indi.famc) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        for (const pid of [fam.husb, fam.wife]) {
+          if (pid && !map.has(pid)) {
+            map.set(pid, gen + 1);
+            queue.push([pid, gen + 1]);
+          }
+        }
+      }
+    }
+    return map;
+  }
+
+  const ancA = ancestors(idA);
+  const ancB = ancestors(idB);
+
+  // --- Direct descendant / ancestor ---
+  if (ancA.has(idB)) {
+    const g = ancA.get(idB);
+    result.innerHTML = _relLine(_sexIcon(indiB), _ancestorLabel(g, indiB.sex));
+    return;
+  }
+  if (ancB.has(idA)) {
+    const g = ancB.get(idA);
+    result.innerHTML = _relLine(_sexIcon(indiA), _descendantLabel(g, indiA.sex));
+    return;
+  }
+
+  // --- Find lowest common ancestor(s) ---
+  let bestGenA = Infinity, bestGenB = Infinity, lcas = [];
+  for (const [id, gA] of ancA) {
+    if (!ancB.has(id)) continue;
+    const gB = ancB.get(id);
+    const total = gA + gB;
+    if (total < bestGenA + bestGenB) {
+      bestGenA = gA; bestGenB = gB; lcas = [id];
+    } else if (total === bestGenA + bestGenB) {
+      lcas.push(id);
+    }
+  }
+
+  if (!lcas.length) {
+    // Fall back to BFS path for step/in-law relations
+    result.innerHTML = _relLine('🔗', _bfsPathLabel(idA, idB));
+    return;
+  }
+
+  // --- Classify via LCA ---
+  // siblings: genA=1, genB=1
+  if (bestGenA === 1 && bestGenB === 1) {
+    // full vs half sibling: check if they share both parents
+    const parentsA = new Set();
+    for (const famId of indiA.famc) {
+      const fam = families.get(famId);
+      if (fam) { if (fam.husb) parentsA.add(fam.husb); if (fam.wife) parentsA.add(fam.wife); }
+    }
+    const parentsB = new Set();
+    for (const famId of indiB.famc) {
+      const fam = families.get(famId);
+      if (fam) { if (fam.husb) parentsB.add(fam.husb); if (fam.wife) parentsB.add(fam.wife); }
+    }
+    const shared = [...parentsA].filter(p => parentsB.has(p)).length;
+    const label = shared >= 2 ? _siblingLabel(indiB.sex) : _halfSiblingLabel(indiB.sex);
+    result.innerHTML = _relLine(_sexIcon(indiB), label);
+    return;
+  }
+
+  // aunt/uncle: genA=1, genB=2 (B is grandparent of A's parent)
+  if (bestGenA === 1 && bestGenB === 2) {
+    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? 'Onkel' : indiB.sex === 'F' ? 'Tante' : 'Onkel/Tante');
+    return;
+  }
+  if (bestGenA === 2 && bestGenB === 1) {
+    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? 'Neffe' : indiA.sex === 'F' ? 'Nichte' : 'Neffe/Nichte');
+    return;
+  }
+
+  // great-aunt/uncle
+  if (bestGenA === 1 && bestGenB === 3) {
+    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? 'Großonkel' : indiB.sex === 'F' ? 'Großtante' : 'Großonkel/-tante');
+    return;
+  }
+  if (bestGenA === 3 && bestGenB === 1) {
+    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? 'Großneffe' : indiA.sex === 'F' ? 'Großnichte' : 'Großneffe/-nichte');
+    return;
+  }
+
+  // cousins: both ≥ 2 from LCA
+  const degree  = Math.min(bestGenA, bestGenB) - 1;   // 1st cousin = degree 1
+  const removed = Math.abs(bestGenA - bestGenB);
+  result.innerHTML = _relLine('👥', _cousinLabel(degree, removed, indiB.sex));
+}
+
+function _relLine(icon, text) {
+  return `<span class="rel-icon">${icon}</span><span class="rel-text">${text}</span>`;
+}
+function _sexIcon(indi) {
+  return indi.sex === 'M' ? '👨' : indi.sex === 'F' ? '👩' : '🧑';
+}
+
+function _ancestorLabel(gen, sex) {
+  const m = sex === 'M', f = sex === 'F';
+  if (gen === 1) return m ? 'Vater' : f ? 'Mutter' : 'Elternteil';
+  if (gen === 2) return m ? 'Großvater' : f ? 'Großmutter' : 'Großelternteil';
+  const prefix = 'Ur-'.repeat(gen - 2);
+  return prefix + (m ? 'Urgroßvater' : f ? 'Urgroßmutter' : 'Urgroßelternteil');
+}
+function _descendantLabel(gen, sex) {
+  const m = sex === 'M', f = sex === 'F';
+  if (gen === 1) return m ? 'Sohn' : f ? 'Tochter' : 'Kind';
+  if (gen === 2) return m ? 'Enkel' : f ? 'Enkelin' : 'Enkelkind';
+  const prefix = 'Ur-'.repeat(gen - 2);
+  return prefix + (m ? 'Urenkel' : f ? 'Urenkelin' : 'Urenkelkind');
+}
+function _siblingLabel(sex) {
+  return sex === 'M' ? 'Bruder' : sex === 'F' ? 'Schwester' : 'Geschwister';
+}
+function _halfSiblingLabel(sex) {
+  return sex === 'M' ? 'Halbbruder' : sex === 'F' ? 'Halbschwester' : 'Halbgeschwister';
+}
+function _cousinLabel(degree, removed, sex) {
+  let base;
+  if (degree === 1) base = sex === 'F' ? 'Cousine' : 'Cousin';
+  else              base = (sex === 'F' ? 'Cousine' : 'Cousin') + ` ${degree}. Grades`;
+  return removed > 0 ? `${base}, ${removed}× entfernt` : base;
+}
+
+// BFS path label — fallback for step/in-law/blended families
+function _bfsPathLabel(idA, idB) {
+  // Build full undirected adjacency including spouses
+  const adj = new Map();
+  const edge = (a, b, type) => {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push({ id: b, type });
+  };
+  for (const [id, indi] of individuals) {
+    for (const famId of indi.famc) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      if (fam.husb) { edge(id, fam.husb, 'parent'); edge(fam.husb, id, 'child'); }
+      if (fam.wife) { edge(id, fam.wife, 'parent'); edge(fam.wife, id, 'child'); }
+    }
+    for (const famId of indi.fams) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (sp) edge(id, sp, 'spouse');
+    }
+  }
+  const visited = new Map([[idA, null]]);
+  const queue = [idA];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur === idB) {
+      // Reconstruct path
+      const path = [];
+      let c = cur;
+      while (c) { path.unshift(c); c = visited.get(c)?.from; }
+      const steps = path.length - 1;
+      return steps > 0 ? `${steps} Verwandtschaftsschritte entfernt` : 'Verbunden';
+    }
+    for (const nb of (adj.get(cur) || [])) {
+      if (!visited.has(nb.id)) {
+        visited.set(nb.id, { from: cur });
+        queue.push(nb.id);
+      }
+    }
+  }
+  return 'Keine Verbindung gefunden';
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Expose for inline onclick handlers
 // ═══════════════════════════════════════════════════════════════
 window.showIndiDetail    = showIndiDetail;
@@ -3049,6 +3391,7 @@ window.resetLinkColors   = resetLinkColors;
 window.resetNodeColors   = resetNodeColors;
 window.zoomToFit         = zoomToFit;
 window.reheatSimulation  = reheatSimulation;
+window.autoSettle        = autoSettle;
 window.resetPhysics      = resetPhysics;
 window.startEdit         = startEdit;
 window.commitIndiEdit    = commitIndiEdit;
@@ -3060,6 +3403,9 @@ window.applyPreset       = applyPreset;
 window.downloadGEDCOM    = downloadGEDCOM;
 window.export3DTopDown   = export3DTopDown;
 window.toggleNodeDrag    = toggleNodeDrag;
+window.openRelationTool  = openRelationTool;
+window.closeRelationTool = closeRelationTool;
+window.relPickSlot       = relPickSlot;
 window.toggleView        = toggleView;
 window.toggleSidebar     = toggleSidebar;
 window.addNewPerson      = addNewPerson;

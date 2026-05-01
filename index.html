@@ -8,6 +8,8 @@
 </head>
 <body>
 
+<div id="settle-bar"></div>
+
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Menü öffnen">&#9776;</button>
   <h1>&#127795; Stammbaum</h1>
@@ -17,6 +19,7 @@
   <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
+  <button id="relation-tool-btn" onclick="openRelationTool()" title="Verwandtschaft berechnen" disabled>&#x1F517; Verwandtschaft</button>
   <div id="status">Keine Datei geladen &mdash; bitte GEDCOM Datei laden</div>
 </div>
 
@@ -55,6 +58,7 @@
       <button class="sidebar-btn" onclick="toggleAllSurnames(false)">Alle ausblenden</button>
       <button class="sidebar-btn" onclick="resetHighlight()">Hervorhebung aufheben</button>
       <button class="sidebar-btn" onclick="zoomToFit()">Alles anzeigen</button>
+      <button class="sidebar-btn" onclick="autoSettle()">&#x2744; Auto-Abkühlung</button>
     </div>
 
     <details id="link-colors-panel">
@@ -140,23 +144,23 @@
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
           <span class="phys-label">Linien-Breite</span>
-          <span class="phys-value" id="ap-link-width-val">0.8</span>
+          <span class="phys-value" id="ap-link-width-val">2.4</span>
         </div>
-        <input type="range" class="phys-slider" id="ap-link-width" min="0.1" max="4" step="0.1" value="0.8">
+        <input type="range" class="phys-slider" id="ap-link-width" min="0.1" max="4" step="0.1" value="2.4">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
           <span class="phys-label">Knotengrösse</span>
-          <span class="phys-value" id="ap-node-size-val">4</span>
+          <span class="phys-value" id="ap-node-size-val">2.0</span>
         </div>
-        <input type="range" class="phys-slider" id="ap-node-size" min="1" max="12" step="0.5" value="4">
+        <input type="range" class="phys-slider" id="ap-node-size" min="1" max="12" step="0.5" value="2">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
           <span class="phys-label">Beschriftungsgrösse</span>
-          <span class="phys-value" id="ap-font-size-val">14</span>
+          <span class="phys-value" id="ap-font-size-val">18</span>
         </div>
-        <input type="range" class="phys-slider" id="ap-font-size" min="8" max="32" step="1" value="14">
+        <input type="range" class="phys-slider" id="ap-font-size" min="8" max="32" step="1" value="18">
       </div>
       <button class="sidebar-btn" onclick="export3DTopDown()" style="margin-top:6px">&#x1F4E5; Export Top-Down</button>
     </details>
@@ -170,17 +174,17 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Ehepaar</span>
-            <span class="phys-value" id="pv-spouse-dist">50</span>
+            <span class="phys-value" id="pv-spouse-dist">31</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-spouse-dist" min="10" max="200" step="1" value="50">
+          <input class="phys-slider" type="range" id="ps-spouse-dist" min="10" max="200" step="1" value="31">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Eltern–Kind</span>
-            <span class="phys-value" id="pv-parent-dist">65</span>
+            <span class="phys-value" id="pv-parent-dist">53</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-parent-dist" min="10" max="200" step="1" value="65">
+          <input class="phys-slider" type="range" id="ps-parent-dist" min="10" max="200" step="1" value="53">
         </div>
 
         <div class="phys-section-label">Bindungsstärke</div>
@@ -188,17 +192,17 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Ehepaar</span>
-            <span class="phys-value" id="pv-spouse-str">0.45</span>
+            <span class="phys-value" id="pv-spouse-str">1.00</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-spouse-str" min="0.01" max="1" step="0.01" value="0.45">
+          <input class="phys-slider" type="range" id="ps-spouse-str" min="0.01" max="1" step="0.01" value="1">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Eltern–Kind</span>
-            <span class="phys-value" id="pv-parent-str">0.65</span>
+            <span class="phys-value" id="pv-parent-str">0.78</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-parent-str" min="0.01" max="1" step="0.01" value="0.65">
+          <input class="phys-slider" type="range" id="ps-parent-str" min="0.01" max="1" step="0.01" value="0.78">
         </div>
 
         <div class="phys-section-label">Abstoßung</div>
@@ -206,25 +210,25 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Person</span>
-            <span class="phys-value" id="pv-charge-indi">170</span>
+            <span class="phys-value" id="pv-charge-indi">600</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-charge-indi" min="0" max="600" step="5" value="170">
+          <input class="phys-slider" type="range" id="ps-charge-indi" min="0" max="600" step="5" value="600">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Familie</span>
-            <span class="phys-value" id="pv-charge-fam">25</span>
+            <span class="phys-value" id="pv-charge-fam">200</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-charge-fam" min="0" max="200" step="5" value="25">
+          <input class="phys-slider" type="range" id="ps-charge-fam" min="0" max="200" step="5" value="200">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Reichweite</span>
-            <span class="phys-value" id="pv-charge-dist">380</span>
+            <span class="phys-value" id="pv-charge-dist">1000</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-charge-dist" min="50" max="1000" step="10" value="380">
+          <input class="phys-slider" type="range" id="ps-charge-dist" min="50" max="1000" step="10" value="1000">
         </div>
 
         <div class="phys-section-label">Weitere Kräfte</div>
@@ -232,41 +236,41 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Kollisionsradius</span>
-            <span class="phys-value" id="pv-collide">16</span>
+            <span class="phys-value" id="pv-collide">50</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-collide" min="5" max="50" step="1" value="16">
+          <input class="phys-slider" type="range" id="ps-collide" min="5" max="50" step="1" value="50">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Zeitl. Schichtung</span>
-            <span class="phys-value" id="pv-ystr">0.35</span>
+            <span class="phys-value" id="pv-ystr">0.00</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-ystr" min="0" max="1" step="0.01" value="0.35">
+          <input class="phys-slider" type="range" id="ps-ystr" min="0" max="1" step="0.01" value="0">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Zentrierung</span>
-            <span class="phys-value" id="pv-center">0.04</span>
+            <span class="phys-value" id="pv-center">0.000</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-center" min="0" max="0.3" step="0.005" value="0.04">
+          <input class="phys-slider" type="range" id="ps-center" min="0" max="0.3" step="0.005" value="0">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Dämpfung</span>
-            <span class="phys-value" id="pv-vdecay">0.40</span>
+            <span class="phys-value" id="pv-vdecay">0.05</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-vdecay" min="0.05" max="0.98" step="0.01" value="0.4">
+          <input class="phys-slider" type="range" id="ps-vdecay" min="0.05" max="0.98" step="0.01" value="0.05">
         </div>
 
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label">Abkühlung</span>
-            <span class="phys-value" id="pv-alphadecay">0.028</span>
+            <span class="phys-value" id="pv-alphadecay">0.005</span>
           </div>
-          <input class="phys-slider" type="range" id="ps-alphadecay" min="0.005" max="0.10" step="0.001" value="0.028">
+          <input class="phys-slider" type="range" id="ps-alphadecay" min="0.005" max="0.10" step="0.001" value="0.005">
         </div>
 
         <button id="phys-reheat-btn" onclick="reheatSimulation()">&#9654; Neu starten</button>
@@ -311,6 +315,25 @@
 </div>
 
 <div id="reopen-panel-pill" onclick="reopenDetailPanel()" style="display:none"></div>
+
+<div id="relation-panel">
+  <button class="rel-close-btn" onclick="closeRelationTool()" title="Schliessen">&#x2715;</button>
+  <h3 class="rel-title">&#x1F517; Verwandtschaft</h3>
+  <div class="rel-slots">
+    <div class="rel-slot">
+      <div class="rel-slot-label">Person A</div>
+      <div class="rel-slot-name" id="rel-name-a">—</div>
+      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')">&#x1F449; Klicken</button>
+    </div>
+    <div class="rel-divider">&#x2194;</div>
+    <div class="rel-slot">
+      <div class="rel-slot-label">Person B</div>
+      <div class="rel-slot-name" id="rel-name-b">—</div>
+      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')">&#x1F449; Klicken</button>
+    </div>
+  </div>
+  <div id="rel-result"></div>
+</div>
 <div id="tooltip"></div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
