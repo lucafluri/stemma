@@ -385,6 +385,23 @@ function parseGEDCOM(raw) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// Full in-memory rebuild — call after any structural change
+// ═══════════════════════════════════════════════════════════════
+function _fullRebuildGraph() {
+  const sorted = buildSurnameColorMap();
+  buildSurnameList(sorted);
+  buildGraphData();
+  if (!svgSel) initSVG();
+  renderGraph();
+  document.getElementById('status').textContent =
+    `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
+  _firstLoad = true;
+  buildAndRunSimulation();
+  setTimeout(autoSettle, 200);
+  if (currentView === '3d') applyFilter();
+}
+
 // 2. GRAPH DATA BUILDER  (bipartite INDI + FAM nodes)
 // ═══════════════════════════════════════════════════════════════
 function buildGraphData() {
@@ -964,54 +981,50 @@ function reheatSimulation() {
   simulation.alpha(0.5).restart();
 }
 
-let _autoSettleTimer = null;
+let _autoSettleTimer   = null;
+let _pendingDeleteId   = null;
+let _pendingDeleteType = null;
 
-function _settleBarStart() {
+function _settleBarRun(durationMs) {
   const bar = document.getElementById('settle-bar');
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
   bar.style.opacity = '1';
   requestAnimationFrame(() => {
-    bar.style.transition = 'width 3s linear';
-    bar.style.width = '65%';
+    bar.style.transition = `width ${durationMs}ms linear`;
+    bar.style.width = '100%';
+    setTimeout(() => {
+      bar.style.transition = 'none';
+      bar.style.opacity = '0';
+      bar.style.width = '0%';
+    }, durationMs + 100);
   });
-}
-
-function _settleBarFinish() {
-  const bar = document.getElementById('settle-bar');
-  if (!bar) return;
-  bar.style.transition = 'width 4s linear';
-  bar.style.width = '100%';
-  setTimeout(() => { bar.style.transition = 'none'; bar.style.opacity = '0'; bar.style.width = '0%'; }, 4100);
 }
 
 function autoSettle() {
   if (_autoSettleTimer) { clearTimeout(_autoSettleTimer); _autoSettleTimer = null; }
 
-  _settleBarStart();
+  // alphaDecay=0.04 → sim dies in ~170 ticks ≈ 2.8s at 60fps
+  const SETTLE_MS = 3000;
+  _settleBarRun(SETTLE_MS);
 
   if (currentView === '3d') {
     if (!graph3d) return;
     graph3d.d3AlphaDecay(0.04);
     graph3d.d3ReheatSimulation();
     _autoSettleTimer = setTimeout(() => {
-      if (graph3d) {
-        graph3d.d3AlphaDecay(physicsParams.alphaDecay);
-        graph3d.d3ReheatSimulation();
-      }
-      _settleBarFinish();
+      if (graph3d) graph3d.d3AlphaDecay(physicsParams.alphaDecay);
       _autoSettleTimer = null;
-    }, 3000);
+    }, SETTLE_MS);
   } else {
     if (!simulation) return;
     const savedDecay = physicsParams.alphaDecay;
     simulation.alphaDecay(0.04).alpha(1).restart();
     _autoSettleTimer = setTimeout(() => {
-      if (simulation) simulation.alphaDecay(savedDecay).alpha(0.3).restart();
-      _settleBarFinish();
+      if (simulation) simulation.alphaDecay(savedDecay);
       _autoSettleTimer = null;
-    }, 3000);
+    }, SETTLE_MS);
   }
 }
 
@@ -1039,9 +1052,6 @@ function onSimEnd() {
     _firstLoad = false;
     if (currentView === '2d') {
       zoomToFit();
-    }
-    if (individuals.has('@I1@')) {
-      setTimeout(() => showIndiDetail('@I1@'), 300);
     }
   }
 }
@@ -1248,6 +1258,7 @@ function showIndiDetail(id) {
   }
 
   document.getElementById('detail-content').innerHTML = html;
+  document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
   document.getElementById('detail-buttons').style.display = 'flex';
   openPanel();
@@ -1289,6 +1300,7 @@ function showFamDetail(id) {
   }
 
   document.getElementById('detail-content').innerHTML = html;
+  document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
   document.getElementById('detail-buttons').style.display = 'flex';
   openPanel();
@@ -1306,6 +1318,8 @@ function closeDetailPanel() {
   panel.classList.remove('panel-visible');
   panel.style.transform = '';   // clear any inline transform from swipe gesture
   document.getElementById('detail-edit-bar').style.display = 'none';
+  document.getElementById('delete-confirm-bar').style.display = 'none';
+  _pendingDeleteId = null; _pendingDeleteType = null;
   selectedIndiId = null;
   _updateCenterPersonBtn();
   resetHighlight();
@@ -1593,6 +1607,7 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       document.getElementById('center-view-btn').style.display = 'inline-block';
       document.getElementById('center-view-btn').disabled = false;
       document.getElementById('center-person-btn').style.display = 'inline-block';
+      document.getElementById('relation-tool-btn').style.display = 'inline-block';
       document.getElementById('relation-tool-btn').disabled = false;
       window._gedcomFilename = file.name;
 
@@ -1622,6 +1637,96 @@ document.getElementById('file-input').addEventListener('change', function (e) {
 // ═══════════════════════════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// GEDCOM DATE WIDGET
+// ═══════════════════════════════════════════════════════════════
+const _GD_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function _safeId(gedcomId) {
+  return String(gedcomId).replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function _parseGedcomDate(str) {
+  if (!str) return { prefix: '', day: '', month: '', year: '' };
+  str = str.trim().toUpperCase();
+  let prefix = '';
+  for (const p of ['ABT','BEF','AFT','EST','CAL','INT']) {
+    if (str.startsWith(p + ' ') || str === p) {
+      prefix = p; str = str.slice(p.length).trim(); break;
+    }
+  }
+  if (str.startsWith('BET ')) {
+    prefix = 'BET'; str = str.slice(4).trim();
+    const ai = str.indexOf(' AND ');
+    if (ai >= 0) str = str.slice(0, ai).trim();
+  }
+  let day = '', month = '', year = '';
+  for (const part of str.split(/\s+/)) {
+    if (!day && !year && /^\d{1,2}$/.test(part)) { day = part; continue; }
+    if (!month && _GD_MONTHS.includes(part))      { month = part; continue; }
+    if (!year  && /^\d{3,4}$/.test(part))         { year = part; }
+  }
+  return { prefix, day, month, year };
+}
+
+function _buildFamEditSections(personId) {
+  const i = individuals.get(personId);
+  if (!i || !i.fams.length) return '<div style="color:#555;font-size:11px;padding:2px 0">Keine Ehe / Partnerschaft</div>';
+  return i.fams.map(famId => {
+    const fam = families.get(famId);
+    if (!fam) return '';
+    const spouseId = fam.husb === personId ? fam.wife : fam.husb;
+    const spouse   = spouseId ? individuals.get(spouseId) : null;
+    const spouseLbl = spouse ? escHtml(spouse.name) : (spouseId ? escHtml(spouseId) : '<em>unbekannt</em>');
+    const sid = _safeId(famId);
+    return `<div class="ef-fam-block">
+      <div class="ef-fam-header">&#x26a1; ${spouseLbl}</div>
+      <div class="edit-section">
+        <div class="edit-label">Heiratsdatum</div>
+        ${_gedcomDateWidget('ef-fam-' + sid + '-mdate', fam.marr.date)}
+      </div>
+      <div class="edit-section">
+        <div class="edit-label">Heiratsort</div>
+        <input class="edit-input" id="ef-fam-${sid}-mplac" value="${escAttr(fam.marr.plac)}">
+      </div>
+      <label class="edit-checkbox-row">
+        <input type="checkbox" id="ef-fam-${sid}-div"${fam.div ? ' checked' : ''}>
+        Geschieden
+      </label>
+    </div>`;
+  }).join('');
+}
+
+function _gedcomDateWidget(fieldId, value) {
+  const { prefix, day, month, year } = _parseGedcomDate(value);
+  const monthOpts = _GD_MONTHS.map(m =>
+    `<option value="${m}"${month===m?' selected':''}>${m[0]}${m.slice(1).toLowerCase()}</option>`
+  ).join('');
+  const prefixOpts = [['','exakt'],['ABT','ca.'],['BEF','vor'],['AFT','nach'],['EST','gesch.']]
+    .map(([v,l]) => `<option value="${v}"${prefix===v?' selected':''}>${l}</option>`).join('');
+  return `<div class="gd-widget" id="${fieldId}">` +
+    `<select class="gd-prefix">${prefixOpts}</select>` +
+    `<input  class="gd-day"    type="number" min="1" max="31" placeholder="TT"   value="${day}"  title="Tag">` +
+    `<select class="gd-month"><option value="">Mon.</option>${monthOpts}</select>` +
+    `<input  class="gd-year"   type="number" min="1" max="2200" placeholder="JJJJ" value="${year}" title="Jahr">` +
+    `</div>`;
+}
+
+function _gedcomDateValue(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return '';
+  const prefix = el.querySelector('.gd-prefix').value;
+  const day    = el.querySelector('.gd-day').value.trim();
+  const month  = el.querySelector('.gd-month').value;
+  const year   = el.querySelector('.gd-year').value.trim();
+  const parts  = [];
+  if (prefix) parts.push(prefix);
+  if (day)    parts.push(String(parseInt(day, 10)));
+  if (month)  parts.push(month);
+  if (year)   parts.push(year);
+  return parts.join(' ');
+}
+
 function escHtml(s) {
   if (!s) return '';
   return String(s)
@@ -1729,7 +1834,8 @@ let _editingType = null;   // 'INDI' | 'FAM'
 
 
 // Pending relationships to be committed with the new/edited person
-let _pendingRelations = [];  // [{ targetId, type: 'parent'|'child'|'spouse' }]
+let _pendingRelations = [];   // [{ targetId, type: 'parent'|'child'|'spouse', isNew? }]
+let _removedRelations = [];   // [{ targetId, type, famId }]
 
 function _buildPersonDatalist(excludeId) {
   let opts = '';
@@ -1769,9 +1875,10 @@ function _renderPendingRelations() {
   el.innerHTML = _pendingRelations.map((r, idx) => {
     const p = individuals.get(r.targetId);
     const name = p ? escHtml(p.name || r.targetId) : escHtml(r.targetId);
+    const badge = r.isNew ? '<span class="ef-rel-new-badge">neu</span>' : '';
     return `<div class="ef-rel-item">
       <span class="ef-rel-type">${labels[r.type]}</span>
-      <span class="ef-rel-name">${name}</span>
+      <span class="ef-rel-name">${name}${badge}</span>
       <button class="ef-rel-remove" onclick="removeRelation(${idx})" title="Entfernen">&#x2715;</button>
     </div>`;
   }).join('');
@@ -1788,7 +1895,6 @@ function addRelation() {
     setTimeout(() => { input.style.borderColor = ''; }, 1200);
     return;
   }
-  // Prevent duplicate
   if (_pendingRelations.some(r => r.targetId === targetId && r.type === type)) return;
   _pendingRelations.push({ targetId, type });
   input.value = '';
@@ -1796,8 +1902,104 @@ function addRelation() {
 }
 
 function removeRelation(idx) {
+  const rel = _pendingRelations[idx];
+  // If this was an inline-created stub, remove it from the individuals map
+  if (rel?.isNew) individuals.delete(rel.targetId);
   _pendingRelations.splice(idx, 1);
   _renderPendingRelations();
+}
+
+function toggleNewPersonSubform() {
+  const sf = document.getElementById('ef-new-person-subform');
+  if (!sf) return;
+  const visible = sf.style.display !== 'none';
+  sf.style.display = visible ? 'none' : 'block';
+  if (!visible) document.getElementById('ef-np-givn')?.focus();
+}
+
+function confirmNewPersonRelation() {
+  const givn = document.getElementById('ef-np-givn')?.value.trim() || '';
+  const surn = document.getElementById('ef-np-surn')?.value.trim() || '';
+  const sex  = document.getElementById('ef-np-sex')?.value || 'U';
+  const type = document.getElementById('ef-np-type')?.value || 'child';
+
+  const fullName = (givn + ' ' + surn).trim();
+  if (!fullName) {
+    document.getElementById('ef-np-givn').style.borderColor = '#e74c3c';
+    setTimeout(() => { document.getElementById('ef-np-givn').style.borderColor = ''; }, 1200);
+    return;
+  }
+
+  const newId = getNextIndiId();
+  const displayName = fullName.length > 24
+    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : fullName.slice(0, 22) + '…')
+    : fullName;
+
+  individuals.set(newId, {
+    id: newId, name: fullName, givn, surn, sex,
+    birth: { date: '', plac: '' },
+    death: { date: '', plac: '', caus: '' },
+    deceased: false, birthYear: null,
+    famc: [], fams: [], occu: '', note: '', displayName,
+  });
+
+  _pendingRelations.push({ targetId: newId, type, isNew: true });
+  _renderPendingRelations();
+
+  // Reset and hide the subform
+  document.getElementById('ef-np-givn').value = '';
+  document.getElementById('ef-np-surn').value = '';
+  document.getElementById('ef-np-sex').value  = 'U';
+  document.getElementById('ef-new-person-subform').style.display = 'none';
+}
+
+function _getExistingRelations(id) {
+  const i = individuals.get(id);
+  if (!i) return [];
+  const rels = [];
+  // Parents: families where this person is a child
+  for (const famId of i.famc) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+    if (fam.husb) rels.push({ type: 'parent', targetId: fam.husb, famId, label: 'Vater' });
+    if (fam.wife) rels.push({ type: 'parent', targetId: fam.wife, famId, label: 'Mutter' });
+  }
+  // Spouses and children: families where this person is a spouse
+  for (const famId of i.fams) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+    const spouseId = fam.husb === id ? fam.wife : fam.husb;
+    if (spouseId) rels.push({ type: 'spouse', targetId: spouseId, famId, label: 'Ehepartner' });
+    for (const childId of fam.chil) {
+      rels.push({ type: 'child', targetId: childId, famId, label: 'Kind' });
+    }
+  }
+  return rels;
+}
+
+function _renderExistingRelations(id) {
+  const el = document.getElementById('ef-existing-rel-list');
+  if (!el) return;
+  const rels = _getExistingRelations(id).filter(
+    r => !_removedRelations.some(rem => rem.targetId === r.targetId && rem.type === r.type && rem.famId === r.famId)
+  );
+  if (!rels.length) { el.innerHTML = ''; return; }
+  el.innerHTML = rels.map((r, idx) => {
+    const p = individuals.get(r.targetId);
+    const name = p ? escHtml(p.displayName || p.name) : escHtml(r.targetId);
+    return `<div class="ef-rel-item ef-existing-rel">
+      <span class="ef-rel-type">${r.label}</span>
+      <span class="ef-rel-name">${name}</span>
+      <button class="ef-rel-remove" onclick="removeExistingRelation(${JSON.stringify(r).split('"').join("'")})" title="Entfernen">&#x2715;</button>
+    </div>`;
+  }).join('');
+}
+
+function removeExistingRelation(r) {
+  if (!_removedRelations.some(x => x.targetId === r.targetId && x.type === r.type && x.famId === r.famId)) {
+    _removedRelations.push(r);
+  }
+  _renderExistingRelations(_editingId);
 }
 
 function showIndiEditForm(id) {
@@ -1805,6 +2007,7 @@ function showIndiEditForm(id) {
   if (!i) return;
 
   _pendingRelations = [];
+  _removedRelations = [];
 
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
@@ -1830,7 +2033,7 @@ function showIndiEditForm(id) {
     </div>
     <div class="edit-section">
       <div class="edit-label">Geburtsdatum</div>
-      <input class="edit-input" id="ef-bdate" placeholder="z.B. 15 MAY 1996" value="${escAttr(i.birth.date)}">
+      ${_gedcomDateWidget('ef-bdate', i.birth.date)}
     </div>
     <div class="edit-section">
       <div class="edit-label">Geburtsort</div>
@@ -1842,7 +2045,7 @@ function showIndiEditForm(id) {
     </label>
     <div class="edit-section">
       <div class="edit-label">Sterbedatum</div>
-      <input class="edit-input" id="ef-ddate" placeholder="z.B. 20 JUL 2024" value="${escAttr(i.death.date)}">
+      ${_gedcomDateWidget('ef-ddate', i.death.date)}
     </div>
     <div class="edit-section">
       <div class="edit-label">Sterbeort</div>
@@ -1861,9 +2064,14 @@ function showIndiEditForm(id) {
       <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
     </div>
     <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+      <div class="edit-label">Ehen &amp; Partnerschaften</div>
+      <div id="ef-fam-sections">${_buildFamEditSections(id)}</div>
+    </div>
+    <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
       <div class="edit-label">Beziehungen</div>
+      <div id="ef-existing-rel-list" style="margin-bottom:4px"></div>
       <div id="ef-rel-list" style="margin-bottom:6px">
-        <div style="color:#555;font-size:11px;padding:2px 0">Keine Beziehungen hinzugefügt</div>
+        <div style="color:#555;font-size:11px;padding:2px 0">Keine neuen Beziehungen</div>
       </div>
       <div class="ef-rel-add-row">
         <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="Person suchen…" autocomplete="off">
@@ -1875,11 +2083,37 @@ function showIndiEditForm(id) {
         </select>
         <button class="ef-rel-add-btn" onclick="addRelation()" title="Beziehung hinzufügen">+</button>
       </div>
+      <button class="ef-new-person-btn" onclick="toggleNewPersonSubform()">&#xff0b; Neue Person erstellen</button>
+      <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
+        <div class="edit-label" style="margin-bottom:6px">Neue Person</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input class="edit-input" id="ef-np-givn" placeholder="Vorname" style="flex:1">
+          <input class="edit-input" id="ef-np-surn" placeholder="Familienname" style="flex:1">
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <select class="edit-select" id="ef-np-sex" style="flex:1">
+            <option value="U">Geschlecht…</option>
+            <option value="M">männlich</option>
+            <option value="F">weiblich</option>
+          </select>
+          <select class="edit-select" id="ef-np-type" style="flex:1">
+            <option value="child">Kind von</option>
+            <option value="parent">Elternteil von</option>
+            <option value="spouse">Ehepartner von</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmNewPersonRelation()">&#x2713; Hinzufügen</button>
+          <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleNewPersonSubform()">Abbrechen</button>
+        </div>
+      </div>
     </div>
     <div class="edit-form-buttons">
       <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; Speichern</button>
       <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
     </div>`;
+
+  _renderExistingRelations(id);
 }
 
 function commitIndiEdit() {
@@ -1900,10 +2134,10 @@ function commitIndiEdit() {
     : i.name;
 
   i.sex        = document.getElementById('ef-sex').value;
-  i.birth.date = document.getElementById('ef-bdate').value.trim();
+  i.birth.date = _gedcomDateValue('ef-bdate');
   i.birth.plac = document.getElementById('ef-bplac').value.trim();
   i.deceased   = document.getElementById('ef-dead').checked;
-  i.death.date = document.getElementById('ef-ddate').value.trim();
+  i.death.date = _gedcomDateValue('ef-ddate');
   i.death.plac = document.getElementById('ef-dplac').value.trim();
   i.death.caus = document.getElementById('ef-dcaus').value.trim();
   i.occu       = document.getElementById('ef-occu').value.trim();
@@ -1913,8 +2147,53 @@ function commitIndiEdit() {
   const ym = i.birth.date.match(/\b(\d{4})\b/);
   i.birthYear = ym ? +ym[1] : null;
 
+  // ── Save inline family (marriage) edits ──
+  for (const famId of i.fams) {
+    const fam = families.get(famId);
+    const sid = _safeId(famId);
+    const mdateEl = document.getElementById('ef-fam-' + sid + '-mdate');
+    if (fam && mdateEl) {
+      fam.marr.date = _gedcomDateValue('ef-fam-' + sid + '-mdate');
+      fam.marr.plac = (document.getElementById('ef-fam-' + sid + '-mplac')?.value || '').trim();
+      fam.div       = document.getElementById('ef-fam-' + sid + '-div')?.checked ?? fam.div;
+    }
+  }
+
+  // ── Process removed relationships ──
+  for (const r of _removedRelations) {
+    const fam = families.get(r.famId);
+    if (!fam) continue;
+    if (r.type === 'parent') {
+      // Remove this person as a child from that family
+      fam.chil = fam.chil.filter(c => c !== _editingId);
+      i.famc = i.famc.filter(f => f !== r.famId);
+      // Nullify the specific parent slot
+      if (fam.husb === r.targetId) fam.husb = null;
+      else if (fam.wife === r.targetId) fam.wife = null;
+    } else if (r.type === 'spouse') {
+      const spouse = individuals.get(r.targetId);
+      fam.husb === _editingId ? (fam.husb = null) : (fam.wife = null);
+      i.fams = i.fams.filter(f => f !== r.famId);
+      if (spouse) spouse.fams = spouse.fams.filter(f => f !== r.famId);
+    } else if (r.type === 'child') {
+      const child = individuals.get(r.targetId);
+      fam.chil = fam.chil.filter(c => c !== r.targetId);
+      if (child) child.famc = child.famc.filter(f => f !== r.famId);
+    }
+    // Clean up empty families
+    if (!fam.husb && !fam.wife && !fam.chil.length) {
+      families.delete(r.famId);
+      for (const [, p] of individuals) {
+        p.famc = p.famc.filter(f => f !== r.famId);
+        p.fams = p.fams.filter(f => f !== r.famId);
+      }
+    }
+  }
+  const hadRemovals = _removedRelations.length > 0;
+  _removedRelations = [];
+
   // ── Process pending relationships ──
-  const needsRebuild = _pendingRelations.length > 0;
+  const needsRebuild = _pendingRelations.length > 0 || hadRemovals;
   for (const rel of _pendingRelations) {
     const target = individuals.get(rel.targetId);
     if (!target) continue;
@@ -1961,34 +2240,20 @@ function commitIndiEdit() {
   }
   _pendingRelations = [];
 
-  // Update label on graph (existing nodes)
-  if (labelSel) {
-    labelSel.filter(d => d.id === _editingId).text(i.displayName);
-  }
-
   const id = _editingId;
   _editingId = null; _editingType = null;
 
-  if (_isNewRecord || needsRebuild) {
-    _isNewRecord = false;
-    const sorted = buildSurnameColorMap();
-    buildSurnameList(sorted);
-    buildGraphData();
-    if (!svgSel) initSVG();
-    renderGraph();
+  _isNewRecord = false;
+  if (needsRebuild) {
     document.getElementById('dl-btn').style.display = 'inline-block';
     document.getElementById('center-view-btn').style.display = 'inline-block';
     document.getElementById('center-view-btn').disabled = false;
     document.getElementById('center-person-btn').style.display = 'inline-block';
+    document.getElementById('relation-tool-btn').style.display = 'inline-block';
     document.getElementById('relation-tool-btn').disabled = false;
     document.getElementById('view-toggle-btn').disabled = false;
-    document.getElementById('status').textContent =
-      `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
-    _firstLoad = true;
-    buildAndRunSimulation();
-    setTimeout(autoSettle, 200);
   }
-
+  _fullRebuildGraph();
   showIndiDetail(id);
 }
 
@@ -2023,7 +2288,7 @@ function showFamEditForm(id) {
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
       <div class="edit-label">Heiratsdatum</div>
-      <input class="edit-input" id="ef-mdate" placeholder="z.B. 5 JUN 1965" value="${escAttr(f.marr.date)}">
+      ${_gedcomDateWidget('ef-mdate', f.marr.date)}
     </div>
     <div class="edit-section">
       <div class="edit-label">Heiratsort</div>
@@ -2043,28 +2308,24 @@ function commitFamEdit() {
   const f = families.get(_editingId);
   if (!f) return;
 
-  f.marr.date = document.getElementById('ef-mdate').value.trim();
+  f.marr.date = _gedcomDateValue('ef-mdate');
   f.marr.plac = document.getElementById('ef-mplac').value.trim();
   f.div       = document.getElementById('ef-div').checked;
 
-  // Update diamond color
-  if (nodeSel) {
-    nodeSel.filter(d => d.id === _editingId)
-      .select('polygon')
-      .attr('fill',         f.div ? nodeColors.famDiv : nodeColors.fam)
-      .attr('stroke',       f.div ? nodeColors.famDiv : nodeColors.fam)
-      .attr('stroke-dasharray', f.div ? '3 2' : null);
-  }
-
   const id = _editingId;
   _editingId = null; _editingType = null;
+  _fullRebuildGraph();
   showFamDetail(id);
 }
 
 function cancelEdit() {
   const id = _editingId;
   _editingId = null; _editingType = null;
+  for (const rel of _pendingRelations) {
+    if (rel.isNew) individuals.delete(rel.targetId);
+  }
   _pendingRelations = [];
+  _removedRelations = [];
   if (_isNewRecord) {
     _isNewRecord = false;
     // Discard the stub record that was created for this cancelled new entry
@@ -2078,6 +2339,70 @@ function cancelEdit() {
   } else {
     closeDetailPanel();
   }
+}
+
+function deleteCurrentRecord() {
+  const id   = selectedIndiId || _lastShownFamId;
+  const type = selectedIndiId ? 'INDI' : 'FAM';
+  if (!id) return;
+  _pendingDeleteId   = id;
+  _pendingDeleteType = type;
+  const name = type === 'INDI'
+    ? (individuals.get(id)?.name || id)
+    : (() => { const f = families.get(id); return 'Familie' + (f ? ': ' + [f.husb, f.wife].filter(Boolean).map(p => individuals.get(p)?.name || p).join(' & ') : ''); })();
+  document.getElementById('delete-confirm-msg').textContent = `„${name}" wirklich löschen?`;
+  document.getElementById('delete-confirm-bar').style.display = 'flex';
+  document.getElementById('detail-edit-bar').style.display   = 'none';
+}
+
+function cancelDeleteRecord() {
+  _pendingDeleteId = null; _pendingDeleteType = null;
+  document.getElementById('delete-confirm-bar').style.display = 'none';
+  document.getElementById('detail-edit-bar').style.display   = 'block';
+}
+
+function confirmDeleteRecord() {
+  const id   = _pendingDeleteId;
+  const type = _pendingDeleteType;
+  _pendingDeleteId = null; _pendingDeleteType = null;
+  document.getElementById('delete-confirm-bar').style.display = 'none';
+
+  if (type === 'INDI') {
+    // Remove person from all families
+    for (const [famId, fam] of families) {
+      if (fam.husb === id) fam.husb = null;
+      if (fam.wife === id) fam.wife = null;
+      fam.chil = fam.chil.filter(c => c !== id);
+    }
+    // Remove empty families
+    for (const [famId, fam] of [...families]) {
+      if (!fam.husb && !fam.wife && fam.chil.length === 0) {
+        families.delete(famId);
+        for (const indi of individuals.values()) {
+          indi.famc = indi.famc.filter(f => f !== famId);
+          indi.fams = indi.fams.filter(f => f !== famId);
+        }
+      }
+    }
+    individuals.delete(id);
+  } else {
+    // Remove FAM — clean up member refs
+    const fam = families.get(id);
+    if (fam) {
+      for (const pid of [fam.husb, fam.wife].filter(Boolean)) {
+        const p = individuals.get(pid);
+        if (p) p.fams = p.fams.filter(f => f !== id);
+      }
+      for (const cid of fam.chil) {
+        const c = individuals.get(cid);
+        if (c) c.famc = c.famc.filter(f => f !== id);
+      }
+    }
+    families.delete(id);
+  }
+
+  closeDetailPanel();
+  _fullRebuildGraph();
 }
 
 function startEdit() {
@@ -3139,6 +3464,16 @@ let _relPersonB = null;
 function openRelationTool() {
   document.getElementById('relation-panel').classList.add('panel-visible');
   _renderRelationPanel();
+  // Close dropdowns on outside click
+  if (!openRelationTool._outsideHandler) {
+    openRelationTool._outsideHandler = e => {
+      if (!e.target.closest('#relation-panel')) {
+        document.getElementById('rel-drop-a').style.display = 'none';
+        document.getElementById('rel-drop-b').style.display = 'none';
+      }
+    };
+    document.addEventListener('mousedown', openRelationTool._outsideHandler);
+  }
 }
 
 function closeRelationTool() {
@@ -3159,19 +3494,65 @@ function _tryPickRelationPerson(id) {
   return true;
 }
 
+function _relPersonLabel(id) {
+  if (!id) return '—';
+  const p = individuals.get(id);
+  if (!p) return id;
+  const yr = p.birthYear || (_estimatedYears?.get(id));
+  return p.displayName + (yr ? ` *${yr}` : '');
+}
+
 function _renderRelationPanel() {
-  const nameA = _relPersonA ? (individuals.get(_relPersonA)?.displayName || _relPersonA) : '—';
-  const nameB = _relPersonB ? (individuals.get(_relPersonB)?.displayName || _relPersonB) : '—';
-  document.getElementById('rel-name-a').textContent = nameA;
-  document.getElementById('rel-name-b').textContent = nameB;
+  document.getElementById('rel-name-a').textContent = _relPersonLabel(_relPersonA);
+  document.getElementById('rel-name-b').textContent = _relPersonLabel(_relPersonB);
   document.getElementById('rel-pick-a').classList.toggle('rel-picking', _relSlotWaiting === 'A');
   document.getElementById('rel-pick-b').classList.toggle('rel-picking', _relSlotWaiting === 'B');
+  // Clear search inputs when a person is set via click
+  if (_relPersonA) { const el = document.getElementById('rel-search-a'); if (el) el.value = ''; }
+  if (_relPersonB) { const el = document.getElementById('rel-search-b'); if (el) el.value = ''; }
 }
 
 function relPickSlot(slot) {
   _relSlotWaiting = _relSlotWaiting === slot ? null : slot;
   document.body.classList.toggle('relation-picking', !!_relSlotWaiting);
   _renderRelationPanel();
+}
+
+function relSearch(slot, query) {
+  const dropId = slot === 'A' ? 'rel-drop-a' : 'rel-drop-b';
+  const drop = document.getElementById(dropId);
+  if (!drop) return;
+  const q = query.trim().toLowerCase();
+  if (!q) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
+
+  const matches = [];
+  for (const [id, p] of individuals) {
+    const yr = p.birthYear || (_estimatedYears?.get(id));
+    const label = (p.name || id) + (yr ? ` *${yr}` : '');
+    if ((p.name || id).toLowerCase().includes(q)) matches.push({ id, label, yr });
+    if (matches.length >= 8) break;
+  }
+
+  if (!matches.length) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
+
+  drop.innerHTML = matches.map(m =>
+    `<div class="rel-drop-item" onmousedown="relSelectPerson('${slot}','${escAttr(m.id)}')">${escHtml(m.label)}</div>`
+  ).join('');
+  drop.style.display = 'block';
+}
+
+function relSelectPerson(slot, id) {
+  if (slot === 'A') _relPersonA = id;
+  else              _relPersonB = id;
+  // Hide dropdown
+  const dropId = slot === 'A' ? 'rel-drop-a' : 'rel-drop-b';
+  const searchId = slot === 'A' ? 'rel-search-a' : 'rel-search-b';
+  const drop = document.getElementById(dropId);
+  if (drop) { drop.innerHTML = ''; drop.style.display = 'none'; }
+  const inp = document.getElementById(searchId);
+  if (inp) inp.value = '';
+  _renderRelationPanel();
+  if (_relPersonA && _relPersonB) _computeAndShowRelation();
 }
 
 // ── Relationship algorithm ────────────────────────────────────
@@ -3406,10 +3787,19 @@ window.toggleNodeDrag    = toggleNodeDrag;
 window.openRelationTool  = openRelationTool;
 window.closeRelationTool = closeRelationTool;
 window.relPickSlot       = relPickSlot;
+window.relSearch         = relSearch;
+window.relSelectPerson   = relSelectPerson;
 window.toggleView        = toggleView;
 window.toggleSidebar     = toggleSidebar;
 window.addNewPerson      = addNewPerson;
 window.centerView        = centerView;
 window.centerOnPerson    = centerOnPerson;
-window.addRelation       = addRelation;
-window.removeRelation    = removeRelation;
+window.addRelation              = addRelation;
+window.removeRelation           = removeRelation;
+window.removeExistingRelation   = removeExistingRelation;
+window.toggleNewPersonSubform   = toggleNewPersonSubform;
+window.confirmNewPersonRelation = confirmNewPersonRelation;
+window.deleteCurrentRecord   = deleteCurrentRecord;
+window.confirmDeleteRecord   = confirmDeleteRecord;
+window.cancelDeleteRecord    = cancelDeleteRecord;
+window._fullRebuildGraph     = _fullRebuildGraph;

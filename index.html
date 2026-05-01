@@ -303,6 +303,12 @@
     <h2 id="detail-name">—</h2>
     <div id="detail-edit-bar">
       <button class="edit-bar-btn" onclick="startEdit()">&#x270E; Bearbeiten</button>
+      <button class="edit-bar-btn edit-bar-btn--danger" id="delete-record-btn" onclick="deleteCurrentRecord()">&#x1F5D1; Löschen</button>
+    </div>
+    <div id="delete-confirm-bar" style="display:none">
+      <span id="delete-confirm-msg"></span>
+      <button class="edit-bar-btn edit-bar-btn--danger" onclick="confirmDeleteRecord()">Ja, löschen</button>
+      <button class="edit-bar-btn" onclick="cancelDeleteRecord()">Abbrechen</button>
     </div>
     <div id="detail-content"></div>
     <div id="detail-buttons">
@@ -323,13 +329,21 @@
     <div class="rel-slot">
       <div class="rel-slot-label">Person A</div>
       <div class="rel-slot-name" id="rel-name-a">—</div>
-      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')">&#x1F449; Klicken</button>
+      <div class="rel-search-wrap">
+        <input class="rel-search" id="rel-search-a" placeholder="Suchen…" autocomplete="off" oninput="relSearch('A',this.value)" onfocus="relSearch('A',this.value)">
+        <div class="rel-dropdown" id="rel-drop-a"></div>
+      </div>
+      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')" title="Im Graph anklicken">&#x1F449;</button>
     </div>
     <div class="rel-divider">&#x2194;</div>
     <div class="rel-slot">
       <div class="rel-slot-label">Person B</div>
       <div class="rel-slot-name" id="rel-name-b">—</div>
-      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')">&#x1F449; Klicken</button>
+      <div class="rel-search-wrap">
+        <input class="rel-search" id="rel-search-b" placeholder="Suchen…" autocomplete="off" oninput="relSearch('B',this.value)" onfocus="relSearch('B',this.value)">
+        <div class="rel-dropdown" id="rel-drop-b"></div>
+      </div>
+      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')" title="Im Graph anklicken">&#x1F449;</button>
     </div>
   </div>
   <div id="rel-result"></div>
