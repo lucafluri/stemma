@@ -183,7 +183,7 @@ function _initPanelSwipe() {
     const dy = _panelSwipe.currentY - _panelSwipe.startY;
     _panelSwipe = null;
     if (dy > 80) {
-      closeDetailPanel();
+      minimizeDetailPanel();
     } else {
       // Snap back
       if (panel.classList.contains('panel-visible')) {
@@ -1245,6 +1245,7 @@ function showFamDetail(id) {
 function openPanel() {
   document.getElementById('main-layout').classList.add('panel-open');
   document.getElementById('detail-panel').classList.add('panel-visible');
+  _hideReopenPill();
 }
 function closeDetailPanel() {
   document.getElementById('main-layout').classList.remove('panel-open');
@@ -1256,6 +1257,43 @@ function closeDetailPanel() {
   _updateCenterPersonBtn();
   resetHighlight();
   if (currentView === '3d') _setOrbitTarget3D(null);
+  _hideReopenPill();
+}
+
+// Minimize: hide the panel but keep the selection (mobile-friendly)
+function minimizeDetailPanel() {
+  document.getElementById('main-layout').classList.remove('panel-open');
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('panel-visible');
+  panel.style.transform = '';
+  // Don't clear selectedIndiId or highlights!
+  _showReopenPill();
+}
+
+function reopenDetailPanel() {
+  if (selectedIndiId) {
+    openPanel();
+    _hideReopenPill();
+  }
+}
+
+function _isMobile() {
+  return window.innerWidth <= 768;
+}
+
+function _showReopenPill() {
+  let pill = document.getElementById('reopen-panel-pill');
+  if (!pill) return;
+  if (!selectedIndiId) { _hideReopenPill(); return; }
+  const indi = individuals.get(selectedIndiId);
+  const name = indi ? (indi.displayName || indi.name || selectedIndiId) : selectedIndiId;
+  pill.textContent = '▲ ' + name;
+  pill.style.display = 'block';
+}
+
+function _hideReopenPill() {
+  const pill = document.getElementById('reopen-panel-pill');
+  if (pill) pill.style.display = 'none';
 }
 
 function row(label, value) {
@@ -2223,7 +2261,7 @@ function initGraph3D() {
         onOut();
       }
     })
-    .onBackgroundClick(() => closeDetailPanel());
+    .onBackgroundClick(() => { _isMobile() ? minimizeDetailPanel() : closeDetailPanel(); });
 
   // Delay setup so the library's internal controls finish initialising first
   setTimeout(() => {
@@ -2838,7 +2876,9 @@ window.showIndiDetail    = showIndiDetail;
 window.showFamDetail     = showFamDetail;
 window.highlightMode     = highlightMode;
 window.resetHighlight    = resetHighlight;
-window.closeDetailPanel  = closeDetailPanel;
+window.closeDetailPanel    = closeDetailPanel;
+window.minimizeDetailPanel = minimizeDetailPanel;
+window.reopenDetailPanel   = reopenDetailPanel;
 window.toggleAllSurnames = toggleAllSurnames;
 window.resetLinkColors   = resetLinkColors;
 window.resetNodeColors   = resetNodeColors;

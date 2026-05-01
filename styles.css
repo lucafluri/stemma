@@ -947,6 +947,41 @@ body {
   }
 }
 
+/* Reopen pill — floating at bottom when panel is minimized */
+#reopen-panel-pill {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  background: rgba(10, 20, 50, 0.92);
+  color: #7ac;
+  border: 1px solid #2a4a8a;
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#reopen-panel-pill:active {
+  background: rgba(15, 52, 96, 0.95);
+}
+
 @media (max-width: 400px) {
   #topbar h1 { display: none; }
+}
+
+/* Hide reopen pill on desktop — only for mobile */
+@media (min-width: 769px) {
+  #reopen-panel-pill { display: none !important; }
 }
