@@ -40,15 +40,16 @@
       <div id="time-spread-row" style="padding:4px 2px 2px 2px;border-top:none">
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
           <span>Zeitachsen-Spreizung</span>
-          <span id="time-spread-val">250</span>
+          <span id="time-spread-val">500</span>
         </div>
-        <input type="range" id="time-spread-slider" min="80" max="700" step="10" value="250"
+        <input type="range" id="time-spread-slider" min="80" max="1200" step="10" value="500"
                style="width:100%;accent-color:#4a7abf;cursor:pointer">
       </div>
       <label class="sidebar-toggle" id="show-names-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="show-names-3d-toggle" checked>
         <span>Namen anzeigen (3D)</span>
       </label>
+      <button class="sidebar-btn" id="node-drag-btn" onclick="toggleNodeDrag()" style="opacity:0.6">&#x1F512; Ziehen aus</button>
       <button class="sidebar-btn" onclick="addNewPerson()">&#xff0b; Neue Person</button>
       <button class="sidebar-btn" onclick="toggleAllSurnames(true)">Alle einblenden</button>
       <button class="sidebar-btn" onclick="toggleAllSurnames(false)">Alle ausblenden</button>
@@ -150,6 +151,14 @@
         </div>
         <input type="range" class="phys-slider" id="ap-node-size" min="1" max="12" step="0.5" value="4">
       </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label">Beschriftungsgrösse</span>
+          <span class="phys-value" id="ap-font-size-val">14</span>
+        </div>
+        <input type="range" class="phys-slider" id="ap-font-size" min="8" max="32" step="1" value="14">
+      </div>
+      <button class="sidebar-btn" onclick="export3DTopDown()" style="margin-top:6px">&#x1F4E5; Export Top-Down</button>
     </details>
 
     <details id="physics-panel">

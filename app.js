@@ -65,8 +65,10 @@ let _3dMousePos    = { x: 0, y: 0 };
 let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
 let sortByTime3D   = true;   // Y-stratify 3D sim by birth year + show 3D timeline
 let show3DNames    = true;   // render name+year labels above nodes in 3D
+let _nodeDragEnabled = false; // node dragging disabled by default
 let _timeline3DObj    = null;   // THREE.Group holding timeline meshes in the 3D scene
-let _3dYHalfSpan      = 250;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
+let _3dYHalfSpan      = 500;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
+let _3dFontSize       = 14;    // name label font size in 3D view
 let _orbitControls3d  = null;  // OrbitControls instance (replaces TrackballControls)
 let _orbitTargetAnim  = null;  // { from, to, start, duration } for smooth orbit target transition
 let _orbitTrackNodeId = null;  // node id whose live position the orbit target tracks
@@ -782,11 +784,12 @@ function renderGraph() {
     })
     .call(d3.drag()
       .on('start', (evt, d) => {
+        if (!_nodeDragEnabled) return;
         if (!evt.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x; d.fy = d.y;
       })
-      .on('drag', (evt, d) => { d.fx = evt.x; d.fy = evt.y; })
-      .on('end', (evt) => { if (!evt.active) simulation.alphaTarget(0); })
+      .on('drag', (evt, d) => { if (_nodeDragEnabled) { d.fx = evt.x; d.fy = evt.y; } })
+      .on('end', (evt) => { if (_nodeDragEnabled && !evt.active) simulation.alphaTarget(0); })
     );
 
   // Draw shapes per node
@@ -1335,8 +1338,8 @@ function collectAncestors(id, visited = new Set()) {
   return visited;
 }
 
-function collectDescendants(id, visited = new Set()) {
-  if (visited.has(id)) return visited;
+function collectDescendants(id, visited = new Set(), isRoot = true) {
+  if (!isRoot && visited.has(id)) return visited;
   visited.add(id);
   const indi = individuals.get(id);
   if (!indi) return visited;
@@ -1344,10 +1347,7 @@ function collectDescendants(id, visited = new Set()) {
     visited.add(famId);
     const fam = families.get(famId);
     if (!fam) continue;
-    // Include spouse
-    const spId = fam.husb === id ? fam.wife : fam.husb;
-    if (spId) visited.add(spId);
-    fam.chil.forEach(cid => collectDescendants(cid, visited));
+    fam.chil.forEach(cid => collectDescendants(cid, visited, false));
   }
   return visited;
 }
@@ -2261,7 +2261,8 @@ function initGraph3D() {
         onOut();
       }
     })
-    .onBackgroundClick(() => { _isMobile() ? minimizeDetailPanel() : closeDetailPanel(); });
+    .onBackgroundClick(() => { _isMobile() ? minimizeDetailPanel() : closeDetailPanel(); })
+    .enableNodeDrag(_nodeDragEnabled);
 
   // Delay setup so the library's internal controls finish initialising first
   setTimeout(() => {
@@ -2360,41 +2361,79 @@ function refresh3D() {
   const hasHL = hlSet.size > 0;
   const gd = graph3d.graphData();
 
-  // Update accessors for future mesh creation
+  // ── Update accessors for future mesh creation ──
   graph3d.nodeColor(n => compute3DNodeColor(n));
-  graph3d.linkColor(l => {
-    if (!hasHL) return linkColor(l);
-    const sid = typeof l.source === 'object' ? l.source.id : l.source;
-    const tid = typeof l.target === 'object' ? l.target.id : l.target;
-    return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
-  });
+  graph3d.linkColor(l => _compute3DLinkColor(l, hasHL));
 
-  // Directly update existing Three.js materials on cached node objects
+  // ── Directly update node Three.js materials (color + opacity) ──
   for (const n of gd.nodes) {
     const obj = n.__threeObj;
     if (!obj) continue;
     const color = new THREE.Color(compute3DNodeColor(n));
-    // The default sphere is a Mesh child, or the object itself
+    const inHL = !hasHL || hlSet.has(n.id);
     obj.traverse(child => {
-      if (child.isMesh && child.material && child.material.color) {
-        child.material.color.copy(color);
+      if (child.isMesh && child.material) {
+        if (child.material.color) child.material.color.copy(color);
+        if (hasHL) {
+          child.material.opacity = inHL ? 1.0 : 0.06;
+          child.material.transparent = true;
+        } else {
+          child.material.opacity = 1.0;
+          child.material.transparent = false;
+        }
+      }
+      // Dim/show sprite labels (name tags)
+      if (child.isSprite && child.material) {
+        if (hasHL) {
+          child.material.opacity = inHL ? 1.0 : 0.05;
+          child.material.transparent = true;
+        } else {
+          child.material.opacity = 1.0;
+          child.material.transparent = false;
+        }
       }
     });
   }
 
-  // Directly update existing Three.js materials on cached link objects
+  // ── Directly update link Three.js materials (color + opacity) ──
+  // When linkWidth > 0, ForceGraph3D creates a cylinder Mesh per link stored as __lineObj
+  let linksUpdated = false;
   for (const l of gd.links) {
     const obj = l.__lineObj;
     if (!obj) continue;
+    linksUpdated = true;
     const sid = typeof l.source === 'object' ? l.source.id : l.source;
     const tid = typeof l.target === 'object' ? l.target.id : l.target;
-    const lColor = (!hasHL) ? linkColor(l)
-      : (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
-    const c = new THREE.Color(lColor);
+    const inHL = !hasHL || (hlSet.has(sid) && hlSet.has(tid));
+    const lColor = new THREE.Color(_compute3DLinkColor(l, hasHL));
     obj.traverse(child => {
-      if (child.material && child.material.color) child.material.color.copy(c);
+      if (child.material) {
+        if (child.material.color) child.material.color.copy(lColor);
+        if (hasHL) {
+          child.material.opacity = inHL ? 0.8 : 0.03;
+          child.material.transparent = true;
+        } else {
+          child.material.opacity = _3dAppearance.linkOpacity;
+          child.material.transparent = _3dAppearance.linkOpacity < 1;
+        }
+      }
     });
   }
+
+  // Fallback: if links don't have individual __lineObj (e.g. thin lines / LineSegments),
+  // update via scene traversal for any LineSegments geometry
+  if (!linksUpdated) {
+    graph3d.linkOpacity(hasHL ? 0.8 : _3dAppearance.linkOpacity);
+    // Re-supply graphData to force link rebuild (nodes keep positions via same refs)
+    graph3d.graphData({ nodes: [...gd.nodes], links: [...gd.links] });
+  }
+}
+
+function _compute3DLinkColor(l, hasHL) {
+  if (!hasHL) return linkColor(l);
+  const sid = typeof l.source === 'object' ? l.source.id : l.source;
+  const tid = typeof l.target === 'object' ? l.target.id : l.target;
+  return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
 }
 
 // ── Link color customization ──
@@ -2565,8 +2604,8 @@ function makeNameSprite3D(n) {
   const yearLine = [born, died].filter(Boolean).join('  ');
   const textColor = _nameTextColor(n);
 
-  const FONT_NAME = 14;
-  const FONT_YEAR = 10;
+  const FONT_NAME = _3dFontSize;
+  const FONT_YEAR = Math.round(_3dFontSize * 0.72);
   const PAD_X = 8, PAD_Y = 4, LINE_GAP = 2;
 
   // Measure both lines to pick canvas width
@@ -2623,6 +2662,128 @@ function update3DNames() {
       .nodeThreeObject(null)
       .nodeThreeObjectExtend(false);
   }
+}
+
+function toggleNodeDrag() {
+  _nodeDragEnabled = !_nodeDragEnabled;
+  if (graph3d) graph3d.enableNodeDrag(_nodeDragEnabled);
+  const btn = document.getElementById('node-drag-btn');
+  if (btn) {
+    btn.textContent = _nodeDragEnabled ? '🔓 Ziehen an' : '🔒 Ziehen aus';
+    btn.style.opacity = _nodeDragEnabled ? '1' : '0.6';
+  }
+}
+
+// ── Top-down high-res export ──
+function export3DTopDown() {
+  if (!graph3d) return;
+
+  const btn = document.querySelector('button[onclick="export3DTopDown()"]');
+  if (btn) { btn.textContent = '⏳ Wird gerendert…'; btn.disabled = true; }
+
+  const origHalfSpan = _3dYHalfSpan;
+
+  // Flatten all nodes to Y=0 so the top-down view is a true 2D projection
+  _3dYHalfSpan = 0;
+  applyTimelineYFix();
+  graph3d.d3ReheatSimulation();
+
+  // Give the simulation time to settle in XZ before capturing
+  setTimeout(() => {
+    const renderer = graph3d.renderer();
+    const scene    = graph3d.scene();
+    const camera   = graph3d.camera();
+
+    // Compute graph centroid and XZ extent
+    const gd = graph3d.graphData();
+    let cx = 0, cz = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const n of gd.nodes) {
+      const nx = n.x || 0, nz = n.z || 0;
+      cx += nx; cz += nz;
+      x0 = Math.min(x0, nx); x1 = Math.max(x1, nx);
+      z0 = Math.min(z0, nz); z1 = Math.max(z1, nz);
+    }
+    const count = gd.nodes.length || 1;
+    cx /= count; cz /= count;
+
+    // Choose export canvas size proportional to graph XZ extent (min 2048)
+    const graphW = Math.max(x1 - x0, 1);
+    const graphH = Math.max(z1 - z0, 1);
+    const EXPORT_LONG = Math.min(16384, renderer.capabilities.maxTextureSize);
+    const aspect = graphW / graphH;
+    const EXPORT_W = aspect >= 1 ? EXPORT_LONG : Math.round(EXPORT_LONG * aspect);
+    const EXPORT_H = aspect >= 1 ? Math.round(EXPORT_LONG / aspect) : EXPORT_LONG;
+
+    // Save camera state
+    const savedPos  = camera.position.clone();
+    const savedQuat = camera.quaternion.clone();
+    const savedUp   = camera.up.clone();
+    const savedNear = camera.near;
+    const savedFar  = camera.far;
+    const savedAspect = camera.aspect;
+    const savedFov    = camera.fov;
+
+    // Position camera directly above looking down; up = -Z so graph top = older gens
+    const CAM_HEIGHT = 5000;
+    camera.position.set(cx, CAM_HEIGHT, cz);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(cx, 0, cz);
+    camera.near  = 1;
+    camera.far   = CAM_HEIGHT * 2;
+    camera.aspect = EXPORT_W / EXPORT_H;
+    camera.fov   = 2 * Math.atan((Math.max(graphW, graphH) * 0.6) / CAM_HEIGHT) * (180 / Math.PI);
+    camera.updateProjectionMatrix();
+
+    // Render into an offscreen WebGLRenderTarget — doesn't touch the visible canvas
+    const rt = new THREE.WebGLRenderTarget(EXPORT_W, EXPORT_H, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+    });
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+
+    // Read pixels (WebGL is Y-flipped relative to canvas)
+    const pixBuf = new Uint8Array(EXPORT_W * EXPORT_H * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, EXPORT_W, EXPORT_H, pixBuf);
+    rt.dispose();
+
+    // Flip Y and write into a 2D canvas for download
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width  = EXPORT_W;
+    outCanvas.height = EXPORT_H;
+    const ctx2d  = outCanvas.getContext('2d');
+    const imgData = ctx2d.createImageData(EXPORT_W, EXPORT_H);
+    for (let row = 0; row < EXPORT_H; row++) {
+      const src = (EXPORT_H - 1 - row) * EXPORT_W * 4;
+      imgData.data.set(pixBuf.subarray(src, src + EXPORT_W * 4), row * EXPORT_W * 4);
+    }
+    ctx2d.putImageData(imgData, 0, 0);
+
+    // Restore camera
+    camera.position.copy(savedPos);
+    camera.quaternion.copy(savedQuat);
+    camera.up.copy(savedUp);
+    camera.near   = savedNear;
+    camera.far    = savedFar;
+    camera.aspect = savedAspect;
+    camera.fov    = savedFov;
+    camera.updateProjectionMatrix();
+
+    // Restore spread and Y pins
+    _3dYHalfSpan = origHalfSpan;
+    applyTimelineYFix();
+    graph3d.d3ReheatSimulation();
+
+    if (btn) { btn.textContent = '📥 Export Top-Down'; btn.disabled = false; }
+
+    const a = document.createElement('a');
+    a.download = 'stammbaum_export.png';
+    a.href = outCanvas.toDataURL('image/png');
+    a.click();
+
+  }, 2500);
 }
 
 // Resize 3D view when window resizes
@@ -2867,6 +3028,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('ap-node-size-val').textContent = (+this.value).toFixed(1);
     if (graph3d) graph3d.nodeRelSize(+this.value);
   });
+
+  document.getElementById('ap-font-size')?.addEventListener('input', function () {
+    _3dFontSize = +this.value;
+    document.getElementById('ap-font-size-val').textContent = this.value;
+    update3DNames();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2893,6 +3060,8 @@ window.savePreset        = savePreset;
 window.deletePreset      = deletePreset;
 window.applyPreset       = applyPreset;
 window.downloadGEDCOM    = downloadGEDCOM;
+window.export3DTopDown   = export3DTopDown;
+window.toggleNodeDrag    = toggleNodeDrag;
 window.toggleView        = toggleView;
 window.toggleSidebar     = toggleSidebar;
 window.addNewPerson      = addNewPerson;
