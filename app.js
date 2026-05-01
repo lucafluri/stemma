@@ -446,8 +446,6 @@ function buildSurnameColorMap() {
 function nodeBaseColor(n) {
   if (n.type === 'FAM') return n.data.div ? nodeColors.famDiv : nodeColors.fam;
   const indi = n.data;
-  const s = indi.surn;
-  if (s && surnameColors.has(s)) return surnameColors.get(s);
   if (indi.sex === 'M') return nodeColors.male;
   if (indi.sex === 'F') return nodeColors.female;
   return nodeColors.unknown;
