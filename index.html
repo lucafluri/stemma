@@ -17,6 +17,7 @@
   <input type="file" id="file-input" accept=".ged">
   <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
   <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
+  <button id="import-text-btn" onclick="openTextImport()" title="Text-Datei importieren und Änderungen prüfen">&#x1F4C4; Text Import</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
   <button id="relation-tool-btn" onclick="openRelationTool()" title="Verwandtschaft berechnen" disabled>&#x1F517; Verwandtschaft</button>
@@ -349,6 +350,43 @@
   <div id="rel-result"></div>
 </div>
 <div id="tooltip"></div>
+
+<!-- ── Text Import Modal ───────────────────────────────────────────────── -->
+<div id="import-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Text Import">
+  <div id="import-modal-backdrop" onclick="closeTextImport()"></div>
+  <div id="import-modal-panel">
+    <div id="import-modal-header">
+      <h2>&#x1F4C4; Text Import</h2>
+      <button id="import-close-btn" onclick="closeTextImport()" title="Schliessen">&#x2715;</button>
+    </div>
+
+    <!-- Step 1: Input -->
+    <div id="import-step-input">
+      <p class="import-hint">Lade eine Textdatei (aus PDF exportiert) oder füge den Text direkt ein. Erwartet wird englischer Genealogietext mit Mustern wie <i>«was born on … married … son/daughter of …»</i>.</p>
+      <div class="import-file-row">
+        <label class="import-file-label" for="import-file-input">&#x1F4C2; Datei wählen</label>
+        <input type="file" id="import-file-input" accept=".txt,.text" onchange="handleImportFileSelect(event)">
+        <span id="import-file-name" class="import-file-name-lbl">Keine Datei gewählt</span>
+      </div>
+      <textarea id="import-text-area" placeholder="…oder Text hier einfügen"></textarea>
+      <div class="import-step-footer">
+        <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()">&#x1F50D; Analysieren</button>
+        <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Review -->
+    <div id="import-step-review" style="display:none">
+      <div id="import-summary"></div>
+      <div id="import-actions-list"></div>
+      <div class="import-step-footer import-step-footer--review">
+        <button class="import-action-btn import-action-btn--primary" onclick="applyImport()">&#x2713; Änderungen anwenden</button>
+        <button class="import-action-btn" onclick="backToInputImport()">&#x2190; Zurück</button>
+        <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.137.5/build/three.min.js"></script>

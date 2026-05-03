@@ -3802,3 +3802,648 @@ window.deleteCurrentRecord   = deleteCurrentRecord;
 window.confirmDeleteRecord   = confirmDeleteRecord;
 window.cancelDeleteRecord    = cancelDeleteRecord;
 window._fullRebuildGraph     = _fullRebuildGraph;
+
+// ═══════════════════════════════════════════════════════════════
+// TEXT IMPORT ENGINE  (port of scripts/pdf_to_gedcom.py)
+// ═══════════════════════════════════════════════════════════════
+
+const _TI_MONTH_MAP = {
+  jan:'JAN',feb:'FEB',mar:'MAR',apr:'APR',may:'MAY',jun:'JUN',
+  jul:'JUL',aug:'AUG',sep:'SEP',oct:'OCT',nov:'NOV',dec:'DEC',
+  januar:'JAN',februar:'FEB','märz':'MAR',april:'APR',mai:'MAY',
+  juni:'JUN',juli:'JUL',august:'AUG',september:'SEP',
+  oktober:'OCT',november:'NOV',dezember:'DEC',
+};
+
+function _tiNormName(name) {
+  return (name || '').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+}
+
+function _tiNormDate(raw) {
+  raw = (raw || '').trim();
+  let m = raw.match(/^(\d{1,2})\s+(\w+)\s+(\d{4})$/);
+  if (m) {
+    const mo = _TI_MONTH_MAP[m[2].toLowerCase()] || m[2].toUpperCase();
+    return `${parseInt(m[1],10)} ${mo} ${m[3]}`;
+  }
+  m = raw.match(/^(\w+)\s+(\d{4})$/);
+  if (m) {
+    const mo = _TI_MONTH_MAP[m[1].toLowerCase()] || m[1].toUpperCase();
+    return `${mo} ${m[2]}`;
+  }
+  if (/^\d{4}$/.test(raw)) return raw;
+  return raw;
+}
+
+function _tiInferSex(block, fullName) {
+  if (/\bdaughter\s+of\b/i.test(block)) return 'F';
+  if (/\bson\s+of\b/i.test(block)) return 'M';
+  const hm = block.match(/\b(She|He)\b/i);
+  if (hm) return hm[1].toLowerCase() === 'she' ? 'F' : 'M';
+  const first = ((fullName || '').split(' ')[0] || '').toLowerCase();
+  const fem = ['a','e','ina','ine','ette','itha','ith','burg','hild','traud','gard','linde'];
+  const mal = ['us','old','olf','helm','bert','hard','fried','rich','mann','hans','anz'];
+  for (const s of fem) { if (first.endsWith(s) && first.length > s.length) return 'F'; }
+  for (const s of mal) { if (first.endsWith(s) && first.length > s.length) return 'M'; }
+  return null;
+}
+
+// Regex building blocks
+const _TI_DATE_PAT   = '(?:\\d{1,2}\\s+)?(?:Jan(?:uar)?|Feb(?:ruar)?|M[aä]r(?:z)?|Apr(?:il)?|Mai|May|Jun(?:i)?|Jul(?:i)?|Aug(?:ust)?|Sep(?:tember)?|O[ck]t(?:ober)?|Nov(?:ember)?|De[cz](?:ember)?)\\s+\\d{4}|\\d{4}';
+const _TI_DATE_CAP   = '(' + _TI_DATE_PAT + ')';
+const _TI_PLACE_PAT  = '([A-ZÄÖÜ][^,.\\n]+(?:,\\s*[A-ZÄÖÜ][^,.\\n]+)*)';
+const _TI_PFX        = '(?:von|van|de|der|den|di|du|le|la|zum|zur|am|im|auf|ten|ter)\\s+';
+const _TI_WORD       = '[A-ZÄÖÜ][a-zäöüß]+';
+const _TI_NAME_PAT   = '(?:' + _TI_PFX + ')?' + _TI_WORD + '(?:\\s+(?:' + _TI_PFX + ')?' + _TI_WORD + '){0,4}';
+
+const _TI_BORN_RE     = new RegExp('was born on\\s+' + _TI_DATE_CAP + '(?:\\s+in\\s+' + _TI_PLACE_PAT + ')?', 'i');
+const _TI_DIED_RE     = new RegExp('(?:died|death)\\s+(?:on\\s+)?' + _TI_DATE_CAP + '(?:\\s+in\\s+' + _TI_PLACE_PAT + ')?', 'i');
+const _TI_MARRIED_RE  = new RegExp('married\\s+(' + _TI_NAME_PAT + ')(?:\\s+on\\s+' + _TI_DATE_CAP + ')?(?:\\s+in\\s+' + _TI_PLACE_PAT + ')?', 'gi');
+const _TI_PARENTS_RE  = new RegExp(',\\s*(?:son|daughter)\\s+of\\s+(' + _TI_NAME_PAT + ')\\s+and\\s+(' + _TI_NAME_PAT + ')', 'i');
+const _TI_CHILDREN_RE = new RegExp('(' + _TI_NAME_PAT + ')\\s+and\\s+(' + _TI_NAME_PAT + ')\\s+had the following children?:', 'i');
+const _TI_CHILD_SOLE_RE = new RegExp('(' + _TI_NAME_PAT + ')\\s+had the following children?:', 'i');
+const _TI_CHILD_RE    = new RegExp('^([ivxlc]+)\\.\\s+(' + _TI_NAME_PAT + ')(?=\\s+was\\b|\\s+died\\b|\\s+married\\b|\\.\\s*$|\\s*$)', 'i');
+const _TI_INTRO_RE    = new RegExp('^(' + _TI_NAME_PAT + ')(?=\\s*,|\\s+was\\b|\\s+died\\b)');
+
+function _tiCleanText(raw) {
+  return raw
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .replace(/-\n(?=[a-z])/g, '');
+}
+
+function _tiParsePersonBlock(block) {
+  block = (block || '').trim();
+  if (!block) return null;
+  const im = _TI_INTRO_RE.exec(block);
+  if (!im) return null;
+
+  const p = {
+    fullName:    im[1].trim(),
+    sex:         _tiInferSex(block, im[1].trim()),
+    birthDate:   '', birthPlace: '',
+    deathDate:   '', deathPlace: '',
+    fatherName:  '', motherName: '',
+    marriages:   [],
+    sourceNote:  block.slice(0,300),
+  };
+
+  const pm = _TI_PARENTS_RE.exec(block);
+  if (pm) { p.fatherName = pm[1].trim(); p.motherName = pm[2].trim(); }
+
+  const bm = _TI_BORN_RE.exec(block);
+  if (bm) { p.birthDate = _tiNormDate(bm[1]); p.birthPlace = bm[2] ? bm[2].trim() : ''; }
+
+  const dm = _TI_DIED_RE.exec(block);
+  if (dm) { p.deathDate = _tiNormDate(dm[1]); p.deathPlace = dm[2] ? dm[2].trim() : ''; }
+
+  _TI_MARRIED_RE.lastIndex = 0;
+  let mm;
+  while ((mm = _TI_MARRIED_RE.exec(block)) !== null) {
+    p.marriages.push({
+      spouseName: mm[1].trim(),
+      date:       mm[2] ? _tiNormDate(mm[2]) : '',
+      place:      mm[3] ? mm[3].trim() : '',
+      children:   [],
+    });
+  }
+  return p;
+}
+
+function _tiParseText(text) {
+  const persons = [];
+  const seenKey = new Map();  // normName|birthYear -> index in persons[]
+
+  function mergeInto(existing, p) {
+    if (!existing.birthDate  && p.birthDate)  existing.birthDate  = p.birthDate;
+    if (!existing.birthPlace && p.birthPlace) existing.birthPlace = p.birthPlace;
+    if (!existing.deathDate  && p.deathDate)  existing.deathDate  = p.deathDate;
+    if (!existing.deathPlace && p.deathPlace) existing.deathPlace = p.deathPlace;
+    if (!existing.fatherName && p.fatherName) existing.fatherName = p.fatherName;
+    if (!existing.motherName && p.motherName) existing.motherName = p.motherName;
+    for (const m of p.marriages) {
+      const mn = _tiNormName(m.spouseName);
+      if (!existing.marriages.find(em => _tiNormName(em.spouseName) === mn))
+        existing.marriages.push(m);
+    }
+  }
+
+  function addPerson(p) {
+    if (!p || !p.fullName) return;
+    const yr = (p.birthDate||'').match(/\b(\d{4})\b/)?.[1] || '';
+    const key = _tiNormName(p.fullName) + '|' + yr;
+    if (seenKey.has(key)) { mergeInto(persons[seenKey.get(key)], p); return; }
+    seenKey.set(key, persons.length);
+    persons.push(p);
+  }
+
+  // Step 1: strip Generation/Ancestors prefixes and Notes blocks line by line
+  const rawLines = text.split('\n');
+  const lines = [];
+  let inNotes = false;
+  for (const line of rawLines) {
+    const t = line.trim();
+    if (/^Notes for /i.test(t)) { inNotes = true; continue; }
+    if (inNotes) {
+      // Notes end at a structural marker
+      if (!t || /^\d+\./.test(t) || /^[ivxlc]+\./i.test(t) ||
+          /had the following child/i.test(t)) {
+        inNotes = false;
+        if (t) lines.push(t);
+      }
+      continue;
+    }
+    // Strip "Ancestors of X" preamble and inline "Generation N" markers
+    const stripped = t
+      .replace(/^Ancestors\s+of\b[^.]*\.?\s*/i, '')
+      .replace(/\bGeneration\s+\d+\s*/g, '')
+      .trim();
+    if (stripped) lines.push(stripped);
+  }
+
+  // Step 2: group lines into main person blocks.
+  // A new block starts when a line opens with "N. Name" (digit+period+space+uppercase),
+  // but NOT "N. i." (digit+period+roman = back-reference child entry).
+  // Also "N." alone on a line → next line starts the block content.
+  const blocks = [];
+  let current = [];
+  let expectName = false;  // true after a bare "N." line
+
+  function flush() { if (current.length) blocks.push(current.join('\n')); current = []; }
+
+  for (const line of lines) {
+    const mainM  = line.match(/^(\d+)\.\s+([A-ZÄÖÜ])/);  // "8. Viktor"
+    const bareN  = line.match(/^(\d+)\.\s*$/);             // "4." alone
+    if (mainM) {
+      flush();
+      current = [line.slice(line.indexOf(mainM[2]))];  // drop the leading "N. "
+      expectName = false;
+    } else if (bareN) {
+      flush();
+      expectName = true;
+    } else if (expectName) {
+      current = [line];
+      expectName = false;
+    } else {
+      current.push(line);
+    }
+  }
+  flush();
+
+  // Step 3: parse each block
+  for (const block of blocks) {
+    const b = block.trim();
+    if (!b || b.length < 4) continue;
+
+    // Try two-parent family block first, then single-parent
+    const cb   = _TI_CHILDREN_RE.exec(b);
+    const cbS  = !cb ? _TI_CHILD_SOLE_RE.exec(b) : null;
+    const anyC = cb || cbS;
+
+    if (anyC) {
+      const parent2   = cb ? cb[2].trim() : '';
+      const parentSrc = b.slice(0, anyC.index).trim();
+      const afterSrc  = b.slice(anyC.index + anyC[0].length);
+
+      // Parse children; handle "ii.\nName" splits and "N. ii. Name" back-refs
+      const childRefs  = [];
+      const childLines = afterSrc.split('\n').map(l => l.trim()).filter(Boolean);
+      let pendingRoman = null;
+      for (const cl of childLines) {
+        // Roman numeral alone on a line ("ii." or "iii.")
+        if (/^[ivxlc]+\.\s*$/i.test(cl)) { pendingRoman = cl; continue; }
+        // Strip back-reference number prefix: "4. ii. " → "ii. "
+        const stripped = cl.replace(/^\d+\.\s+(?=[ivxlc]+\.)/i, '');
+        const combined = pendingRoman ? pendingRoman + ' ' + stripped : stripped;
+        pendingRoman = null;
+        const cm = _TI_CHILD_RE.exec(combined);
+        if (!cm) continue;
+        const childContent = combined.slice(combined.indexOf(cm[2]));
+        const child = _tiParsePersonBlock(childContent) || {
+          fullName: cm[2].trim(), sex: null,
+          birthDate:'', birthPlace:'', deathDate:'', deathPlace:'',
+          fatherName:'', motherName:'', marriages:[], sourceNote:'',
+        };
+        childRefs.push(child);
+        addPerson(child);
+      }
+
+      const p = parentSrc ? _tiParsePersonBlock(parentSrc) : null;
+      if (p) {
+        if (parent2) {
+          const n2      = _tiNormName(parent2);
+          const matched = p.marriages.find(m => _tiNormName(m.spouseName) === n2);
+          if (matched) matched.children = childRefs;
+          else if (p.marriages.length) p.marriages[0].children = childRefs;
+          else p.marriages.push({ spouseName: parent2, date:'', place:'', children: childRefs });
+        } else if (p.marriages.length) {
+          p.marriages[0].children = childRefs;
+        }
+        addPerson(p);
+      }
+    } else {
+      addPerson(_tiParsePersonBlock(b));
+    }
+  }
+
+  return persons;
+}
+
+function _tiGenerateActions(persons) {
+  const actions = [];
+
+  // Index existing GEDCOM data
+  const nameToId = new Map();
+  const keyToId  = new Map();
+  for (const [id, indi] of individuals) {
+    const nn = _tiNormName(indi.name || '');
+    if (nn) {
+      nameToId.set(nn, id);
+      const yr = (indi.birth.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+      keyToId.set(`${nn}|${yr}`, id);
+    }
+  }
+
+  // Keyed by sorted normalised names so new-couple collisions don't hide each other
+  function _famKey(a, b) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
+  const famPairs = new Set();
+  for (const [,fam] of families) {
+    const h = individuals.get(fam.husb); const w = individuals.get(fam.wife);
+    if (h || w) famPairs.add(_famKey(_tiNormName((h||w)?.name||''), _tiNormName((w||h)?.name||'')));
+  }
+
+  const pendingNames = new Map();  // normalisedName -> '__new__'
+
+  function lookup(person) {
+    const nn = _tiNormName(person.fullName);
+    const yr = (person.birthDate||'').match(/\b(\d{4})\b/)?.[1] || '';
+    if (keyToId.has(`${nn}|${yr}`)) return keyToId.get(`${nn}|${yr}`);
+    if (nameToId.has(nn)) {
+      const eid = nameToId.get(nn);
+      const indi = individuals.get(eid);
+      const eyr = (indi?.birth?.date||'').match(/\b(\d{4})\b/)?.[1] || '';
+      if (!eyr || !yr) return eid;
+    }
+    // Already queued in this import batch
+    if (pendingNames.has(nn)) return pendingNames.get(nn);
+    return null;
+  }
+
+  for (const person of persons) {
+    const existing = lookup(person);
+    if (existing === null) {
+      actions.push({
+        id:     Math.random().toString(36).slice(2),
+        kind:   'person',
+        status: 'pending',
+        fields: {
+          'Name':         person.fullName,
+          'Sex':          person.sex || '',
+          'Birth Date':   person.birthDate,
+          'Birth Place':  person.birthPlace,
+          'Death Date':   person.deathDate,
+          'Death Place':  person.deathPlace,
+          'Father':       person.fatherName,
+          'Mother':       person.motherName,
+        },
+        source:  person.sourceNote,
+        _person: person,
+      });
+      const nn = _tiNormName(person.fullName);
+      pendingNames.set(nn, '__new__');
+    }
+  }
+
+  for (const person of persons) {
+    for (const marriage of person.marriages) {
+      let husbName, wifeName;
+      if (person.sex === 'F') { husbName = marriage.spouseName; wifeName = person.fullName; }
+      else                    { husbName = person.fullName;     wifeName = marriage.spouseName; }
+
+      const hn = _tiNormName(husbName);
+      const wn = _tiNormName(wifeName);
+      const pairKey = _famKey(hn, wn);
+      if (famPairs.has(pairKey)) continue;
+
+      actions.push({
+        id:       Math.random().toString(36).slice(2),
+        kind:     'marriage',
+        status:   'pending',
+        fields: {
+          'Husband':        husbName,
+          'Wife':           wifeName,
+          'Marriage Date':  marriage.date,
+          'Marriage Place': marriage.place,
+          'Children':       marriage.children.map(c => c.fullName).join('; '),
+        },
+        source:    person.sourceNote,
+        _person:   person,
+        _marriage: marriage,
+      });
+      famPairs.add(pairKey);
+    }
+  }
+
+  return actions;
+}
+
+function _tiApplyActions(actions) {
+  let maxIndi = 0, maxFam = 0;
+  for (const [id] of individuals) { const m = id.match(/\d+/); if (m) maxIndi = Math.max(maxIndi,+m[0]); }
+  for (const [id] of families)    { const m = id.match(/\d+/); if (m) maxFam  = Math.max(maxFam, +m[0]); }
+
+  const nameToId = new Map();
+  for (const [id, indi] of individuals) nameToId.set(_tiNormName(indi.name||''), id);
+
+  const famsOf = new Map();   // indiId -> [famId]
+  const famcOf = new Map();   // childId -> famId
+  const report = [];
+  const actionXref = new Map();  // action.id -> indiId
+
+  // Pass 1: allocate INDI xrefs for approved persons
+  for (const action of actions) {
+    if (action.status !== 'approved' || action.kind !== 'person') continue;
+    const name = (action.fields['Name'] || '').trim();
+    if (!name) continue;
+    const nn = _tiNormName(name);
+    if (nameToId.has(nn)) {
+      report.push({ type:'skip', msg:`${name} — already exists` });
+      actionXref.set(action.id, nameToId.get(nn));
+    } else {
+      const xref = `@I${++maxIndi}@`;
+      nameToId.set(nn, xref);
+      actionXref.set(action.id, xref);
+      report.push({ type:'add', msg:`${name} → ${xref}` });
+    }
+  }
+
+  // Pass 2: create FAM records for approved marriages
+  for (const action of actions) {
+    if (action.status !== 'approved' || action.kind !== 'marriage') continue;
+    const husbName = (action.fields['Husband']||'').trim();
+    const wifeName = (action.fields['Wife']||'').trim();
+    const husbId = nameToId.get(_tiNormName(husbName)) || null;
+    const wifeId = nameToId.get(_tiNormName(wifeName)) || null;
+    const famXref = `@F${++maxFam}@`;
+
+    const childIds = [];
+    const childrenStr = action.fields['Children'] || '';
+    for (const cname of childrenStr.split(';').map(s=>s.trim()).filter(Boolean)) {
+      const cid = nameToId.get(_tiNormName(cname));
+      if (cid) { childIds.push(cid); if (!famcOf.has(cid)) famcOf.set(cid, famXref); }
+    }
+
+    if (husbId) { if (!famsOf.has(husbId)) famsOf.set(husbId,[]); famsOf.get(husbId).push(famXref); }
+    if (wifeId) { if (!famsOf.has(wifeId)) famsOf.set(wifeId,[]); famsOf.get(wifeId).push(famXref); }
+
+    families.set(famXref, {
+      id: famXref, husb: husbId, wife: wifeId, chil: childIds,
+      marr: { date: action.fields['Marriage Date']||'', plac: action.fields['Marriage Place']||'' },
+      div: false,
+    });
+    report.push({ type:'fam', msg:`${husbName} + ${wifeName} → ${famXref}` });
+  }
+
+  // Pass 3: create INDI records
+  for (const action of actions) {
+    if (action.status !== 'approved' || action.kind !== 'person') continue;
+    const xref = actionXref.get(action.id);
+    if (!xref || individuals.has(xref)) continue;
+
+    const name  = (action.fields['Name']||'').trim();
+    const parts = name.split(/\s+/);
+    const givn  = parts.length >= 2 ? parts.slice(0,-1).join(' ') : name;
+    const surn  = parts.length >= 2 ? parts[parts.length-1] : '';
+    const bdate = action.fields['Birth Date'] || '';
+    const yrm   = bdate.match(/\b(\d{4})\b/);
+
+    let displayName = givn && surn ? `${givn} ${surn}` : name;
+    if (displayName.length > 24) {
+      displayName = givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : displayName.slice(0,22) + '…';
+    }
+
+    const noteParts = [];
+    if (action.fields['Father']) noteParts.push('Father: ' + action.fields['Father']);
+    if (action.fields['Mother']) noteParts.push('Mother: ' + action.fields['Mother']);
+
+    individuals.set(xref, {
+      id: xref, name, givn, surn,
+      sex: (action.fields['Sex']||'U').trim() || 'U',
+      birth: { date: bdate, plac: action.fields['Birth Place']||'' },
+      death: { date: action.fields['Death Date']||'', plac: action.fields['Death Place']||'', caus:'' },
+      deceased: !!(action.fields['Death Date']),
+      birthYear: yrm ? +yrm[1] : null,
+      famc: famcOf.has(xref) ? [famcOf.get(xref)] : [],
+      fams: famsOf.get(xref) || [],
+      occu: '',
+      note: noteParts.join('; '),
+      displayName,
+    });
+  }
+
+  // Pass 4: patch FAMS/FAMC on pre-existing individuals
+  for (const [indiId, famIds] of famsOf) {
+    const indi = individuals.get(indiId);
+    if (!indi) continue;
+    for (const famId of famIds) { if (!indi.fams.includes(famId)) indi.fams.push(famId); }
+  }
+  for (const [childId, famId] of famcOf) {
+    const indi = individuals.get(childId);
+    if (!indi) continue;
+    if (!indi.famc.includes(famId)) indi.famc.push(famId);
+  }
+
+  return report;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEXT IMPORT UI
+// ═══════════════════════════════════════════════════════════════
+
+let _importActions = [];
+
+function openTextImport() {
+  document.getElementById('import-modal').style.display = 'flex';
+  _resetImportUI();
+}
+
+function closeTextImport() {
+  document.getElementById('import-modal').style.display = 'none';
+  _importActions = [];
+}
+
+function _resetImportUI() {
+  document.getElementById('import-step-input').style.display = '';
+  document.getElementById('import-step-review').style.display = 'none';
+  document.getElementById('import-text-area').value = '';
+  const fi = document.getElementById('import-file-input');
+  if (fi) { fi.value = ''; }
+  document.getElementById('import-file-name').textContent = 'Keine Datei gewählt';
+  _importActions = [];
+}
+
+function handleImportFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('import-file-name').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = ev => { document.getElementById('import-text-area').value = ev.target.result || ''; };
+  reader.readAsText(file, 'utf-8');
+}
+
+function parseImportText() {
+  const raw = (document.getElementById('import-text-area').value || '').trim();
+  if (!raw) { alert('Bitte Text eingeben oder Datei laden.'); return; }
+
+  const clean   = _tiCleanText(raw);
+  const persons = _tiParseText(clean);
+
+  if (!persons.length) {
+    alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
+    return;
+  }
+
+  _importActions = _tiGenerateActions(persons);
+
+  if (!_importActions.length) {
+    alert(`${persons.length} Person(en) erkannt, aber alle sind bereits in der GEDCOM-Datei vorhanden.`);
+    return;
+  }
+
+  document.getElementById('import-step-input').style.display = 'none';
+  document.getElementById('import-step-review').style.display = '';
+  _renderImportReview();
+}
+
+function _renderImportReview() {
+  const nPers    = _importActions.filter(a => a.kind === 'person').length;
+  const nMarr    = _importActions.filter(a => a.kind === 'marriage').length;
+  const nApp     = _importActions.filter(a => a.status === 'approved').length;
+  const nSkip    = _importActions.filter(a => a.status === 'skipped').length;
+  const nPend    = _importActions.filter(a => a.status === 'pending').length;
+
+  document.getElementById('import-summary').innerHTML = `
+    <div class="import-summary-bar">
+      <span class="import-stat"><b>${_importActions.length}</b> Vorschläge</span>
+      <span class="import-stat import-stat--person">&#x1F464; <b>${nPers}</b> Person${nPers!==1?'en':''}</span>
+      <span class="import-stat import-stat--marriage">&#x1F48D; <b>${nMarr}</b> Ehe${nMarr!==1?'n':''}</span>
+      <span class="import-stat import-stat--approved">&#x2713; <b>${nApp}</b> genehmigt</span>
+      <span class="import-stat import-stat--skipped">&#x2715; <b>${nSkip}</b> übersprungen</span>
+      <span class="import-stat import-stat--pending">&#x23F3; <b>${nPend}</b> ausstehend</span>
+    </div>
+    <div class="import-bulk-actions">
+      <button class="import-bulk-btn import-bulk-btn--approve" onclick="_importApproveAll()">&#x2713; Alle genehmigen</button>
+      <button class="import-bulk-btn import-bulk-btn--skip"    onclick="_importSkipAll()">&#x2715; Alle überspringen</button>
+      <button class="import-bulk-btn import-bulk-btn--reset"   onclick="_importResetAll()">&#x21BA; Zurücksetzen</button>
+    </div>
+  `;
+
+  document.getElementById('import-actions-list').innerHTML =
+    _importActions.map((action, idx) => _renderImportCard(action, idx)).join('');
+}
+
+function _renderImportCard(action) {
+  const kindLabel = action.kind === 'person' ? 'Person hinzufügen' : 'Ehe hinzufügen';
+  const kindClass = action.kind === 'person' ? 'import-badge--person' : 'import-badge--marriage';
+  const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
+  const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
+
+  const fieldsHtml = Object.entries(action.fields).map(([label, val]) => {
+    const wideClass = label === 'Children' ? ' import-field-row--wide' : '';
+    const fid = `if-${action.id}-${label.replace(/\s+/g,'_')}`;
+    return `<div class="import-field-row${wideClass}">
+      <label class="import-field-label" for="${fid}">${escHtml(label)}</label>
+      <input class="import-field-input" id="${fid}" type="text"
+             value="${escHtml(val||'')}"
+             data-action="${action.id}" data-field="${label}"
+             placeholder="(leer)">
+    </div>`;
+  }).join('');
+
+  const srcHtml = action.source ? `
+    <details class="import-source-details">
+      <summary>Quelltext</summary>
+      <div class="import-source-text">${escHtml(action.source)}</div>
+    </details>` : '';
+
+  const appActive = action.status === 'approved' ? ' import-btn--active' : '';
+  const skpActive = action.status === 'skipped'  ? ' import-btn--active' : '';
+
+  return `<div class="import-action-card import-action-card--${action.status}" data-action-id="${action.id}">
+    <div class="import-card-header">
+      <span class="import-badge ${kindClass}">${kindLabel}</span>
+      <span class="import-status ${stCls}">${stLbl}</span>
+    </div>
+    <div class="import-fields">${fieldsHtml}</div>
+    ${srcHtml}
+    <div class="import-card-actions">
+      <button class="import-btn import-btn--approve${appActive}" data-action="${action.id}" data-status="approved">&#x2713; Genehmigen</button>
+      <button class="import-btn import-btn--skip${skpActive}"    data-action="${action.id}" data-status="skipped">&#x2715; \xdcberspringen</button>
+    </div>
+  </div>`;
+}
+
+// Single delegated listener on the list container (set up once)
+document.addEventListener('DOMContentLoaded', () => {
+  const list = document.getElementById('import-actions-list');
+  if (!list) return;
+
+  // Button clicks (approve / skip)
+  list.addEventListener('click', e => {
+    const btn = e.target.closest('[data-status]');
+    if (!btn) return;
+    const id = btn.dataset.action;
+    const wantedStatus = btn.dataset.status;
+    const action = _importActions.find(a => a.id === id);
+    if (!action) return;
+    action.status = (action.status === wantedStatus) ? 'pending' : wantedStatus;
+    const card = list.querySelector(`[data-action-id="${id}"]`);
+    _renderImportReview();
+    // Re-scroll to keep card in view after re-render
+    const newCard = list.querySelector(`[data-action-id="${id}"]`);
+    if (newCard) newCard.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  });
+
+  // Field edits (delegated input)
+  list.addEventListener('input', e => {
+    const inp = e.target.closest('[data-action][data-field]');
+    if (!inp) return;
+    const action = _importActions.find(a => a.id === inp.dataset.action);
+    if (action) action.fields[inp.dataset.field] = inp.value;
+  });
+});
+
+function _importApproveAll() { _importActions.forEach(a => a.status = 'approved'); _renderImportReview(); }
+function _importSkipAll()    { _importActions.forEach(a => a.status = 'skipped');  _renderImportReview(); }
+function _importResetAll()   { _importActions.forEach(a => a.status = 'pending');  _renderImportReview(); }
+
+function backToInputImport() {
+  document.getElementById('import-step-input').style.display = '';
+  document.getElementById('import-step-review').style.display = 'none';
+}
+
+function applyImport() {
+  const nApproved = _importActions.filter(a => a.status === 'approved').length;
+  if (nApproved === 0) {
+    alert('Keine Änderungen genehmigt.\nBitte mindestens eine Änderung genehmigen.');
+    return;
+  }
+
+  const report = _tiApplyActions(_importActions);
+  _fullRebuildGraph();
+  closeTextImport();
+
+  const nAdd  = report.filter(r => r.type === 'add').length;
+  const nFam  = report.filter(r => r.type === 'fam').length;
+  const nSkip = report.filter(r => r.type === 'skip').length;
+  alert(`Import abgeschlossen:\n• ${nAdd} Person${nAdd!==1?'en':''} hinzugef\xfcgt\n• ${nFam} Famili${nFam!==1?'en':'e'} erstellt\n• ${nSkip} bereits vorhanden`);
+}
+
+window.openTextImport    = openTextImport;
+window.closeTextImport   = closeTextImport;
+window.handleImportFileSelect = handleImportFileSelect;
+window.parseImportText   = parseImportText;
+window.backToInputImport = backToInputImport;
+window.applyImport       = applyImport;
+window._importApproveAll = _importApproveAll;
+window._importSkipAll    = _importSkipAll;
+window._importResetAll   = _importResetAll;
