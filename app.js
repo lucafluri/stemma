@@ -204,35 +204,37 @@ function toggleSidebar() {
 // TOUCH SUPPORT
 // ═══════════════════════════════════════════════════════════════
 
-// ── 3D pinch-to-zoom (OrbitControls has enableZoom=false) ──
-let _pinch3d = null;  // { dist0, camDist0 }
+// ── 3D pinch-to-zoom ──
+let _pinch3d = null;  // { dist0, camDist0, midX, midY }
 
 function _onTouch3DStart(evt) {
   if (evt.touches.length === 2 && graph3d && _orbitControls3d) {
     evt.preventDefault();
-    const dx = evt.touches[0].clientX - evt.touches[1].clientX;
-    const dy = evt.touches[0].clientY - evt.touches[1].clientY;
-    const dist0 = Math.hypot(dx, dy);
-    const camDist0 = graph3d.camera().position.distanceTo(_orbitControls3d.target);
-    _pinch3d = { dist0, camDist0 };
+    const t0 = evt.touches[0], t1 = evt.touches[1];
+    _pinch3d = {
+      dist0:    Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
+      camDist0: graph3d.camera().position.distanceTo(_orbitControls3d.target),
+      midX: (t0.clientX + t1.clientX) / 2,
+      midY: (t0.clientY + t1.clientY) / 2,
+    };
   }
 }
 
 function _onTouch3DMove(evt) {
   if (!_pinch3d || evt.touches.length !== 2 || !graph3d || !_orbitControls3d) return;
   evt.preventDefault();
-  const dx = evt.touches[0].clientX - evt.touches[1].clientX;
-  const dy = evt.touches[0].clientY - evt.touches[1].clientY;
-  const dist = Math.hypot(dx, dy);
-  const scale = _pinch3d.dist0 / Math.max(dist, 1);
-  let newDist = _pinch3d.camDist0 * scale;
-  newDist = Math.max(25, Math.min(14000, newDist));
+  const t0 = evt.touches[0], t1 = evt.touches[1];
+  const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
 
-  // Move camera along the line from target to camera
+  // Correct scale: wider pinch = smaller distance (zoom in)
+  const scale = _pinch3d.dist0 / Math.max(dist, 1);
+  const newDist = Math.max(1, _pinch3d.camDist0 * scale);
+
   const cam = graph3d.camera();
-  const dir = cam.position.clone().sub(_orbitControls3d.target).normalize();
-  cam.position.copy(_orbitControls3d.target).addScaledVector(dir, newDist);
-  _orbitControls3d.update();
+  const ctrl = _orbitControls3d;
+  const dir = cam.position.clone().sub(ctrl.target).normalize();
+  cam.position.copy(ctrl.target).addScaledVector(dir, newDist);
+  ctrl.update();
 }
 
 function _onTouch3DEnd(evt) {
@@ -342,7 +344,7 @@ function parseGEDCOM(raw) {
       if (tag.startsWith('@') && val === 'INDI') {
         cur = {
           id: tag,
-          name: '', givn: '', surn: '',
+          name: '', givn: '', surn: '', maidenName: '',
           sex: 'U',
           birth: { date: '', plac: '' },
           death: { date: '', plac: '', caus: '' },
@@ -376,9 +378,8 @@ function parseGEDCOM(raw) {
         subCtx = null;
         switch (tag) {
           case 'NAME':
-            // Only accept first non-empty name
             if (!cur.name) {
-              // val like "Luca /Fluri/" or "/Kuhn/" or ""
+              // First NAME record — primary name like "Luca /Fluri/" or "/Kuhn/"
               if (val && val !== '//' && val.trim()) {
                 const clean = val.replace(/\//g, '').replace(/\s+/g, ' ').trim();
                 if (clean) {
@@ -389,8 +390,15 @@ function parseGEDCOM(raw) {
                   if (gm) cur.givn = gm[1].trim();
                 }
               }
+              subCtx = 'NAME';
+            } else if (!cur.maidenName) {
+              // Second NAME record — treat as maiden/birth name
+              const sm2 = val.match(/\/([^/]+)\//);
+              cur.maidenName = sm2 ? sm2[1].trim() : val.replace(/\//g, '').trim();
+              subCtx = 'NAME2';
             }
             break;
+          case '_MARN': if (val && !cur.maidenName) cur.maidenName = val; break;
           case 'SEX':  cur.sex = val; break;
           case 'BIRT': subCtx = 'BIRT'; break;
           case 'DEAT':
@@ -415,6 +423,14 @@ function parseGEDCOM(raw) {
             if (tag === 'DATE') cur.death.date = val;
             else if (tag === 'PLAC') cur.death.plac = val;
             else if (tag === 'CAUS') cur.death.caus = val;
+            break;
+          case 'NAME':
+            if (tag === 'GIVN') cur.givn = cur.givn || val;
+            else if (tag === 'SURN') cur.surn = cur.surn || val;
+            else if (tag === 'CONT') cur.note += '\n' + val;
+            break;
+          case 'NAME2':
+            if (tag === 'SURN') cur.maidenName = val;  // explicit SURN beats parsed value
             break;
           default:
             if (tag === 'GIVN' && !cur.givn) cur.givn = val;
@@ -893,22 +909,23 @@ function initSVG() {
   zoomBehavior = d3.zoom()
     .scaleExtent([0.005, 20])
     .constrain((transform, extent, translateExtent) => {
-      // Custom constraint: when scale is clamped, prevent translate drift
-      // by keeping the previous translate values
+      // Custom constraint: prevent translate drift when hitting zoom limits
+      // Allow small epsilon for floating point comparisons
       const k = transform.k;
       const minK = 0.005;
       const maxK = 20;
+      const epsilon = 0.0001;
 
-      if (k <= minK && _lastTransform.k <= minK) {
-        // At min zoom limit - keep previous translate to prevent drift
+      // If we're trying to go below min and already near min - clamp and prevent drift
+      if (k <= minK && _lastTransform.k <= minK + epsilon) {
         return d3.zoomIdentity.translate(_lastTransform.x, _lastTransform.y).scale(minK);
       }
-      if (k >= maxK && _lastTransform.k >= maxK) {
-        // At max zoom limit - keep previous translate to prevent drift
+      // If we're trying to go above max and already near max - clamp and prevent drift
+      if (k >= maxK && _lastTransform.k >= maxK - epsilon) {
         return d3.zoomIdentity.translate(_lastTransform.x, _lastTransform.y).scale(maxK);
       }
 
-      // Otherwise allow normal transform
+      // Otherwise allow normal transform (including zooming away from limits)
       return transform;
     })
     .on('zoom', evt => {
@@ -928,28 +945,6 @@ function initSVG() {
         requestAnimationFrame(() => { _labelRafPending = false; updateLabels(); });
       }
     });
-
-  // Improve wheel/touchpad zoom: smoother, gentler steps
-  svgSel.on('wheel.zoom', evt => {
-    evt.preventDefault();
-    const delta = evt.deltaY;
-    // Detect touchpad (often has fractional deltas) vs mouse wheel
-    const isTouchpad = Math.abs(delta) < 50 || evt.deltaMode === 0;
-    const factor = isTouchpad
-      ? (delta > 0 ? 0.92 : 1.08)  // Smaller steps for touchpad (smoother)
-      : (delta > 0 ? 0.85 : 1.15); // Larger steps for mouse wheel
-
-    const transform = d3.zoomTransform(svgSel.node());
-    const point = d3.pointer(evt, svgSel.node());
-
-    const newK = Math.max(0.005, Math.min(20, transform.k * factor));
-    if (newK !== transform.k) {
-      const newX = point[0] - (point[0] - transform.x) * (newK / transform.k);
-      const newY = point[1] - (point[1] - transform.y) * (newK / transform.k);
-      const newTransform = d3.zoomIdentity.translate(newX, newY).scale(newK);
-      svgSel.call(zoomBehavior.transform, newTransform);
-    }
-  }, { passive: false });
 
   // Auto-recenter if graph centroid is way off-screen (prevents getting "lost")
   setInterval(() => {
@@ -1436,7 +1431,8 @@ function onHover(evt, d) {
       html += `<div class="tt-detail">† ${i.death.date ? escHtml(i.death.date) : 'Datum unbekannt'}</div>`;
     }
     if (i.occu) html += `<div class="tt-detail" style="color:#7ac">${escHtml(i.occu)}</div>`;
-    if (i.surn) html += `<div class="tt-detail" style="color:#888">Familienname: ${escHtml(i.surn)}</div>`;
+    if (i.maidenName) html += `<div class="tt-detail" style="color:#888">geb. ${escHtml(i.maidenName)}</div>`;
+    else if (i.surn) html += `<div class="tt-detail" style="color:#888">Familienname: ${escHtml(i.surn)}</div>`;
   } else {
     const f = d.data;
     const names = [f.husb, f.wife].filter(Boolean)
@@ -1506,6 +1502,9 @@ function showIndiDetail(id) {
 
   // Occupation
   if (indi.occu) html += row('Beruf', escHtml(indi.occu));
+
+  // Maiden name
+  if (indi.maidenName) html += row('Geburtsname', escHtml(indi.maidenName));
 
   // Parents
   if (indi.famc.length) {
@@ -2107,6 +2106,7 @@ function serializeGEDCOM() {
       lines.push(`1 NAME ${i.name}`);
     }
 
+    if (i.maidenName) lines.push(`1 _MARN ${i.maidenName}`);
     if (i.sex && i.sex !== 'U') lines.push(`1 SEX ${i.sex}`);
 
     if (i.birth.date || i.birth.plac) {
@@ -2277,7 +2277,7 @@ function confirmNewPersonRelation() {
     : fullName;
 
   individuals.set(newId, {
-    id: newId, name: fullName, givn, surn, sex,
+    id: newId, name: fullName, givn, surn, maidenName: '', sex,
     birth: { date: '', plac: '' },
     death: { date: '', plac: '', caus: '' },
     deceased: false, birthYear: null,
@@ -2363,6 +2363,10 @@ function showIndiEditForm(id) {
     <div class="edit-section">
       <div class="edit-label">Familienname</div>
       <input class="edit-input" id="ef-surn" value="${escAttr(i.surn)}">
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Geburtsname (Mädchenname)</div>
+      <input class="edit-input" id="ef-maiden" value="${escAttr(i.maidenName || '')}">
     </div>
     <div class="edit-section">
       <div class="edit-label">Geschlecht</div>
@@ -2464,8 +2468,9 @@ function commitIndiEdit() {
   const givn = document.getElementById('ef-givn').value.trim();
   const surn = document.getElementById('ef-surn').value.trim();
 
-  i.givn = givn;
-  i.surn = surn;
+  i.givn       = givn;
+  i.surn       = surn;
+  i.maidenName = (document.getElementById('ef-maiden')?.value || '').trim();
   // Rebuild name from parts
   i.name = (givn ? givn + ' ' : '') + (surn ? surn : '');
   if (!i.name.trim()) i.name = _editingId.replace(/@/g, '');
@@ -2777,7 +2782,7 @@ function getNextFamId() {
 function addNewPerson() {
   const id = getNextIndiId();
   individuals.set(id, {
-    id, name: '', givn: '', surn: '', sex: 'U',
+    id, name: '', givn: '', surn: '', maidenName: '', sex: 'U',
     birth: { date: '', plac: '' },
     death: { date: '', plac: '', caus: '' },
     deceased: false, birthYear: null,
@@ -2998,18 +3003,18 @@ function initGraph3D() {
 
     _orbitControls3d = new THREE.OrbitControls(cam, domEl);
     _orbitControls3d.enableDamping  = true;
-    _orbitControls3d.dampingFactor  = 0.08;
-    _orbitControls3d.rotateSpeed    = 0.45;
+    _orbitControls3d.dampingFactor  = 0.10;
+    _orbitControls3d.rotateSpeed    = 0.5;
     _orbitControls3d.panSpeed       = 0.9;
-    _orbitControls3d.enableZoom     = false;   // zoom handled manually for zoom-to-cursor
+    _orbitControls3d.enableZoom     = false;   // wheel zoom handled manually (zoom-to-cursor)
     _orbitControls3d.enablePan      = true;
-    _orbitControls3d.minDistance    = 20;
-    _orbitControls3d.maxDistance    = 14000;
-    // Touch: 1-finger = ROTATE, 2-finger = PAN (zoom handled by our pinch handler)
+    _orbitControls3d.minDistance    = 1;       // unrestricted — no hard floor
+    _orbitControls3d.maxDistance    = Infinity;
+    // Touch: 1-finger = ROTATE, 2-finger = PAN only (zoom via our pinch handler)
     if (_orbitControls3d.touches) {
       _orbitControls3d.touches = {
         ONE: THREE.TOUCH.ROTATE,
-        TWO: THREE.TOUCH.DOLLY_PAN,
+        TWO: THREE.TOUCH.PAN,
       };
     }
     cam.up.set(0, 1, 0);
@@ -3318,6 +3323,7 @@ function makeNameSprite3D(n) {
   if (n.type !== 'INDI') return null;
   const indi = n.data;
   const name = indi.displayName || indi.name || n.id;
+  const maidenLine = indi.maidenName ? `geb. ${indi.maidenName}` : '';
   let born = '';
   if (indi.birthYear) {
     born = `*${indi.birthYear}`;
@@ -3330,19 +3336,25 @@ function makeNameSprite3D(n) {
   const yearLine = [born, died].filter(Boolean).join('  ');
   const textColor = _nameTextColor(n);
 
-  const FONT_NAME = _3dFontSize;
-  const FONT_YEAR = Math.round(_3dFontSize * 0.72);
+  const FONT_NAME   = _3dFontSize;
+  const FONT_MAIDEN = Math.round(_3dFontSize * 0.72);
+  const FONT_YEAR   = Math.round(_3dFontSize * 0.72);
   const PAD_X = 8, PAD_Y = 4, LINE_GAP = 2;
 
-  // Measure both lines to pick canvas width
+  // Measure all lines to pick canvas width
   const tmpCtx = document.createElement('canvas').getContext('2d');
   tmpCtx.font = `bold ${FONT_NAME}px Arial`;
   const nameW = tmpCtx.measureText(name).width;
+  tmpCtx.font = `italic ${FONT_MAIDEN}px Arial`;
+  const maidenW = maidenLine ? tmpCtx.measureText(maidenLine).width : 0;
   tmpCtx.font = `${FONT_YEAR}px Arial`;
   const yearW = yearLine ? tmpCtx.measureText(yearLine).width : 0;
 
-  const LW = Math.ceil(Math.max(nameW, yearW)) + PAD_X * 2;
-  const LH = FONT_NAME + (yearLine ? FONT_YEAR + LINE_GAP : 0) + PAD_Y * 2;
+  const LW = Math.ceil(Math.max(nameW, maidenW, yearW)) + PAD_X * 2;
+  const LH = FONT_NAME
+    + (maidenLine ? FONT_MAIDEN + LINE_GAP : 0)
+    + (yearLine   ? FONT_YEAR   + LINE_GAP : 0)
+    + PAD_Y * 2;
 
   const sprite = makeTextSprite3D((ctx, w, h) => {
     ctx.fillStyle = 'rgba(6, 12, 36, 0.84)';
@@ -3352,17 +3364,26 @@ function makeNameSprite3D(n) {
     ctx.strokeStyle = textColor + '55';
     ctx.lineWidth = 1;
     ctx.stroke();
-    // Name
-    ctx.font = `bold ${FONT_NAME}px Arial`;
-    ctx.fillStyle = textColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(name, w / 2, PAD_Y);
+    let y = PAD_Y;
+    // Name line
+    ctx.font = `bold ${FONT_NAME}px Arial`;
+    ctx.fillStyle = textColor;
+    ctx.fillText(name, w / 2, y);
+    y += FONT_NAME + LINE_GAP;
+    // Maiden name line
+    if (maidenLine) {
+      ctx.font = `italic ${FONT_MAIDEN}px Arial`;
+      ctx.fillStyle = textColor + 'cc';
+      ctx.fillText(maidenLine, w / 2, y);
+      y += FONT_MAIDEN + LINE_GAP;
+    }
     // Year line
     if (yearLine) {
       ctx.font = `${FONT_YEAR}px Arial`;
       ctx.fillStyle = textColor + 'aa';
-      ctx.fillText(yearLine, w / 2, PAD_Y + FONT_NAME + LINE_GAP);
+      ctx.fillText(yearLine, w / 2, y);
     }
   }, LW, LH);
 
@@ -3599,34 +3620,36 @@ function _tickOrbitTarget() {
 function _onWheel3D(evt) {
   evt.preventDefault();
   if (!graph3d || !_orbitControls3d) return;
-  // Cancel orbit tracking — user is taking manual control
   _orbitTargetAnim = null;
   _orbitTrackNodeId = null;
 
-  const cam   = graph3d.camera();
-  const ctrl  = _orbitControls3d;
-  const el    = graph3d.renderer().domElement;
-  const rect  = el.getBoundingClientRect();
+  const cam  = graph3d.camera();
+  const ctrl = _orbitControls3d;
+  const el   = graph3d.renderer().domElement;
+  const rect = el.getBoundingClientRect();
 
-  // Ray direction from camera through the cursor
+  // Normalise delta across mouse wheels (deltaMode 0=px,1=line,2=page) and trackpads
+  let delta = evt.deltaY;
+  if (evt.deltaMode === 1) delta *= 33;
+  if (evt.deltaMode === 2) delta *= 800;
+
+  // Cursor ray into the scene
   const nx  = ((evt.clientX - rect.left) / rect.width)  *  2 - 1;
   const ny  = -((evt.clientY - rect.top)  / rect.height) *  2 + 1;
-  const dir = new THREE.Vector3(nx, ny, 0.5)
-    .unproject(cam)
-    .sub(cam.position)
-    .normalize();
+  const ray = new THREE.Vector3(nx, ny, 0.5).unproject(cam).sub(cam.position).normalize();
 
-  // Zoom step proportional to current camera-to-target distance
-  const dist = cam.position.distanceTo(ctrl.target);
-  const step = evt.deltaY * 0.0008 * dist;
+  // Exponential factor: consistent feel at any distance, no hard cutoff
+  const factor  = Math.pow(1.0015, delta);   // >1 = zoom out, <1 = zoom in
+  const dist    = cam.position.distanceTo(ctrl.target);
+  const newDist = Math.max(1, dist * factor);
 
-  const newDist = dist + step;
-  if (newDist < 25 || newDist > 14000) return;
-
-  // Move camera along ray (toward cursor); target follows at 25% so camera
-  // actually closes in on the scene (true zoom, not just pan)
-  cam.position.addScaledVector(dir, step);
-  ctrl.target.addScaledVector(dir, step * 0.25);
+  // Zoom-to-cursor: find scene point under cursor at cam-target depth,
+  // move camera toward it, shift target by the same delta (orbit geometry preserved).
+  const focusPoint = cam.position.clone().addScaledVector(ray, dist);
+  const newCamPos  = focusPoint.clone().addScaledVector(ray, -newDist);
+  const shift      = newCamPos.clone().sub(cam.position);
+  cam.position.copy(newCamPos);
+  ctrl.target.add(shift);   // same shift — keeps cam↔target vector intact
   ctrl.update();
 }
 
