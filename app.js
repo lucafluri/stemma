@@ -28,6 +28,90 @@ let hlSet  = new Set();       // highlighted node ids
 
 let surnameColors  = new Map();   // surname -> color string
 let surnameEnabled = new Map();   // surname -> bool
+let surnameCustomColors = new Map(); // surname -> user-picked color (persisted)
+let colorBySurname = true;        // global toggle for surname coloring
+let _surnameColorCache = new Map(); // memoized hash colors
+
+// Load persisted settings
+const _lsSurnameColors = localStorage.getItem('surnameCustomColors');
+if (_lsSurnameColors) {
+  try {
+    const parsed = JSON.parse(_lsSurnameColors);
+    surnameCustomColors = new Map(Object.entries(parsed));
+  } catch (e) { /* ignore */ }
+}
+colorBySurname = localStorage.getItem('colorBySurname') !== 'false'; // default true
+
+// Label styling state - defaults for fully opaque surname-colored labels
+let labelStyle = {
+  textColor: '#cccccc',
+  textOpacity: 1.0,  // Fully opaque
+  fontSize: 32,      // 32 from screenshot
+  fontWeight: 'normal',
+  bgEnabled: false,
+  bgColor: '#1a1a2e',
+  bgOpacity: 0.7
+};
+
+// === Surname Color Functions ===
+// Golden angle (≈137.508°) gives maximum perceptual separation for any N colors
+const GOLDEN_ANGLE = 137.508;
+
+function surnameHashColor(surname) {
+  // Fallback for surnames not in the pre-assigned cache
+  if (!surname) return '#888888';
+  let hash = 0;
+  const s = surname.toLowerCase().trim();
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash) + s.charCodeAt(i);
+    hash = hash & hash;
+  }
+  const h = Math.abs(hash) % 360;
+  return hslToHex(h, 50, 52);
+}
+
+function hslToHex(h, s, l) {
+  l /= 100;
+  const a = s * Math.min(l, 1 - l) / 100;
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function surnameColor(surname) {
+  if (!surname) return '#888888';
+  // Check for user override
+  if (surnameCustomColors.has(surname)) {
+    return surnameCustomColors.get(surname);
+  }
+  // Use cached hash color
+  if (!_surnameColorCache.has(surname)) {
+    _surnameColorCache.set(surname, surnameHashColor(surname));
+  }
+  return _surnameColorCache.get(surname);
+}
+
+function setSurnameColor(surname, color) {
+  if (color === null || color === undefined) {
+    surnameCustomColors.delete(surname);
+  } else {
+    surnameCustomColors.set(surname, color);
+  }
+  // Persist
+  debouncedLsWrite('surnameCustomColors', JSON.stringify(Object.fromEntries(surnameCustomColors)));
+}
+
+// Debounced localStorage writer
+let _lsWriteTimeouts = {};
+function debouncedLsWrite(key, value, delay = 200) {
+  clearTimeout(_lsWriteTimeouts[key]);
+  _lsWriteTimeouts[key] = setTimeout(() => {
+    localStorage.setItem(key, value);
+  }, delay);
+}
 
 const PALETTE = [
   '#4e79a7','#e15759','#59a14f','#76b7b2','#edc948',
@@ -76,12 +160,12 @@ let _orbitTrackNodeId = null;  // node id whose live position the orbit target t
 // 3D appearance
 let _3dAppearance = {
   bgColor:     '#04060f',
-  nodeOpacity: 0.85,
-  linkOpacity: 0.45,
-  ambientLight: 0.4,
-  pointLight:  0.8,
-  linkWidth:   2.4,
-  nodeRelSize: 2.0,
+  nodeOpacity: 1.0,   // 1.00 from screenshot
+  linkOpacity: 1.0,   // 1.00 from screenshot
+  ambientLight: 0.6,  // 0.6 from screenshot
+  pointLight:  0.5,   // 0.5 from screenshot
+  linkWidth:   3.1,   // 3.1 from screenshot
+  nodeRelSize: 5.5,   // 5.5 from screenshot
 };
 let _3dAmbientLight = null;
 let _3dPointLight   = null;
@@ -105,6 +189,8 @@ const NODE_COLOR_DEFAULTS = {
   famDiv:  '#e74c3c',
 };
 let nodeColors = { ...NODE_COLOR_DEFAULTS };
+
+let famNodeSize = parseInt(localStorage.getItem('famNodeSize')) || 1;
 
 // ═══════════════════════════════════════════════════════════════
 // MOBILE SIDEBAR TOGGLE
@@ -389,16 +475,35 @@ function parseGEDCOM(raw) {
 // Full in-memory rebuild — call after any structural change
 // ═══════════════════════════════════════════════════════════════
 function _fullRebuildGraph() {
-  const sorted = buildSurnameColorMap();
-  buildSurnameList(sorted);
-  buildGraphData();
+  console.time('[rebuild] total');
+  console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
+  console.time('[rebuild] surnameList');     buildSurnameList(sorted);               console.timeEnd('[rebuild] surnameList');
+  console.time('[rebuild] buildGraphData');  buildGraphData();                        console.timeEnd('[rebuild] buildGraphData');
   if (!svgSel) initSVG();
-  renderGraph();
+  console.time('[rebuild] renderGraph');     renderGraph();                           console.timeEnd('[rebuild] renderGraph');
   document.getElementById('status').textContent =
     `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
+  _genDepthsCache = null;  // invalidate depth cache before rebuild
+  _estimatedYears = null;
   _firstLoad = true;
-  buildAndRunSimulation();
-  if (currentView === '3d') applyFilter();
+  console.time('[rebuild] simulation');      buildAndRunSimulation();                 console.timeEnd('[rebuild] simulation');
+  // For 3D: push data directly instead of calling applyFilter() which would
+  // run buildAndRunSimulation() a second time (doubles the sim cost).
+  if (currentView === '3d' && graph3d) {
+    console.time('[rebuild] 3d data push');
+    const gNodes = nodes.map(n => ({ id: n.id, type: n.type, data: n.data }));
+    const gLinks = links.map(l => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      ltype: l.ltype,
+    }));
+    graph3d.graphData({ nodes: gNodes, links: gLinks });
+    apply3DPhysics();
+    build3DTimeline();
+    update3DNames();
+    console.timeEnd('[rebuild] 3d data push');
+  }
+  console.timeEnd('[rebuild] total');
 }
 
 // 2. GRAPH DATA BUILDER  (bipartite INDI + FAM nodes)
@@ -447,11 +552,25 @@ function buildSurnameColorMap() {
 
   surnameColors.clear();
   surnameEnabled.clear();
+  _surnameColorCache.clear();
+
+  // Assign golden-angle spaced hues so the most common surnames are maximally distinct.
+  // Hue starts at 30° (warm, avoids clash with sex colors blue/pink) and steps by golden angle.
   sorted.forEach(([surn], i) => {
-    surnameColors.set(surn, PALETTE[i % PALETTE.length]);
+    if (surnameCustomColors.has(surn)) {
+      // User override wins; still seed the cache so surnameColor() is fast
+      const c = surnameCustomColors.get(surn);
+      surnameColors.set(surn, c);
+      _surnameColorCache.set(surn, c);
+    } else {
+      const h = (30 + i * GOLDEN_ANGLE) % 360;
+      const color = hslToHex(h, 62, 52);
+      surnameColors.set(surn, color);
+      _surnameColorCache.set(surn, color);
+    }
     surnameEnabled.set(surn, true);
   });
-  // Persons with no surname — key null, shown at end of list
+
   if (noSurnCount > 0) {
     surnameEnabled.set(null, true);
     sorted.push([null, noSurnCount]);
@@ -459,12 +578,24 @@ function buildSurnameColorMap() {
   return sorted;
 }
 
-function nodeBaseColor(n) {
-  if (n.type === 'FAM') return n.data.div ? nodeColors.famDiv : nodeColors.fam;
-  const indi = n.data;
+// Single color source for all INDI visuals (circle + label).
+// colorBySurname=true  → surname hash color
+// colorBySurname=false → sex color
+function indiColor(indi) {
+  if (colorBySurname && indi.surn) return surnameColor(indi.surn);
   if (indi.sex === 'M') return nodeColors.male;
   if (indi.sex === 'F') return nodeColors.female;
   return nodeColors.unknown;
+}
+
+function nodeBaseColor(n) {
+  if (n.type === 'FAM') return n.data.div ? nodeColors.famDiv : nodeColors.fam;
+  return indiColor(n.data);
+}
+
+function labelColor(n) {
+  if (n.type !== 'INDI') return '#888888';
+  return indiColor(n.data);
 }
 
 // ── Visibility helpers (surname filter) ──
@@ -487,12 +618,16 @@ function isNodeVisible(n) {
 
 // ── Generation depth: iterates until every child is strictly deeper than its parents ──
 function computeGenerationDepths() {
+  if (_genDepthsCache) return _genDepthsCache;
   const depth = new Map();
   for (const [id] of individuals) depth.set(id, 0);
 
   // Propagate: child depth = max(parent depths) + 1, repeat until stable
+  // Cap at individuals.size iterations to guard against cycles in malformed data
   let changed = true;
-  while (changed) {
+  let iters = 0;
+  const MAX_ITERS = individuals.size + 1;
+  while (changed && iters++ < MAX_ITERS) {
     changed = false;
     for (const [, fam] of families) {
       const pd = Math.max(
@@ -508,6 +643,7 @@ function computeGenerationDepths() {
       }
     }
   }
+  _genDepthsCache = depth;
   return depth;
 }
 
@@ -531,6 +667,7 @@ function yearTo3DY(yr) {
 
 // ── Estimated birth year cache (rebuilt by computeEstimatedYears) ──
 let _estimatedYears = null;  // Map<id, number>
+let _genDepthsCache = null;   // Map<id, number> — cleared by _fullRebuildGraph
 const GEN_GAP = 28;  // average generation gap in years
 
 // Build estimated birth years for every individual using a multi-pass BFS:
@@ -545,8 +682,11 @@ function computeEstimatedYears() {
   }
 
   // BFS propagation — repeat until no new estimates emerge
+  // Cap iterations to guard against cycles
   let changed = true;
-  while (changed) {
+  let iters = 0;
+  const MAX_ITERS = individuals.size + 1;
+  while (changed && iters++ < MAX_ITERS) {
     changed = false;
     for (const [, fam] of families) {
       const spouses = [fam.husb, fam.wife].filter(Boolean);
@@ -580,7 +720,7 @@ function computeEstimatedYears() {
   }
 
   // Final fallback: use generation depth + average year per generation
-  // Compute a reference year-per-generation from people who DO have years
+  // Reuse cached depths — computeGenerationDepths() is idempotent and cached
   const genDepths = computeGenerationDepths();
   const yearsByGen = new Map();
   for (const [id, yr] of est) {
@@ -701,6 +841,11 @@ function computeActiveData() {
   }
 }
 
+// ── Lightweight re-render: update colors/styles without rebuilding simulation ──
+function _rerenderNodes() {
+  refreshNodeColors();  // updates circles, FAM polygons, labels, 3D
+}
+
 // ── Full filter apply: recompute active data + restart simulation ──
 function applyFilter() {
   // Close detail panel if selected person became hidden
@@ -742,13 +887,111 @@ function initSVG() {
 
   gMain = svgSel.append('g').attr('class', 'main-g');
 
+  let _labelRafPending = false;
+  let _lastTransform = d3.zoomIdentity;
+
   zoomBehavior = d3.zoom()
-    .scaleExtent([0.04, 4])
+    .scaleExtent([0.005, 20])
+    .constrain((transform, extent, translateExtent) => {
+      // Custom constraint: when scale is clamped, prevent translate drift
+      // by keeping the previous translate values
+      const k = transform.k;
+      const minK = 0.005;
+      const maxK = 20;
+
+      if (k <= minK && _lastTransform.k <= minK) {
+        // At min zoom limit - keep previous translate to prevent drift
+        return d3.zoomIdentity.translate(_lastTransform.x, _lastTransform.y).scale(minK);
+      }
+      if (k >= maxK && _lastTransform.k >= maxK) {
+        // At max zoom limit - keep previous translate to prevent drift
+        return d3.zoomIdentity.translate(_lastTransform.x, _lastTransform.y).scale(maxK);
+      }
+
+      // Otherwise allow normal transform
+      return transform;
+    })
     .on('zoom', evt => {
+      // Store current transform before applying
+      _lastTransform = evt.transform;
+
       gMain.attr('transform', evt.transform);
+      const prev = currentZoom;
       currentZoom = evt.transform.k;
-      updateLabels();
+      // Full label update only when crossing visibility thresholds; otherwise RAF-throttled
+      const crossedThreshold = (prev < 0.35) !== (currentZoom < 0.35) ||
+                               (prev < 1.1)  !== (currentZoom < 1.1);
+      if (crossedThreshold) {
+        updateLabels();
+      } else if (!_labelRafPending) {
+        _labelRafPending = true;
+        requestAnimationFrame(() => { _labelRafPending = false; updateLabels(); });
+      }
     });
+
+  // Improve wheel/touchpad zoom: smoother, gentler steps
+  svgSel.on('wheel.zoom', evt => {
+    evt.preventDefault();
+    const delta = evt.deltaY;
+    // Detect touchpad (often has fractional deltas) vs mouse wheel
+    const isTouchpad = Math.abs(delta) < 50 || evt.deltaMode === 0;
+    const factor = isTouchpad
+      ? (delta > 0 ? 0.92 : 1.08)  // Smaller steps for touchpad (smoother)
+      : (delta > 0 ? 0.85 : 1.15); // Larger steps for mouse wheel
+
+    const transform = d3.zoomTransform(svgSel.node());
+    const point = d3.pointer(evt, svgSel.node());
+
+    const newK = Math.max(0.005, Math.min(20, transform.k * factor));
+    if (newK !== transform.k) {
+      const newX = point[0] - (point[0] - transform.x) * (newK / transform.k);
+      const newY = point[1] - (point[1] - transform.y) * (newK / transform.k);
+      const newTransform = d3.zoomIdentity.translate(newX, newY).scale(newK);
+      svgSel.call(zoomBehavior.transform, newTransform);
+    }
+  }, { passive: false });
+
+  // Auto-recenter if graph centroid is way off-screen (prevents getting "lost")
+  setInterval(() => {
+    if (!svgSel || !nodes.length) return;
+    const W = document.getElementById('graph-svg')?.clientWidth || 800;
+    const H = document.getElementById('graph-svg')?.clientHeight || 600;
+    const transform = d3.zoomTransform(svgSel.node());
+
+    // Check if any nodes are visible in current viewport
+    let anyVisible = false;
+    const margin = 100; // Allow some overflow
+    for (const n of nodes) {
+      if (n.x == null || n.y == null) continue;
+      const screenX = transform.x + n.x * transform.k;
+      const screenY = transform.y + n.y * transform.k;
+      if (screenX > -margin && screenX < W + margin &&
+          screenY > -margin && screenY < H + margin) {
+        anyVisible = true;
+        break;
+      }
+    }
+
+    // If nothing is visible, auto-recenter
+    if (!anyVisible && nodes.length > 0) {
+      zoomToFit();
+    }
+  }, 2000); // Check every 2 seconds
+
+  // Keyboard shortcuts for zoom
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === '0') {
+      e.preventDefault();
+      resetView();
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      svgSel.transition().duration(200).call(zoomBehavior.scaleBy, 1.3);
+    } else if (e.key === '-') {
+      e.preventDefault();
+      svgSel.transition().duration(200).call(zoomBehavior.scaleBy, 1 / 1.3);
+    }
+  });
 
   svgSel.call(zoomBehavior);
 
@@ -762,9 +1005,10 @@ function initSVG() {
 // 5. RENDER GRAPH
 // ═══════════════════════════════════════════════════════════════
 function renderGraph() {
-  gMain.selectAll('*').remove();
+  console.time('[rg] clear');       gMain.selectAll('*').remove();                    console.timeEnd('[rg] clear');
 
   // Links layer
+  console.time('[rg] links');
   linkSel = gMain.append('g').attr('class', 'links-g')
     .selectAll('line')
     .data(links)
@@ -773,8 +1017,10 @@ function renderGraph() {
     .attr('stroke-dasharray', d => linkDash(d))
     .attr('stroke-width', d => linkWidth(d))
     .attr('opacity', d => linkBaseOpacity(d));
+  console.timeEnd('[rg] links');
 
   // Nodes layer
+  console.time('[rg] node join');
   const nodeG = gMain.append('g').attr('class', 'nodes-g');
 
   nodeSel = nodeG.selectAll('g.ng')
@@ -806,63 +1052,80 @@ function renderGraph() {
       .on('drag', (evt, d) => { if (_nodeDragEnabled) { d.fx = evt.x; d.fy = evt.y; } })
       .on('end', (evt) => { if (_nodeDragEnabled && !evt.active) simulation.alphaTarget(0); })
     );
+  console.timeEnd('[rg] node join');
 
-  // Draw shapes per node
-  nodeSel.each(function(d) {
-    const g = d3.select(this);
-    if (d.type === 'INDI') {
-      g.append('circle')
-        .attr('r', 8)
-        .attr('fill', nodeBaseColor(d))
-        .attr('stroke', '#ffffff44')
-        .attr('stroke-width', 0.8)
-        .attr('opacity', d.data.deceased ? 0.5 : 1);
-      if (d.data.deceased) {
-        g.append('text')
-          .attr('dy', '4px')
-          .attr('text-anchor', 'middle')
-          .attr('fill', '#bbb')
-          .attr('font-size', '11px')
-          .attr('pointer-events', 'none')
-          .text('×');
-      }
-    } else {
-      // Family diamond
-      const sz = 7;
-      g.append('polygon')
-        .attr('points', `0,${-sz} ${sz},0 0,${sz} ${-sz},0`)
-        .attr('fill', d.data.div ? nodeColors.famDiv : nodeColors.fam)
-        .attr('stroke', d.data.div ? nodeColors.famDiv : nodeColors.fam)
-        .attr('stroke-width', d.data.div ? 1.5 : 1)
-        .attr('stroke-dasharray', d.data.div ? '3 2' : null)
-        .attr('opacity', 0.88);
-    }
-  });
+  // Draw shapes per node — batched selections instead of per-node .each()
+  console.time('[rg] shapes');
+  const indiSel = nodeSel.filter(d => d.type === 'INDI');
+  const famSel  = nodeSel.filter(d => d.type === 'FAM');
+
+  indiSel.append('circle')
+    .attr('r', 8)
+    .attr('fill', d => nodeBaseColor(d))
+    .attr('stroke', '#ffffff44')
+    .attr('stroke-width', 0.8)
+    .attr('opacity', d => d.data.deceased ? 0.5 : 1);
+
+  indiSel.filter(d => d.data.deceased)
+    .append('text')
+    .attr('dy', '4px')
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#bbb')
+    .attr('font-size', '11px')
+    .attr('pointer-events', 'none')
+    .text('×');
+
+  famSel.append('polygon')
+    .attr('class', 'fam-polygon')
+    .attr('points', d => { const s = famNodeSize; return `0,${-s} ${s},0 0,${s} ${-s},0`; })
+    .attr('fill',   d => d.data.div ? nodeColors.famDiv : nodeColors.fam)
+    .attr('stroke', d => d.data.div ? nodeColors.famDiv : nodeColors.fam)
+    .attr('stroke-width',     d => d.data.div ? 1.5 : 1)
+    .attr('stroke-dasharray', d => d.data.div ? '3 2' : null)
+    .attr('opacity', 0.88);
+  console.timeEnd('[rg] shapes');
 
   // Labels layer (INDI only)
+  console.time('[rg] labels');
   labelSel = gMain.append('g').attr('class', 'labels-g')
     .selectAll('text')
     .data(nodes.filter(n => n.type === 'INDI'), d => d.id)
     .join('text')
     .attr('class', 'node-label')
     .attr('dy', '-12px')
+    .attr('text-anchor', 'middle')
+    .attr('fill', d => labelColor(d))
+    .attr('fill-opacity', labelStyle.textOpacity)
+    .attr('font-size', labelStyle.fontSize + 'px')
+    .attr('font-weight', labelStyle.fontWeight || 'normal')
     .text(d => d.data.displayName);
 
+  console.timeEnd('[rg] labels');
   updateLabels();
 }
 
 function updateLabels() {
-  if (!labelSel) return;
-  if (currentZoom < 0.35) {
-    labelSel.style('display', 'none');
-  } else if (currentZoom < 1.1) {
-    labelSel.style('display', null).text(d => {
-      const n = d.data.givn || d.data.displayName;
-      return n.length > 10 ? n.slice(0, 10) + '…' : n;
-    });
-  } else {
-    labelSel.style('display', null).text(d => d.data.displayName);
-  }
+  if (!labelSel || labelSel.empty()) return;
+  const zoom = currentZoom;
+  const hidden = zoom < 0.35;
+  const brief  = zoom < 1.1;
+
+  labelSel.each(function(d) {
+    // All visual properties as SVG presentation attributes — never CSS style(),
+    // which would enter the CSS cascade and could override the fill attribute.
+    this.setAttribute('fill',         labelColor(d));
+    this.setAttribute('fill-opacity', labelStyle.textOpacity);
+    this.setAttribute('font-size',    labelStyle.fontSize + 'px');
+    this.setAttribute('font-weight',  labelStyle.fontWeight || 'normal');
+
+    if (hidden) {
+      this.style.display = 'none';
+    } else {
+      this.style.display = '';
+      const name = d.data.givn || d.data.displayName || '';
+      this.textContent = brief && name.length > 10 ? name.slice(0, 10) + '…' : d.data.displayName;
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -882,7 +1145,7 @@ function buildAndRunSimulation() {
   _birthYearRange = { min: minBY, max: maxBY };
 
   // Compute estimated birth years for persons without one (uses generation & relation info)
-  computeEstimatedYears();
+  console.time('[sim] computeEstimatedYears'); computeEstimatedYears(); console.timeEnd('[sim] computeEstimatedYears');
 
   // Expand range to include estimated years so timeline covers everyone
   if (_estimatedYears && _estimatedYears.size) {
@@ -895,7 +1158,9 @@ function buildAndRunSimulation() {
   }
 
   // Generation-depth based Y positioning: children are always below parents
+  console.time('[sim] computeGenerationDepths');
   const genDepths = computeGenerationDepths();
+  console.timeEnd('[sim] computeGenerationDepths');
   const maxGen = genDepths.size ? Math.max(...genDepths.values()) : 0;
 
   const genToY = gen => maxGen === 0 ? H / 2 : 30 + (gen / maxGen) * (H - 60);
@@ -939,8 +1204,25 @@ function buildAndRunSimulation() {
     .alphaDecay(p.alphaDecay)
     .velocityDecay(p.velocityDecay);
 
-  simulation.on('tick', tick);
-  simulation.on('end', onSimEnd);
+  // For large graphs run the simulation headlessly (no per-tick DOM writes)
+  // then paint once at the end — avoids hundreds of synchronous reflows.
+  const HEADLESS_THRESHOLD = 200;
+  if (nodes.length > HEADLESS_THRESHOLD) {
+    // Use a faster decay for headless layout — generation-depth pre-positioning
+    // already places nodes well, so we only need enough ticks to detangle.
+    const HEADLESS_DECAY = 0.05;
+    simulation.stop().alphaDecay(HEADLESS_DECAY);
+    const totalTicks = Math.ceil(Math.log(simulation.alphaMin() / simulation.alpha()) / Math.log(1 - HEADLESS_DECAY));
+    console.log(`[sim] headless: ${nodes.length} nodes, ${links.length} links, ${totalTicks} ticks`);
+    console.time('[sim] headless ticks');
+    for (let i = 0; i < totalTicks; i++) simulation.tick();
+    console.timeEnd('[sim] headless ticks');
+    console.time('[sim] tick() DOM paint');  tick();     console.timeEnd('[sim] tick() DOM paint');
+    console.time('[sim] onSimEnd');          onSimEnd(); console.timeEnd('[sim] onSimEnd');
+  } else {
+    simulation.on('tick', tick);
+    simulation.on('end', onSimEnd);
+  }
 }
 
 // Hot-update all forces on the running simulation and reheat
@@ -1077,6 +1359,12 @@ function zoomToFit() {
 
   svgSel.transition().duration(750)
     .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
+function svgZoomBy(factor) {
+  if (svgSel && zoomBehavior) {
+    svgSel.transition().duration(220).call(zoomBehavior.scaleBy, factor);
+  }
 }
 
 function zoomToNode(nid) {
@@ -1470,10 +1758,33 @@ function refreshNodeColors() {
     if (d.type === 'INDI') {
       d3.select(this).select('circle').attr('fill', nodeBaseColor(d));
     } else {
-      d3.select(this).select('polygon').attr('fill', d.data.div ? nodeColors.famDiv : nodeColors.fam);
+      const col = d.data.div ? nodeColors.famDiv : nodeColors.fam;
+      d3.select(this).select('.fam-polygon')
+        .attr('fill',   col)
+        .attr('stroke', col);
     }
   });
+  _applyFamNodeSize();
+  updateLabels();
   refresh3D();
+}
+
+function _famNodeVal(n) {
+  if (n.type !== 'FAM') return n.data.deceased ? 0.7 : 1;
+  return Math.max(0.05, (famNodeSize / 7) * 0.4);
+}
+
+function _applyFamNodeSize() {
+  // 2D: update SVG polygon points
+  if (svgSel) {
+    const s = famNodeSize;
+    svgSel.selectAll('.fam-polygon')
+      .attr('points', `0,${-s} ${s},0 0,${s} ${-s},0`);
+  }
+  // 3D: update sphere volume via nodeVal
+  if (graph3d) {
+    graph3d.nodeVal(n => _famNodeVal(n));
+  }
 }
 
 function updateHLButtons() {
@@ -1496,17 +1807,48 @@ function buildSurnameList(sorted) {
   container.innerHTML = '';
   for (const [surn, count] of sorted) {
     const isNoSurn = surn === null;
-    const color    = isNoSurn ? '#888' : surnameColors.get(surn);
-    const label    = isNoSurn ? '(kein Nachname)' : surn;
-    const title    = isNoSurn ? 'Personen ohne Nachname' : escAttr(surn);
+    // Use hash color as default, or custom color if set
+    const color = isNoSurn ? '#888' : surnameColor(surn);
+    const label = isNoSurn ? '(kein Nachname)' : surn;
+    const title = isNoSurn ? 'Personen ohne Nachname' : escAttr(surn);
+
     const div = document.createElement('div');
     div.className = 'surname-item';
-    div.innerHTML = `
-      <input type="checkbox" checked>
-      <span class="surname-dot" style="background:${color}${isNoSurn ? ';border:1px solid #666' : ''}"></span>
-      <span class="surname-label" title="${title}" style="${isNoSurn ? 'font-style:italic;color:#999' : ''}">${escHtml(label)}</span>
-      <span class="surname-count">${count}</span>`;
-    div.querySelector('input').addEventListener('change', e => {
+
+    if (isNoSurn) {
+      // No color picker for "no surname" entry
+      div.innerHTML = `
+        <input type="checkbox" checked>
+        <span class="surname-dot" style="background:${color};border:1px solid #666"></span>
+        <span class="surname-label" title="${title}" style="font-style:italic;color:#999">${escHtml(label)}</span>
+        <span class="surname-count">${count}</span>`;
+    } else {
+      // Color picker for surname entries
+      const hasCustom = surnameCustomColors.has(surn);
+      div.innerHTML = `
+        <input type="checkbox" checked>
+        <input type="color" class="surname-color-picker" value="${color}" title="Farbe wählen (Rechtsklick zum Zurücksetzen)">
+        <span class="surname-label" title="${title}">${escHtml(label)}</span>
+        <span class="surname-count">${count}</span>`;
+
+      const colorInput = div.querySelector('.surname-color-picker');
+
+      // Color change handler
+      colorInput.addEventListener('input', e => {
+        setSurnameColor(surn, e.target.value);
+        _rerenderNodes(); // Update colors without rebuilding simulation
+      });
+
+      // Right-click to reset to hash color
+      colorInput.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        setSurnameColor(surn, null); // Clear custom color
+        colorInput.value = surnameHashColor(surn); // Reset to hash color
+        _rerenderNodes();
+      });
+    }
+
+    div.querySelector('input[type="checkbox"]').addEventListener('change', e => {
       surnameEnabled.set(isNoSurn ? null : surn, e.target.checked);
       applyFilter();
     });
@@ -2606,7 +2948,7 @@ function initGraph3D() {
     .graphData({ nodes: gNodes, links: gLinks })
     // ── Nodes ──
     .nodeColor(n => compute3DNodeColor(n))
-    .nodeVal(n => n.type === 'FAM' ? 0.4 : (n.data.deceased ? 0.7 : 1))
+    .nodeVal(n => _famNodeVal(n))
     .nodeRelSize(_3dAppearance.nodeRelSize)
     .nodeOpacity(_3dAppearance.nodeOpacity)
     .nodeResolution(12)
@@ -2847,7 +3189,14 @@ function resetNodeColors() {
     const el = document.getElementById(id);
     if (el) el.value = NODE_COLOR_DEFAULTS[key];
   }
+  famNodeSize = 1;
+  localStorage.setItem('famNodeSize', famNodeSize);
+  const famSizeSlider = document.getElementById('fam-node-size');
+  const famSizeVal    = document.getElementById('fam-node-size-val');
+  if (famSizeSlider) famSizeSlider.value = famNodeSize;
+  if (famSizeVal)    famSizeVal.textContent = famNodeSize;
   updateNodeColors();
+  _applyFamNodeSize();
 }
 
 // ── 3D Timeline (Three.js scene objects) ──
@@ -2961,10 +3310,8 @@ function build3DTimeline() {
 
 // ── 3D name sprites (replace spheres with name text) ──
 function _nameTextColor(n) {
-  const indi = n.data;
-  if (indi.sex === 'M') return indi.deceased ? '#5fa8e0' : '#90d0ff';
-  if (indi.sex === 'F') return indi.deceased ? '#d07090' : '#ffb8d0';
-  return indi.deceased ? '#8899aa' : '#d0dde8';
+  // Use same color logic as 2D — surname hash or sex color
+  return indiColor(n.data);
 }
 
 function makeNameSprite3D(n) {
@@ -3357,6 +3704,24 @@ document.addEventListener('DOMContentLoaded', () => {
     applyFilter();
   });
 
+  // Color-by-surname toggle
+  const colorBySurnameToggle = document.getElementById('color-by-surname');
+  const colorModeLabelEl = document.getElementById('color-mode-label');
+  function _syncColorModeLabel() {
+    if (colorModeLabelEl) colorModeLabelEl.textContent = colorBySurname ? 'Nachname' : 'Geschlecht';
+  }
+  if (colorBySurnameToggle) {
+    colorBySurnameToggle.checked = colorBySurname;
+    _syncColorModeLabel();
+    colorBySurnameToggle.addEventListener('change', function () {
+      colorBySurname = this.checked;
+      localStorage.setItem('colorBySurname', colorBySurname);
+      _syncColorModeLabel();
+      _rerenderNodes();       // 2D circles + labels
+      update3DNames();        // rebuild 3D name sprites with new color
+    });
+  }
+
   // 3D: sort by time + show timeline
   document.getElementById('sort-time-3d-toggle').addEventListener('change', function () {
     sortByTime3D = this.checked;
@@ -3401,6 +3766,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) el.addEventListener('input', function () {
       nodeColors[key] = this.value;
       updateNodeColors();
+    });
+  }
+
+  // FAM node size slider
+  const famSizeSlider = document.getElementById('fam-node-size');
+  const famSizeVal    = document.getElementById('fam-node-size-val');
+  if (famSizeSlider) {
+    famSizeSlider.value = famNodeSize;
+    if (famSizeVal) famSizeVal.textContent = famNodeSize;
+    famSizeSlider.addEventListener('input', function () {
+      famNodeSize = parseInt(this.value);
+      if (famSizeVal) famSizeVal.textContent = famNodeSize;
+      localStorage.setItem('famNodeSize', famNodeSize);
+      _applyFamNodeSize();
     });
   }
 
@@ -3802,6 +4181,14 @@ window.deleteCurrentRecord   = deleteCurrentRecord;
 window.confirmDeleteRecord   = confirmDeleteRecord;
 window.cancelDeleteRecord    = cancelDeleteRecord;
 window._fullRebuildGraph     = _fullRebuildGraph;
+window._rerenderNodes        = _rerenderNodes;
+
+// ── Reset View Function ──
+function resetView() {
+  if (!svgSel || !zoomBehavior) return;
+  svgSel.transition().duration(500).call(zoomBehavior.transform, d3.zoomIdentity);
+}
+window.resetView = resetView;
 
 // ═══════════════════════════════════════════════════════════════
 // TEXT IMPORT ENGINE  (port of scripts/pdf_to_gedcom.py)
@@ -3816,7 +4203,71 @@ const _TI_MONTH_MAP = {
 };
 
 function _tiNormName(name) {
-  return (name || '').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  let n = (name || '').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  n = n.replace(/\bfluri\b/g, 'flury');
+  return n;
+}
+
+// Parse a name into { first, surnames[] } handling maiden-name markers.
+// "Anna Flury geb. Schmid"  → { first:'anna', surnames:['flury','schmid'] }
+// "Anita Berner (Fluri)"    → { first:'anita', surnames:['berner','flury'] }
+// "Marie-Louise von Arx"    → { first:'marie-louise', surnames:['arx'] }
+function _tiParseName(name) {
+  let n = _tiNormName(name);
+  // Extract parenthesised maiden names e.g. "Berner (Fluri)" before stripping
+  const parenSurnames = [];
+  n = n.replace(/\(([^)]+)\)/g, (_, inner) => {
+    inner.trim().split(/\s+/).forEach(t => parenSurnames.push(t));
+    return '';
+  });
+  // Normalise maiden-name keyword markers to a separator
+  n = n.replace(/\b(?:geb\.?|geborene?|n[eé]{1,2}e?|verh\.?|verheiratete?)\s+/gi, '__SEP__');
+  const parts = n.split('__SEP__').map(s => s.trim()).filter(Boolean);
+  const firstSegTokens = parts[0].split(/\s+/);
+  const first = firstSegTokens[0] || '';
+  const surnames = new Set(parenSurnames);
+  for (const seg of parts) {
+    const toks = seg.split(/\s+/);
+    if (toks.length > 1) surnames.add(toks[toks.length - 1]);
+    else if (toks.length === 1 && seg !== parts[0]) surnames.add(toks[0]);
+  }
+  if (firstSegTokens.length > 1) surnames.add(firstSegTokens[firstSegTokens.length - 1]);
+  return { first, surnames: [...surnames] };
+}
+
+// Score how well two parsed names match. Returns 0–1.
+function _tiNameScore(a, b) {
+  // First name must match (exact or prefix)
+  if (!a.first || !b.first) return 0;
+  const fmatch = a.first === b.first ? 1
+               : (a.first.startsWith(b.first) || b.first.startsWith(a.first)) ? 0.7
+               : 0;
+  if (fmatch === 0) return 0;
+  // Best surname overlap
+  let bestSurn = 0;
+  for (const sa of a.surnames) {
+    for (const sb of b.surnames) {
+      if (sa === sb) { bestSurn = 1; break; }
+      // Allow 1-char Levenshtein for typos (Müller/Mueller handled by NFD strip above)
+      if (Math.abs(sa.length - sb.length) <= 2 && _tiLevenshtein(sa, sb) <= 1)
+        bestSurn = Math.max(bestSurn, 0.85);
+    }
+    if (bestSurn === 1) break;
+  }
+  return fmatch * (0.4 + 0.6 * bestSurn);
+}
+
+function _tiLevenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (m === 0) return n; if (n === 0) return m;
+  const dp = Array.from({length: m+1}, (_,i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1]
+               : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
 }
 
 function _tiNormDate(raw) {
@@ -4051,19 +4502,19 @@ function _tiParseText(text) {
 function _tiGenerateActions(persons) {
   const actions = [];
 
-  // Index existing GEDCOM data
-  const nameToId = new Map();
-  const keyToId  = new Map();
+  // Index existing GEDCOM data for fast exact lookup and fuzzy candidate search
+  const keyToId  = new Map();   // "normname|year" → id
+  const nameToId = new Map();   // normname       → id  (last wins, for name-only fallback)
+  const allIndis = [];          // [{id, parsed, yr}] for fuzzy scan
   for (const [id, indi] of individuals) {
     const nn = _tiNormName(indi.name || '');
-    if (nn) {
-      nameToId.set(nn, id);
-      const yr = (indi.birth.date || '').match(/\b(\d{4})\b/)?.[1] || '';
-      keyToId.set(`${nn}|${yr}`, id);
-    }
+    if (!nn) continue;
+    const yr = (indi.birth.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+    keyToId.set(`${nn}|${yr}`, id);
+    nameToId.set(nn, id);
+    allIndis.push({ id, parsed: _tiParseName(indi.name || ''), yr });
   }
 
-  // Keyed by sorted normalised names so new-couple collisions don't hide each other
   function _famKey(a, b) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
   const famPairs = new Set();
   for (const [,fam] of families) {
@@ -4071,19 +4522,43 @@ function _tiGenerateActions(persons) {
     if (h || w) famPairs.add(_famKey(_tiNormName((h||w)?.name||''), _tiNormName((w||h)?.name||'')));
   }
 
-  const pendingNames = new Map();  // normalisedName -> '__new__'
+  const pendingNames = new Map();  // normname → '__new__'
 
   function lookup(person) {
-    const nn = _tiNormName(person.fullName);
-    const yr = (person.birthDate||'').match(/\b(\d{4})\b/)?.[1] || '';
-    if (keyToId.has(`${nn}|${yr}`)) return keyToId.get(`${nn}|${yr}`);
+    const nn  = _tiNormName(person.fullName);
+    const yr  = (person.birthDate||'').match(/\b(\d{4})\b/)?.[1] || '';
+
+    // 1. Exact key match (name + year)
+    if (yr && keyToId.has(`${nn}|${yr}`)) return keyToId.get(`${nn}|${yr}`);
+
+    // 2. Exact name, ignore year when one side is unknown
+    if (keyToId.has(`${nn}|`)) {
+      if (!yr) return keyToId.get(`${nn}|`);          // both year-unknown
+    }
     if (nameToId.has(nn)) {
       const eid = nameToId.get(nn);
-      const indi = individuals.get(eid);
-      const eyr = (indi?.birth?.date||'').match(/\b(\d{4})\b/)?.[1] || '';
-      if (!eyr || !yr) return eid;
+      const eyr = (individuals.get(eid)?.birth?.date||'').match(/\b(\d{4})\b/)?.[1] || '';
+      if (!eyr || !yr) return eid;                     // one side year-unknown
     }
-    // Already queued in this import batch
+
+    // 3. Fuzzy: score all existing persons, pick best above threshold
+    const parsed = _tiParseName(person.fullName);
+    let bestId = null, bestScore = 0;
+    for (const cand of allIndis) {
+      let score = _tiNameScore(parsed, cand.parsed);
+      if (score < 0.6) continue;
+      // Birth-year bonus/penalty
+      if (yr && cand.yr) {
+        const diff = Math.abs(parseInt(yr) - parseInt(cand.yr));
+        if (diff === 0)       score += 0.3;
+        else if (diff <= 2)   score += 0.1;  // data-entry slop
+        else                  score -= 0.4;  // different person
+      }
+      if (score > bestScore) { bestScore = score; bestId = cand.id; }
+    }
+    if (bestScore >= 0.75) return bestId;
+
+    // 4. Already queued in this import batch
     if (pendingNames.has(nn)) return pendingNames.get(nn);
     return null;
   }
@@ -4104,12 +4579,36 @@ function _tiGenerateActions(persons) {
           'Death Place':  person.deathPlace,
           'Father':       person.fatherName,
           'Mother':       person.motherName,
+          'Notes':        person.notes || '',
         },
         source:  person.sourceNote,
         _person: person,
       });
       const nn = _tiNormName(person.fullName);
       pendingNames.set(nn, '__new__');
+    } else {
+      // Person already exists — generate an update action for any missing fields
+      const indi = individuals.get(existing);
+      if (indi) {
+        const missing = {};
+        if (!indi.birth?.date  && person.birthDate)  missing['Birth Date']  = person.birthDate;
+        if (!indi.birth?.plac  && person.birthPlace) missing['Birth Place'] = person.birthPlace;
+        if (!indi.death?.date  && person.deathDate)  missing['Death Date']  = person.deathDate;
+        if (!indi.death?.plac  && person.deathPlace) missing['Death Place'] = person.deathPlace;
+        if ((!indi.sex || indi.sex === 'U') && person.sex) missing['Sex'] = person.sex;
+        if (person.notes && !(indi.note||'').includes(person.notes)) missing['Notes'] = person.notes;
+        if (Object.keys(missing).length) {
+          actions.push({
+            id:       Math.random().toString(36).slice(2),
+            kind:     'update',
+            status:   'pending',
+            existingId: existing,
+            fields:   Object.assign({ 'Name': person.fullName }, missing),
+            source:   person.sourceNote,
+            _person:  person,
+          });
+        }
+      }
     }
   }
 
@@ -4158,6 +4657,22 @@ function _tiApplyActions(actions) {
   const famcOf = new Map();   // childId -> famId
   const report = [];
   const actionXref = new Map();  // action.id -> indiId
+
+  // Pass 0: apply updates to existing individuals
+  for (const action of actions) {
+    if (action.status !== 'approved' || action.kind !== 'update') continue;
+    const indi = individuals.get(action.existingId);
+    if (!indi) continue;
+    if (action.fields['Birth Date'])  indi.birth.date = action.fields['Birth Date'];
+    if (action.fields['Birth Place']) indi.birth.plac = action.fields['Birth Place'];
+    if (action.fields['Death Date']) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
+    if (action.fields['Death Place']) indi.death.plac = action.fields['Death Place'];
+    if (action.fields['Sex'] && (!indi.sex || indi.sex === 'U')) indi.sex = action.fields['Sex'];
+    if (action.fields['Notes']) {
+      indi.note = indi.note ? indi.note + '; ' + action.fields['Notes'] : action.fields['Notes'];
+    }
+    report.push({ type:'update', msg:`${indi.name} — updated` });
+  }
 
   // Pass 1: allocate INDI xrefs for approved persons
   for (const action of actions) {
@@ -4224,6 +4739,7 @@ function _tiApplyActions(actions) {
     const noteParts = [];
     if (action.fields['Father']) noteParts.push('Father: ' + action.fields['Father']);
     if (action.fields['Mother']) noteParts.push('Mother: ' + action.fields['Mother']);
+    if (action.fields['Notes'])  noteParts.push(action.fields['Notes']);
 
     individuals.set(xref, {
       id: xref, name, givn, surn,
@@ -4256,10 +4772,226 @@ function _tiApplyActions(actions) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// STRUCTURED JSON IMPORT
+// ═══════════════════════════════════════════════════════════════
+
+function _tiParseStructuredJson(obj) {
+  if (!obj || !Array.isArray(obj.individuals)) return null;
+
+  // Build a map from JSON person id → full name (for children lookup)
+  const idToName = new Map();
+  for (const raw of obj.individuals) {
+    const fullName = [raw.given_name, raw.surname].filter(Boolean).join(' ').trim();
+    if (raw.id && fullName) idToName.set(raw.id, fullName);
+  }
+
+  // Build a map from sorted(husbId,wifeId) → children names, from families[]
+  const famChildrenByParents = new Map();
+  if (Array.isArray(obj.families)) {
+    for (const fam of obj.families) {
+      const key = [fam.husband_id, fam.wife_id].sort().join('|');
+      const childNames = (fam.children || []).map(cid => idToName.get(cid)).filter(Boolean);
+      famChildrenByParents.set(key, childNames);
+    }
+  }
+
+  const persons = [];
+  for (const raw of obj.individuals) {
+    const fullName = [raw.given_name, raw.surname].filter(Boolean).join(' ').trim();
+    if (!fullName) continue;
+
+    const p = {
+      fullName,
+      sex:         raw.sex || null,
+      birthDate:   _tiNormDate(raw.birth_date || ''),
+      birthPlace:  (raw.birth_place || '').trim(),
+      deathDate:   _tiNormDate(raw.death_date || ''),
+      deathPlace:  (raw.death_place || '').trim(),
+      fatherName:  '',
+      motherName:  '',
+      marriages:   [],
+      notes:       (raw.notes || '').trim(),
+      sourceNote:  `[structured JSON] id=${raw.id}` + (raw.notes ? ` | ${raw.notes}` : ''),
+    };
+
+    for (const m of (raw.marriages || [])) {
+      const spouseName = [m.spouse_given, m.spouse_surname].filter(Boolean).join(' ').trim();
+      if (!spouseName) continue;
+      // Look up children for this couple from the families array
+      const coupleKey = [raw.id, ''].sort().join('|');  // placeholder
+      p.marriages.push({
+        spouseName,
+        date:     _tiNormDate(m.marriage_date || ''),
+        place:    (m.marriage_place || '').trim(),
+        children: [],
+      });
+    }
+
+    persons.push(p);
+  }
+
+  // Second pass: wire children into marriages using families[]
+  if (Array.isArray(obj.families)) {
+    const personByName = new Map();
+    for (const p of persons) personByName.set(_tiNormName(p.fullName), p);
+
+    for (const fam of obj.families) {
+      const husbName = idToName.get(fam.husband_id) || '';
+      const wifeName = idToName.get(fam.wife_id)   || '';
+      const childNames = (fam.children || []).map(cid => idToName.get(cid)).filter(Boolean);
+      if (!childNames.length) continue;
+
+      // Find the husband/wife person objects and set children on matching marriage
+      for (const parentName of [husbName, wifeName]) {
+        if (!parentName) continue;
+        const parentP = personByName.get(_tiNormName(parentName));
+        if (!parentP) continue;
+        const spouseName = parentName === husbName ? wifeName : husbName;
+        const sn = _tiNormName(spouseName);
+        let marriage = parentP.marriages.find(m => _tiNormName(m.spouseName) === sn);
+        if (!marriage && parentP.marriages.length === 1) marriage = parentP.marriages[0];
+        if (!marriage && spouseName) {
+          marriage = { spouseName, date: _tiNormDate(fam.marriage_date||''), place: (fam.marriage_place||'').trim(), children: [] };
+          parentP.marriages.push(marriage);
+        }
+        if (marriage) marriage.children = childNames.map(n => ({ fullName: n }));
+      }
+    }
+  }
+
+  return persons;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GEDCOM MERGE IMPORT
+// ═══════════════════════════════════════════════════════════════
+
+function _tiParseGedcomForMerge(raw) {
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+
+  const indiMap = new Map(); // id -> {name,sex,birth,death,fams,famc,note}
+  const famMap  = new Map(); // id -> {husb,wife,chil,marr}
+
+  const lines = raw.split(/\r?\n/);
+  let cur = null, curType = null, subCtx = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const m = line.match(/^(\d+)\s+(\S+)\s*(.*)/);
+    if (!m) continue;
+    const level = +m[1], tag = m[2], val = m[3].trim();
+
+    if (level === 0) {
+      subCtx = null;
+      if (tag.startsWith('@') && val === 'INDI') {
+        cur = { id: tag, name:'', sex:'', birth:{date:'',plac:''}, death:{date:'',plac:''}, fams:[], famc:[], note:'' };
+        indiMap.set(tag, cur); curType = 'INDI';
+      } else if (tag.startsWith('@') && val === 'FAM') {
+        cur = { id: tag, husb:null, wife:null, chil:[], marr:{date:'',plac:''} };
+        famMap.set(tag, cur); curType = 'FAM';
+      } else { cur = null; curType = null; }
+      continue;
+    }
+
+    if (!cur) continue;
+
+    if (curType === 'INDI') {
+      if (level === 1) {
+        subCtx = null;
+        if      (tag === 'NAME' && !cur.name) { const c = val.replace(/\//g,'').replace(/\s+/g,' ').trim(); if (c) cur.name = c; }
+        else if (tag === 'SEX')  cur.sex  = val;
+        else if (tag === 'BIRT') subCtx = 'BIRT';
+        else if (tag === 'DEAT') subCtx = 'DEAT';
+        else if (tag === 'FAMS' && val) cur.fams.push(val);
+        else if (tag === 'FAMC' && val) cur.famc.push(val);
+        else if (tag === 'NOTE') cur.note = val;
+      } else if (level === 2) {
+        if      (subCtx === 'BIRT' && tag === 'DATE') cur.birth.date = val;
+        else if (subCtx === 'BIRT' && tag === 'PLAC') cur.birth.plac = val;
+        else if (subCtx === 'DEAT' && tag === 'DATE') cur.death.date = val;
+        else if (subCtx === 'DEAT' && tag === 'PLAC') cur.death.plac = val;
+        else if (tag === 'CONT') cur.note += '\n' + val;
+      } else if (level === 3 && tag === 'CONT') { cur.note += '\n' + val; }
+
+    } else if (curType === 'FAM') {
+      if (level === 1) {
+        subCtx = null;
+        if      (tag === 'HUSB') cur.husb = val;
+        else if (tag === 'WIFE') cur.wife = val;
+        else if (tag === 'CHIL' && val) cur.chil.push(val);
+        else if (tag === 'MARR') subCtx = 'MARR';
+      } else if (level === 2 && subCtx === 'MARR') {
+        if      (tag === 'DATE') cur.marr.date = val;
+        else if (tag === 'PLAC') cur.marr.plac = val;
+      }
+    }
+  }
+
+  // Convert to persons[] format understood by _tiGenerateActions
+  const persons = [];
+  for (const [id, indi] of indiMap) {
+    if (!indi.name) continue;
+
+    // Normalise Fluri→Flury for persons born before 1940
+    let displayName = indi.name;
+    if (/Fluri/.test(displayName)) {
+      const birthYr = parseInt((indi.birth.date || '').match(/\b(\d{4})\b/)?.[1] || '9999', 10);
+      if (birthYr < 1940) displayName = displayName.replace(/Fluri/g, 'Flury');
+    }
+
+    const p = {
+      fullName:   displayName,
+      sex:        indi.sex || null,
+      birthDate:  indi.birth.date,
+      birthPlace: indi.birth.plac,
+      deathDate:  indi.death.date,
+      deathPlace: indi.death.plac,
+      fatherName: '', motherName: '',
+      marriages:  [],
+      notes:      indi.note.trim(),
+      sourceNote: `[GEDCOM merge] ${id}`,
+    };
+
+    // Derive father/mother from FAMC
+    for (const famcId of indi.famc) {
+      const fam = famMap.get(famcId);
+      if (!fam) continue;
+      const f = fam.husb ? indiMap.get(fam.husb) : null;
+      const mo = fam.wife ? indiMap.get(fam.wife) : null;
+      if (f?.name  && !p.fatherName) p.fatherName = f.name;
+      if (mo?.name && !p.motherName) p.motherName = mo.name;
+    }
+
+    // Build marriages from FAMS
+    for (const famsId of indi.fams) {
+      const fam = famMap.get(famsId);
+      if (!fam) continue;
+      const spouseId = fam.husb === id ? fam.wife : fam.husb;
+      const spouse   = spouseId ? indiMap.get(spouseId) : null;
+      if (!spouse?.name) continue;
+      p.marriages.push({
+        spouseName: spouse.name,
+        date:       fam.marr.date,
+        place:      fam.marr.plac,
+        children:   fam.chil.map(cid => indiMap.get(cid))
+                            .filter(c => c?.name)
+                            .map(c => ({ fullName: c.name })),
+      });
+    }
+
+    persons.push(p);
+  }
+
+  return persons;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TEXT IMPORT UI
 // ═══════════════════════════════════════════════════════════════
 
 let _importActions = [];
+let _importJsonPersons = null;  // set when a .json file is loaded
 
 function openTextImport() {
   document.getElementById('import-modal').style.display = 'flex';
@@ -4279,27 +5011,66 @@ function _resetImportUI() {
   if (fi) { fi.value = ''; }
   document.getElementById('import-file-name').textContent = 'Keine Datei gewählt';
   _importActions = [];
+  _importJsonPersons = null;
 }
 
 function handleImportFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   document.getElementById('import-file-name').textContent = file.name;
+  _importJsonPersons = null;
+  const isGed  = /\.ged$/i.test(file.name);
+  const isJson = /\.json$/i.test(file.name);
   const reader = new FileReader();
-  reader.onload = ev => { document.getElementById('import-text-area').value = ev.target.result || ''; };
+  if (isGed) {
+    reader.onload = ev => {
+      const persons = _tiParseGedcomForMerge(ev.target.result || '');
+      if (persons?.length) {
+        _importJsonPersons = persons;
+        document.getElementById('import-text-area').value =
+          `[GEDCOM geladen: ${persons.length} Person${persons.length !== 1 ? 'en' : ''} erkannt. Klicke «Analysieren» um fortzufahren.]`;
+      } else {
+        document.getElementById('import-text-area').value = '';
+        alert('GEDCOM-Datei konnte nicht geparst werden oder enthält keine Personen.');
+      }
+    };
+  } else if (isJson) {
+    reader.onload = ev => {
+      try {
+        const obj = JSON.parse(ev.target.result || '{}');
+        const persons = _tiParseStructuredJson(obj);
+        if (persons && persons.length) {
+          _importJsonPersons = persons;
+          document.getElementById('import-text-area').value =
+            `[Strukturierte JSON-Datei geladen: ${persons.length} Person${persons.length!==1?'en':''} erkannt. Klicke «Analysieren» um fortzufahren.]`;
+        } else {
+          document.getElementById('import-text-area').value = '';
+          alert('JSON-Datei konnte nicht geparst werden oder enthält keine Personen.');
+        }
+      } catch(err) {
+        document.getElementById('import-text-area').value = '';
+        alert('Ungültige JSON-Datei: ' + err.message);
+      }
+    };
+  } else {
+    reader.onload = ev => { document.getElementById('import-text-area').value = ev.target.result || ''; };
+  }
   reader.readAsText(file, 'utf-8');
 }
 
 function parseImportText() {
-  const raw = (document.getElementById('import-text-area').value || '').trim();
-  if (!raw) { alert('Bitte Text eingeben oder Datei laden.'); return; }
-
-  const clean   = _tiCleanText(raw);
-  const persons = _tiParseText(clean);
-
-  if (!persons.length) {
-    alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
-    return;
+  let persons;
+  if (_importJsonPersons) {
+    persons = _importJsonPersons;
+  } else {
+    const raw = (document.getElementById('import-text-area').value || '').trim();
+    if (!raw) { alert('Bitte Text eingeben oder Datei laden.'); return; }
+    const clean = _tiCleanText(raw);
+    persons = _tiParseText(clean);
+    if (!persons.length) {
+      alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
+      return;
+    }
   }
 
   _importActions = _tiGenerateActions(persons);
@@ -4314,8 +5085,9 @@ function parseImportText() {
   _renderImportReview();
 }
 
-function _renderImportReview() {
+function _renderImportSummary() {
   const nPers    = _importActions.filter(a => a.kind === 'person').length;
+  const nUpd     = _importActions.filter(a => a.kind === 'update').length;
   const nMarr    = _importActions.filter(a => a.kind === 'marriage').length;
   const nApp     = _importActions.filter(a => a.status === 'approved').length;
   const nSkip    = _importActions.filter(a => a.status === 'skipped').length;
@@ -4324,7 +5096,8 @@ function _renderImportReview() {
   document.getElementById('import-summary').innerHTML = `
     <div class="import-summary-bar">
       <span class="import-stat"><b>${_importActions.length}</b> Vorschläge</span>
-      <span class="import-stat import-stat--person">&#x1F464; <b>${nPers}</b> Person${nPers!==1?'en':''}</span>
+      <span class="import-stat import-stat--person">&#x1F464; <b>${nPers}</b> neu</span>
+      <span class="import-stat import-stat--update">&#x270F; <b>${nUpd}</b> Erg\u00e4nzung${nUpd!==1?'en':''}</span>
       <span class="import-stat import-stat--marriage">&#x1F48D; <b>${nMarr}</b> Ehe${nMarr!==1?'n':''}</span>
       <span class="import-stat import-stat--approved">&#x2713; <b>${nApp}</b> genehmigt</span>
       <span class="import-stat import-stat--skipped">&#x2715; <b>${nSkip}</b> übersprungen</span>
@@ -4336,14 +5109,17 @@ function _renderImportReview() {
       <button class="import-bulk-btn import-bulk-btn--reset"   onclick="_importResetAll()">&#x21BA; Zurücksetzen</button>
     </div>
   `;
+}
 
+function _renderImportReview() {
+  _renderImportSummary();
   document.getElementById('import-actions-list').innerHTML =
     _importActions.map((action, idx) => _renderImportCard(action, idx)).join('');
 }
 
 function _renderImportCard(action) {
-  const kindLabel = action.kind === 'person' ? 'Person hinzufügen' : 'Ehe hinzufügen';
-  const kindClass = action.kind === 'person' ? 'import-badge--person' : 'import-badge--marriage';
+  const kindLabel = action.kind === 'person' ? 'Person hinzufügen' : action.kind === 'update' ? 'Person ergänzen' : 'Ehe hinzufügen';
+  const kindClass = action.kind === 'person' ? 'import-badge--person' : action.kind === 'update' ? 'import-badge--update' : 'import-badge--marriage';
   const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
   const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
 
@@ -4358,6 +5134,13 @@ function _renderImportCard(action) {
              placeholder="(leer)">
     </div>`;
   }).join('');
+
+  // Add match selection button for person actions
+  const matchBtn = (action.kind === 'person' || action.kind === 'update') ? `
+    <button class="import-btn import-btn--match" onclick="openMatchDialog('${action.id}')">
+      &#x1F50D; Person auswählen
+    </button>
+  ` : '';
 
   const srcHtml = action.source ? `
     <details class="import-source-details">
@@ -4378,6 +5161,7 @@ function _renderImportCard(action) {
     <div class="import-card-actions">
       <button class="import-btn import-btn--approve${appActive}" data-action="${action.id}" data-status="approved">&#x2713; Genehmigen</button>
       <button class="import-btn import-btn--skip${skpActive}"    data-action="${action.id}" data-status="skipped">&#x2715; \xdcberspringen</button>
+      ${matchBtn}
     </div>
   </div>`;
 }
@@ -4396,11 +5180,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const action = _importActions.find(a => a.id === id);
     if (!action) return;
     action.status = (action.status === wantedStatus) ? 'pending' : wantedStatus;
+
+    // Patch only the affected card — avoid full list re-render
     const card = list.querySelector(`[data-action-id="${id}"]`);
-    _renderImportReview();
-    // Re-scroll to keep card in view after re-render
-    const newCard = list.querySelector(`[data-action-id="${id}"]`);
-    if (newCard) newCard.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    if (card) {
+      card.className = `import-action-card import-action-card--${action.status}`;
+      const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
+      const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
+      const badge = card.querySelector('.import-status');
+      if (badge) { badge.className = `import-status ${stCls}`; badge.innerHTML = stLbl; }
+      card.querySelectorAll('[data-status]').forEach(b => {
+        b.classList.toggle('import-btn--active', b.dataset.status === action.status);
+      });
+    }
+
+    // Update only the summary counts (cheap)
+    _renderImportSummary();
   });
 
   // Field edits (delegated input)
@@ -4422,20 +5217,55 @@ function backToInputImport() {
 }
 
 function applyImport() {
-  const nApproved = _importActions.filter(a => a.status === 'approved').length;
-  if (nApproved === 0) {
+  const approved = _importActions.filter(a => a.status === 'approved');
+  if (approved.length === 0) {
     alert('Keine Änderungen genehmigt.\nBitte mindestens eine Änderung genehmigen.');
     return;
   }
 
-  const report = _tiApplyActions(_importActions);
-  _fullRebuildGraph();
-  closeTextImport();
+  // Show progress overlay, hide review step
+  document.getElementById('import-step-review').style.display = 'none';
+  const overlay  = document.getElementById('import-progress-overlay');
+  const bar      = document.getElementById('import-progress-bar');
+  const countEl  = document.getElementById('import-progress-count');
+  const labelEl  = document.getElementById('import-progress-label');
+  overlay.style.display = 'flex';
+  bar.style.width = '0%';
 
-  const nAdd  = report.filter(r => r.type === 'add').length;
-  const nFam  = report.filter(r => r.type === 'fam').length;
-  const nSkip = report.filter(r => r.type === 'skip').length;
-  alert(`Import abgeschlossen:\n• ${nAdd} Person${nAdd!==1?'en':''} hinzugef\xfcgt\n• ${nFam} Famili${nFam!==1?'en':'e'} erstellt\n• ${nSkip} bereits vorhanden`);
+  const total = approved.length;
+  const BATCH = 50;
+  let done = 0;
+
+  function tick() {
+    const next = Math.min(done + BATCH, total);
+    done = next;
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = pct + '%';
+    countEl.textContent = `${done} / ${total}`;
+
+    if (done < total) {
+      setTimeout(tick, 0);
+      return;
+    }
+
+    // All ticks done — now run the actual synchronous apply + rebuild
+    labelEl.textContent = 'Graph wird aktualisiert…';
+    bar.style.width = '100%';
+    // Double rAF: first frame commits the DOM change, second frame runs after paint
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const report = _tiApplyActions(_importActions);
+      _fullRebuildGraph();
+      closeTextImport();
+
+      const nAdd  = report.filter(r => r.type === 'add').length;
+      const nUpd  = report.filter(r => r.type === 'update').length;
+      const nFam  = report.filter(r => r.type === 'fam').length;
+      const nSkip = report.filter(r => r.type === 'skip').length;
+      alert(`Import abgeschlossen:\n• ${nAdd} Person${nAdd!==1?'en':''} hinzugef\xfcgt\n• ${nUpd} Person${nUpd!==1?'en':''} erg\u00e4nzt\n• ${nFam} Famili${nFam!==1?'en':'e'} erstellt\n• ${nSkip} bereits vorhanden`);
+    }));
+  }
+
+  setTimeout(tick, 0);
 }
 
 window.openTextImport    = openTextImport;
@@ -4447,3 +5277,2706 @@ window.applyImport       = applyImport;
 window._importApproveAll = _importApproveAll;
 window._importSkipAll    = _importSkipAll;
 window._importResetAll   = _importResetAll;
+
+// ═══════════════════════════════════════════════════════════════
+// INTERACTIVE MATCH SELECTION FOR IMPORT
+// ═══════════════════════════════════════════════════════════════
+
+let _currentMatchActionId = null;
+let _currentMatchCandidates = [];
+
+function openMatchDialog(actionId) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  
+  _currentMatchActionId = actionId;
+  
+  // Display current entry
+  const currentHtml = `
+    <div class="import-match-person">
+      <div class="import-match-name">${escHtml(action.fields['Name'] || 'Unnamed')}</div>
+      <div class="import-match-details">
+        ${action.fields['Birth Date'] ? `Geb: ${escHtml(action.fields['Birth Date'])}` : ''}
+        ${action.fields['Birth Place'] ? ` in ${escHtml(action.fields['Birth Place'])}` : ''}
+      </div>
+    </div>
+  `;
+  document.getElementById('import-match-current-content').innerHTML = currentHtml;
+  
+  // Find candidates
+  _currentMatchCandidates = _findMatchCandidates(action);
+  renderMatchCandidates(_currentMatchCandidates);
+  
+  // Clear search
+  document.getElementById('import-match-search-input').value = '';
+  
+  // Show dialog
+  document.getElementById('import-match-dialog').style.display = 'flex';
+}
+
+function closeMatchDialog() {
+  document.getElementById('import-match-dialog').style.display = 'none';
+  _currentMatchActionId = null;
+  _currentMatchCandidates = [];
+}
+
+function _findMatchCandidates(action) {
+  const candidates = [];
+  const searchName = (action.fields['Name'] || '').toLowerCase();
+  const searchBirth = (action.fields['Birth Date'] || '').match(/\b(\d{4})\b/)?.[1] || '';
+  
+  // Search in existing individuals
+  for (const [id, indi] of individuals) {
+    const indiName = (indi.name || '').toLowerCase();
+    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+    
+    let score = 0;
+    
+    // Exact name match
+    if (indiName === searchName) {
+      score = 100;
+    } else if (indiName.includes(searchName) || searchName.includes(indiName)) {
+      score = 50;
+    } else if (indiName.split(' ').pop() === searchName.split(' ').pop()) {
+      // Same surname
+      score = 30;
+    }
+    
+    // Birth year bonus
+    if (score > 0 && indiBirth && searchBirth) {
+      if (indiBirth === searchBirth) {
+        score += 50;
+      } else if (Math.abs(parseInt(indiBirth) - parseInt(searchBirth)) <= 2) {
+        score += 20;
+      }
+    }
+    
+    if (score > 0) {
+      candidates.push({
+        type: 'existing',
+        id: id,
+        name: indi.name,
+        birth: indi.birth?.date || '',
+        death: indi.death?.date || '',
+        sex: indi.sex || 'U',
+        score: score,
+        data: indi
+      });
+    }
+  }
+  
+  // Also search in other pending import actions
+  for (const otherAction of _importActions) {
+    if (otherAction.id === action.id) continue;
+    if (otherAction.status === 'skipped') continue;
+    
+    const otherName = (otherAction.fields['Name'] || '').toLowerCase();
+    const otherBirth = (otherAction.fields['Birth Date'] || '').match(/\b(\d{4})\b/)?.[1] || '';
+    
+    let score = 0;
+    if (otherName === searchName) {
+      score = 90;
+    } else if (otherName.includes(searchName) || searchName.includes(otherName)) {
+      score = 40;
+    }
+    
+    if (score > 0 && otherBirth && searchBirth && otherBirth === searchBirth) {
+      score += 40;
+    }
+    
+    if (score > 0) {
+      candidates.push({
+        type: 'pending',
+        actionId: otherAction.id,
+        name: otherAction.fields['Name'],
+        birth: otherAction.fields['Birth Date'] || '',
+        death: otherAction.fields['Death Date'] || '',
+        sex: otherAction.fields['Sex'] || 'U',
+        score: score,
+        data: otherAction
+      });
+    }
+  }
+  
+  // Sort by score descending
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+function renderMatchCandidates(candidates) {
+  const listEl = document.getElementById('import-match-list');
+  
+  if (candidates.length === 0) {
+    listEl.innerHTML = '<div class="import-match-empty">Keine Treffer gefunden.</div>';
+    return;
+  }
+  
+  listEl.innerHTML = candidates.map((c, idx) => `
+    <div class="import-match-candidate" onclick="selectMatchCandidate('${c.type}', '${c.type === 'existing' ? c.id : c.actionId}')">
+      <div class="import-match-candidate-type ${c.type === 'existing' ? 'type-existing' : 'type-pending'}">
+        ${c.type === 'existing' ? 'GEDCOM' : 'NEU'}
+      </div>
+      <div class="import-match-candidate-info">
+        <div class="import-match-candidate-name">${escHtml(c.name)}</div>
+        <div class="import-match-candidate-details">
+          ${c.birth ? `geb. ${escHtml(c.birth)}` : ''}
+          ${c.death ? ` - gest. ${escHtml(c.death)}` : ''}
+          [${c.sex}]
+        </div>
+      </div>
+      <div class="import-match-candidate-score">Score: ${c.score}</div>
+    </div>
+  `).join('');
+}
+
+function searchMatchCandidates() {
+  const query = document.getElementById('import-match-search-input').value.toLowerCase().trim();
+  if (!query) {
+    renderMatchCandidates(_currentMatchCandidates);
+    return;
+  }
+  
+  const filtered = _currentMatchCandidates.filter(c => 
+    c.name.toLowerCase().includes(query)
+  );
+  renderMatchCandidates(filtered);
+}
+
+function selectMatchCandidate(type, targetId) {
+  if (!_currentMatchActionId) return;
+  
+  const action = _importActions.find(a => a.id === _currentMatchActionId);
+  if (!action) return;
+  
+  if (type === 'existing') {
+    // Link to existing GEDCOM person
+    const indi = individuals.get(targetId);
+    if (!indi) return;
+    
+    // Convert to update action
+    action.kind = 'update';
+    action.existingId = targetId;
+    action.status = 'approved';
+    
+    // Determine what fields to update
+    const missing = {};
+    if (!indi.birth?.date && action.fields['Birth Date']) missing['Birth Date'] = action.fields['Birth Date'];
+    if (!indi.birth?.plac && action.fields['Birth Place']) missing['Birth Place'] = action.fields['Birth Place'];
+    if (!indi.death?.date && action.fields['Death Date']) missing['Death Date'] = action.fields['Death Date'];
+    if (!indi.death?.plac && action.fields['Death Place']) missing['Death Place'] = action.fields['Death Place'];
+    if ((!indi.sex || indi.sex === 'U') && action.fields['Sex']) missing['Sex'] = action.fields['Sex'];
+    
+    // Keep name but update fields
+    action.fields = Object.assign({ 'Name': action.fields['Name'] }, missing);
+    
+  } else if (type === 'pending') {
+    // Link to another pending action
+    const targetAction = _importActions.find(a => a.id === targetId);
+    if (!targetAction) return;
+    
+    // Merge data into the target action
+    if (action.fields['Birth Date'] && !targetAction.fields['Birth Date']) {
+      targetAction.fields['Birth Date'] = action.fields['Birth Date'];
+    }
+    if (action.fields['Birth Place'] && !targetAction.fields['Birth Place']) {
+      targetAction.fields['Birth Place'] = action.fields['Birth Place'];
+    }
+    if (action.fields['Death Date'] && !targetAction.fields['Death Date']) {
+      targetAction.fields['Death Date'] = action.fields['Death Date'];
+    }
+    if (action.fields['Death Place'] && !targetAction.fields['Death Place']) {
+      targetAction.fields['Death Place'] = action.fields['Death Place'];
+    }
+    
+    // Mark current action as skip (will be merged into target)
+    action.status = 'skipped';
+    action._mergedInto = targetId;
+  }
+  
+  // Refresh the import review UI
+  _renderImportReview();
+  closeMatchDialog();
+}
+
+window.openMatchDialog      = openMatchDialog;
+window.closeMatchDialog     = closeMatchDialog;
+window.searchMatchCandidates = searchMatchCandidates;
+window.selectMatchCandidate = selectMatchCandidate;
+
+// ═══════════════════════════════════════════════════════════════
+// STEP-BY-STEP WIZARD FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+let _wizardEntries = [];        // Parsed person entries
+let _wizardCurrentIdx = 0;      // Current entry being reviewed
+let _wizardDecisions = new Map(); // entry idx -> decision
+let _wizardAutoSkippedCount = 0;  // Count of auto-skipped entries
+
+function openWizard() {
+  document.getElementById('wizard-modal').style.display = 'flex';
+  _resetWizard();
+}
+
+function closeWizard() {
+  document.getElementById('wizard-modal').style.display = 'none';
+  _wizardEntries = [];
+  _wizardDecisions.clear();
+  _wizardCurrentIdx = 0;
+}
+
+function _resetWizard() {
+  // Show load step
+  document.getElementById('wizard-step-load').style.display = '';
+  document.getElementById('wizard-step-review').style.display = 'none';
+  document.getElementById('wizard-step-summary').style.display = 'none';
+  document.getElementById('wizard-progress-fill').style.width = '33%';
+  document.getElementById('wizard-progress-text').textContent = 'Schritt 1/3: Text laden';
+
+  // Clear inputs
+  document.getElementById('wizard-text-area').value = '';
+  document.getElementById('wizard-file-input').value = '';
+  document.getElementById('wizard-file-name').textContent = 'Keine Datei gewählt';
+
+  _wizardEntries = [];
+  _wizardDecisions.clear();
+  _wizardCurrentIdx = 0;
+  _wizardAutoSkippedCount = 0;
+
+  // Hide notifications
+  document.getElementById('wizard-auto-skip-notice').style.display = 'none';
+}
+
+function handleWizardFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('wizard-file-name').textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('wizard-text-area').value = ev.target.result || '';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function wizardParseText() {
+  const raw = (document.getElementById('wizard-text-area').value || '').trim();
+  if (!raw) {
+    alert('Bitte Text eingeben oder Datei laden.');
+    return;
+  }
+
+  // Parse using existing text import logic
+  const clean = _tiCleanText(raw);
+  const persons = _tiParseText(clean);
+
+  if (!persons.length) {
+    alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
+    return;
+  }
+
+  _wizardEntries = persons.map((p, idx) => ({
+    ...p,
+    entryId: `entry_${idx}`,
+    status: 'pending'
+  }));
+
+  // Switch to review step
+  document.getElementById('wizard-step-load').style.display = 'none';
+  document.getElementById('wizard-step-review').style.display = '';
+  document.getElementById('wizard-progress-fill').style.width = '66%';
+  document.getElementById('wizard-progress-text').textContent = 'Schritt 2/3: Einträge prüfen';
+
+  // Show first entry
+  _wizardCurrentIdx = 0;
+  wizardShowEntry(0);
+}
+
+function wizardShowEntry(idx) {
+  if (idx < 0 || idx >= _wizardEntries.length) return;
+
+  // Check if this entry should be auto-skipped (already processed)
+  const existingDecision = _wizardDecisions.get(idx);
+  if (existingDecision) {
+    // Already has a decision, show it normally
+    _wizardRenderEntry(idx);
+    return;
+  }
+
+  // Check if entry needs attention (has changes or is new)
+  const needsAttention = _wizardEntryNeedsAttention(idx);
+
+  if (!needsAttention) {
+    // Auto-skip: mark and move to next
+    _wizardDecisions.set(idx, { action: 'skip', reason: 'no_changes_needed' });
+    _wizardAutoSkippedCount++;
+
+    if (idx < _wizardEntries.length - 1) {
+      wizardShowEntry(idx + 1);
+    } else {
+      wizardShowSummary();
+    }
+    return;
+  }
+
+  // Check for high-confidence match for auto-linking
+  const autoLinkMatch = _wizardFindBestMatchForAutoLink(idx);
+  if (autoLinkMatch && autoLinkMatch.score >= 150) {
+    // Auto-link to existing person with high confidence
+    _wizardDecisions.set(idx, {
+      action: 'link',
+      targetId: autoLinkMatch.id,
+      entry: entry,
+      autoLinked: true
+    });
+    _wizardAutoSkippedCount++;
+
+    if (idx < _wizardEntries.length - 1) {
+      wizardShowEntry(idx + 1);
+    } else {
+      wizardShowSummary();
+    }
+    return;
+  }
+
+  // Show notification if we auto-skipped some entries to get here
+  if (_wizardAutoSkippedCount > 0) {
+    const noticeEl = document.getElementById('wizard-auto-skip-notice');
+    const textEl = document.getElementById('wizard-auto-skip-text');
+    const skipped = _wizardAutoSkippedCount;
+    textEl.textContent = `${skipped} Eintrag(e) übersprungen (keine Änderungen oder auto-verknüpft)`;
+    noticeEl.style.display = 'flex';
+    _wizardAutoSkippedCount = 0;
+  } else {
+    document.getElementById('wizard-auto-skip-notice').style.display = 'none';
+  }
+
+  _wizardRenderEntry(idx);
+}
+
+function _wizardEntryNeedsAttention(idx) {
+  const entry = _wizardEntries[idx];
+
+  // Find existing match
+  const existingId = _wizardFindExistingMatch(entry);
+  const existing = existingId ? individuals.get(existingId) : null;
+
+  if (!existing) {
+    // New person - needs attention if has any data
+    return !!(entry.fullName || entry.birthDate || entry.deathDate);
+  }
+
+  // Check if there are any actual changes to make
+  const hasChanges =
+    (entry.birthDate && !existing.birth?.date) ||
+    (entry.birthPlace && !existing.birth?.plac) ||
+    (entry.deathDate && !existing.death?.date) ||
+    (entry.deathPlace && !existing.death?.plac) ||
+    (entry.sex && entry.sex !== 'U' && (!existing.sex || existing.sex === 'U')) ||
+    (entry.notes && !existing.note?.includes(entry.notes));
+
+  return hasChanges;
+}
+
+function _wizardFindBestMatchForAutoLink(idx) {
+  const entry = _wizardEntries[idx];
+  const searchName = (entry.fullName || '').toLowerCase();
+  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const [id, indi] of individuals) {
+    const indiName = (indi.name || '').toLowerCase();
+    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+    let score = 0;
+
+    // Exact name match
+    if (indiName === searchName) {
+      score = 100;
+    } else if (indiName.includes(searchName) || searchName.includes(indiName)) {
+      score = 60;
+    }
+
+    // Birth year match
+    if (score > 0 && indiBirth && searchBirth) {
+      if (indiBirth === searchBirth) {
+        score += 50;
+      } else if (Math.abs(parseInt(indiBirth) - parseInt(searchBirth)) <= 1) {
+        score += 30;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = { id, name: indi.name, score };
+    }
+  }
+
+  return bestMatch;
+}
+
+function _wizardRenderEntry(idx) {
+  if (idx < 0 || idx >= _wizardEntries.length) return;
+
+  _wizardCurrentIdx = idx;
+  const entry = _wizardEntries[idx];
+
+  // Update counter
+  document.getElementById('wizard-current-idx').textContent = idx + 1;
+  document.getElementById('wizard-total-count').textContent = _wizardEntries.length;
+
+  // Show source text
+  document.getElementById('wizard-source-text').textContent = entry.sourceNote || '(Kein Quelltext verfügbar)';
+
+  // Populate fields
+  document.getElementById('wizard-field-name').value = entry.fullName || '';
+  document.getElementById('wizard-field-sex').value = entry.sex || '';
+  document.getElementById('wizard-field-birth-date').value = entry.birthDate || '';
+  document.getElementById('wizard-field-birth-place').value = entry.birthPlace || '';
+  document.getElementById('wizard-field-death-date').value = entry.deathDate || '';
+  document.getElementById('wizard-field-death-place').value = entry.deathPlace || '';
+  document.getElementById('wizard-field-father').value = entry.fatherName || '';
+  document.getElementById('wizard-field-mother').value = entry.motherName || '';
+  document.getElementById('wizard-field-notes').value = entry.notes || '';
+
+  // Check if already decided
+  const currentDecision = _wizardDecisions.get(idx);
+
+  // Populate marriages with enhanced spouse search
+  const marriagesHtml = (entry.marriages || []).map((m, i) => {
+    const spouseId = m._linkedSpouseId || '';
+    return `
+    <div class="wizard-marriage-row" data-idx="${i}">
+      <div class="wizard-marriage-spouse-section">
+        <input type="text" placeholder="Ehepartner suchen..." value="${escHtml(m.spouseName || '')}" class="wiz-marr-spouse"
+               oninput="wizardSearchSpouseForMarriage(${i}, this.value)"
+               onfocus="wizardShowSpouseSearch(${i})">
+        <div id="wiz-marr-search-${i}" class="wizard-marriage-spouse-search" style="display:none"></div>
+        ${spouseId ? `<span class="wizard-marriage-spouse-linked">&#x1F517; Verknüpft</span>` : ''}
+        <input type="hidden" class="wiz-marr-spouse-id" value="${spouseId}">
+      </div>
+      <div class="wizard-marriage-dates">
+        <input type="text" placeholder="Hochzeitsdatum" value="${escHtml(m.date || '')}" class="wiz-marr-date">
+        <input type="text" placeholder="Hochzeitsort" value="${escHtml(m.place || '')}" class="wiz-marr-place">
+      </div>
+      <button onclick="wizardRemoveMarriage(${i})" title="Ehe entfernen">&#x2715;</button>
+    </div>
+  `}).join('');
+  document.getElementById('wizard-marriages-list').innerHTML = marriagesHtml || '<div style="color:#567;font-size:12px;">Keine Ehen erkannt</div>';
+
+  // Calculate and show proposed changes (with auto-link info)
+  wizardCalculateChanges(entry, currentDecision);
+
+  // Find and show matches
+  wizardFindMatches(entry);
+
+  // Show auto-link status if applicable
+  if (currentDecision?.autoLinked) {
+    const noticeEl = document.getElementById('wizard-auto-link-notice');
+    const textEl = document.getElementById('wizard-auto-link-text');
+    const indi = individuals.get(currentDecision.targetId);
+    textEl.textContent = `Auto-verknüpft mit: ${indi?.name || currentDecision.targetId} (Score: 150+)`;
+    noticeEl.style.display = 'flex';
+  } else {
+    document.getElementById('wizard-auto-link-notice').style.display = 'none';
+  }
+
+  // Update button states based on decision
+  _wizardUpdateButtonStates(currentDecision);
+}
+
+function wizardCalculateChanges(entry, currentDecision) {
+  const changes = [];
+
+  // Show auto-link status
+  if (currentDecision?.autoLinked && currentDecision?.targetId) {
+    const indi = individuals.get(currentDecision.targetId);
+    changes.push({ field: 'Status', old: '(neu)', new: `Auto-verknüpft mit ${indi?.name || currentDecision.targetId}` });
+    return; // No other changes needed for auto-linked entries
+  }
+
+  // Find existing match
+  const existingId = _wizardFindExistingMatch(entry);
+  const existing = existingId ? individuals.get(existingId) : null;
+
+  if (existing) {
+    // Compare fields
+    if (entry.birthDate && entry.birthDate !== (existing.birth?.date || '')) {
+      changes.push({ field: 'Geburtsdatum', old: existing.birth?.date || '(leer)', new: entry.birthDate });
+    }
+    if (entry.birthPlace && entry.birthPlace !== (existing.birth?.plac || '')) {
+      changes.push({ field: 'Geburtsort', old: existing.birth?.plac || '(leer)', new: entry.birthPlace });
+    }
+    if (entry.deathDate && entry.deathDate !== (existing.death?.date || '')) {
+      changes.push({ field: 'Sterbedatum', old: existing.death?.date || '(leer)', new: entry.deathDate });
+    }
+    if (entry.deathPlace && entry.deathPlace !== (existing.death?.plac || '')) {
+      changes.push({ field: 'Sterbeort', old: existing.death?.plac || '(leer)', new: entry.deathPlace });
+    }
+    if (entry.sex && entry.sex !== 'U' && entry.sex !== (existing.sex || 'U')) {
+      changes.push({ field: 'Geschlecht', old: existing.sex || '(leer)', new: entry.sex });
+    }
+  } else {
+    // New person - show what will be added
+    if (entry.fullName) changes.push({ field: 'Name', old: '(neu)', new: entry.fullName });
+    if (entry.birthDate) changes.push({ field: 'Geburtsdatum', old: '(neu)', new: entry.birthDate });
+    if (entry.birthPlace) changes.push({ field: 'Geburtsort', old: '(neu)', new: entry.birthPlace });
+  }
+
+  const changesHtml = changes.length ? changes.map(c => `
+    <div class="wizard-change-item">
+      <span class="wizard-change-field">${escHtml(c.field)}:</span>
+      <span class="wizard-change-old">${escHtml(c.old)}</span>
+      <span class="wizard-change-arrow">&#x2192;</span>
+      <span class="wizard-change-new">${escHtml(c.new)}</span>
+    </div>
+  `).join('') : '<div style="color:#567;font-size:12px;">Keine Änderungen vorgeschlagen</div>';
+
+  document.getElementById('wizard-changes-list').innerHTML = changesHtml;
+}
+
+function wizardFindMatches(entry) {
+  const candidates = [];
+  const searchName = (entry.fullName || '').toLowerCase();
+  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+  // Search in existing individuals
+  for (const [id, indi] of individuals) {
+    const indiName = (indi.name || '').toLowerCase();
+    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+    let score = 0;
+    if (indiName === searchName) {
+      score = 100;
+    } else if (indiName.includes(searchName) || searchName.includes(indiName)) {
+      score = 50;
+    } else if (indiName.split(' ').pop() === searchName.split(' ').pop()) {
+      score = 30;
+    }
+
+    if (score > 0 && indiBirth && searchBirth) {
+      if (indiBirth === searchBirth) score += 50;
+      else if (Math.abs(parseInt(indiBirth) - parseInt(searchBirth)) <= 2) score += 20;
+    }
+
+    if (score > 0) {
+      candidates.push({ type: 'existing', id, name: indi.name, birth: indi.birth?.date || '', death: indi.death?.date || '', sex: indi.sex || 'U', score });
+    }
+  }
+
+  // Search in other entries
+  _wizardEntries.forEach((other, idx) => {
+    if (idx === _wizardCurrentIdx) return;
+    const otherName = (other.fullName || '').toLowerCase();
+    const otherBirth = (other.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+    let score = 0;
+    if (otherName === searchName) score = 90;
+    else if (otherName.includes(searchName) || searchName.includes(otherName)) score = 40;
+
+    if (score > 0 && otherBirth && searchBirth && otherBirth === searchBirth) score += 40;
+
+    if (score > 0) {
+      candidates.push({ type: 'new', idx, name: other.fullName, birth: other.birthDate || '', death: other.deathDate || '', sex: other.sex || 'U', score });
+    }
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  const matchesHtml = candidates.slice(0, 5).map(c => `
+    <div class="wizard-match-item" onclick="wizardSelectMatch('${c.type}', '${c.type === 'existing' ? c.id : c.idx}')">
+      <span class="wizard-match-type ${c.type}">${c.type === 'existing' ? 'GEDCOM' : 'NEU'}</span>
+      <div class="wizard-match-info">
+        <div class="wizard-match-name">${escHtml(c.name)}</div>
+        <div class="wizard-match-details">${c.birth ? `geb. ${escHtml(c.birth)}` : ''} ${c.death ? `- gest. ${escHtml(c.death)}` : ''} [${c.sex}]</div>
+      </div>
+      <span class="wizard-match-score">${c.score}</span>
+    </div>
+  `).join('');
+
+  document.getElementById('wizard-matches-list').innerHTML = matchesHtml || '<div style="color:#567;font-size:12px;">Keine Treffer gefunden</div>';
+}
+
+function _wizardFindExistingMatch(entry) {
+  const searchName = _tiNormName(entry.fullName || '');
+  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+  for (const [id, indi] of individuals) {
+    const indiName = _tiNormName(indi.name || '');
+    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
+
+    if (indiName === searchName) {
+      if (!searchBirth || !indiBirth || indiBirth === searchBirth) {
+        return id;
+      }
+    }
+  }
+  return null;
+}
+
+function wizardSelectMatch(type, targetId) {
+  const entry = _wizardEntries[_wizardCurrentIdx];
+
+  if (type === 'existing') {
+    // Mark for linking to existing
+    _wizardDecisions.set(_wizardCurrentIdx, {
+      action: 'link',
+      targetId: targetId,
+      entry: _wizardCollectFieldData()
+    });
+  } else {
+    // Mark for linking to another new entry
+    _wizardDecisions.set(_wizardCurrentIdx, {
+      action: 'merge',
+      targetIdx: parseInt(targetId),
+      entry: _wizardCollectFieldData()
+    });
+  }
+
+  _wizardUpdateButtonStates(_wizardDecisions.get(_wizardCurrentIdx));
+  wizardNextEntry();
+}
+
+function wizardCollectFieldData() {
+  const marriages = [];
+  document.querySelectorAll('.wizard-marriage-row').forEach(row => {
+    marriages.push({
+      spouseName: row.querySelector('.wiz-marr-spouse')?.value || '',
+      spouseId: row.querySelector('.wiz-marr-spouse-id')?.value || '',
+      date: row.querySelector('.wiz-marr-date')?.value || '',
+      place: row.querySelector('.wiz-marr-place')?.value || ''
+    });
+  });
+
+  return {
+    fullName: document.getElementById('wizard-field-name').value,
+    sex: document.getElementById('wizard-field-sex').value,
+    birthDate: document.getElementById('wizard-field-birth-date').value,
+    birthPlace: document.getElementById('wizard-field-birth-place').value,
+    deathDate: document.getElementById('wizard-field-death-date').value,
+    deathPlace: document.getElementById('wizard-field-death-place').value,
+    fatherName: document.getElementById('wizard-field-father').value,
+    motherName: document.getElementById('wizard-field-mother').value,
+    notes: document.getElementById('wizard-field-notes').value,
+    marriages: marriages
+  };
+}
+
+function wizardApproveEntry() {
+  _wizardDecisions.set(_wizardCurrentIdx, {
+    action: 'add',
+    entry: wizardCollectFieldData()
+  });
+  wizardNextEntry();
+}
+
+function wizardLinkToExisting() {
+  // Show matches box if hidden
+  const matchesBox = document.getElementById('wizard-matches-box');
+  matchesBox.scrollIntoView({ behavior: 'smooth' });
+}
+
+function wizardUpdateExisting() {
+  const existingId = _wizardFindExistingMatch(_wizardEntries[_wizardCurrentIdx]);
+  if (!existingId) {
+    alert('Keine passende bestehende Person gefunden.');
+    return;
+  }
+
+  _wizardDecisions.set(_wizardCurrentIdx, {
+    action: 'update',
+    targetId: existingId,
+    entry: wizardCollectFieldData()
+  });
+  wizardNextEntry();
+}
+
+function wizardSkipEntry() {
+  _wizardDecisions.set(_wizardCurrentIdx, { action: 'skip' });
+  wizardNextEntry();
+}
+
+function wizardPrevEntry() {
+  if (_wizardCurrentIdx > 0) {
+    wizardShowEntry(_wizardCurrentIdx - 1);
+  }
+}
+
+function wizardNextEntry() {
+  if (_wizardCurrentIdx < _wizardEntries.length - 1) {
+    wizardShowEntry(_wizardCurrentIdx + 1);
+  } else {
+    // Show summary
+    wizardShowSummary();
+  }
+}
+
+function wizardShowSummary() {
+  document.getElementById('wizard-step-review').style.display = 'none';
+  document.getElementById('wizard-step-summary').style.display = '';
+  document.getElementById('wizard-progress-fill').style.width = '100%';
+  document.getElementById('wizard-progress-text').textContent = 'Schritt 3/3: Zusammenfassung';
+
+  // Calculate stats
+  let addCount = 0, linkCount = 0, updateCount = 0, skipCount = 0, pendingCount = 0;
+  const pendingItems = [];
+
+  _wizardEntries.forEach((entry, idx) => {
+    const decision = _wizardDecisions.get(idx);
+    if (!decision) {
+      pendingCount++;
+      pendingItems.push({ status: 'pending', name: entry.fullName });
+    } else if (decision.action === 'add') addCount++;
+    else if (decision.action === 'link') linkCount++;
+    else if (decision.action === 'update') updateCount++;
+    else if (decision.action === 'skip') skipCount++;
+    else if (decision.action === 'merge') linkCount++;
+
+    if (decision && decision.action !== 'pending') {
+      pendingItems.push({
+        status: decision.action,
+        name: decision.entry?.fullName || entry.fullName
+      });
+    }
+  });
+
+  // Render stats
+  const statsHtml = `
+    <div class="wizard-stat-card">
+      <div class="wizard-stat-number" style="color:#7de0a0">${addCount}</div>
+      <div class="wizard-stat-label">Neu hinzufügen</div>
+    </div>
+    <div class="wizard-stat-card">
+      <div class="wizard-stat-number" style="color:#a0d0f0">${linkCount}</div>
+      <div class="wizard-stat-label">Verknüpfen</div>
+    </div>
+    <div class="wizard-stat-card">
+      <div class="wizard-stat-number" style="color:#e0e080">${updateCount}</div>
+      <div class="wizard-stat-label">Aktualisieren</div>
+    </div>
+    <div class="wizard-stat-card">
+      <div class="wizard-stat-number" style="color:#e0a0a0">${skipCount}</div>
+      <div class="wizard-stat-label">Übersprungen</div>
+    </div>
+    <div class="wizard-stat-card">
+      <div class="wizard-stat-number" style="color:#789">${pendingCount}</div>
+      <div class="wizard-stat-label">Ausstehend</div>
+    </div>
+  `;
+  document.getElementById('wizard-stats').innerHTML = statsHtml;
+
+  // Render pending list
+  const pendingHtml = pendingItems.map(item => `
+    <div class="wizard-pending-item">
+      <span class="wizard-pending-status ${item.status}">${item.status}</span>
+      <span class="wizard-pending-name">${escHtml(item.name || 'Unnamed')}</span>
+    </div>
+  `).join('');
+  document.getElementById('wizard-pending-list').innerHTML = pendingHtml || '<div style="color:#567;font-size:12px;padding:8px;">Keine Einträge</div>';
+}
+
+function wizardBackToReview() {
+  document.getElementById('wizard-step-summary').style.display = 'none';
+  document.getElementById('wizard-step-review').style.display = '';
+  document.getElementById('wizard-progress-fill').style.width = '66%';
+  document.getElementById('wizard-progress-text').textContent = 'Schritt 2/3: Einträge prüfen';
+}
+
+function wizardApplyAll() {
+  const toApply = [];
+
+  // Convert wizard decisions to import actions
+  for (const [idx, decision] of _wizardDecisions) {
+    if (decision.action === 'skip') continue;
+
+    const entry = decision.entry || _wizardEntries[idx];
+
+    if (decision.action === 'add') {
+      toApply.push({
+        kind: 'person',
+        status: 'approved',
+        fields: {
+          'Name': entry.fullName,
+          'Sex': entry.sex,
+          'Birth Date': entry.birthDate,
+          'Birth Place': entry.birthPlace,
+          'Death Date': entry.deathDate,
+          'Death Place': entry.deathPlace,
+          'Father': entry.fatherName,
+          'Mother': entry.motherName,
+          'Notes': entry.notes
+        },
+        _person: entry
+      });
+    } else if (decision.action === 'update') {
+      toApply.push({
+        kind: 'update',
+        status: 'approved',
+        existingId: decision.targetId,
+        fields: {
+          'Name': entry.fullName,
+          'Birth Date': entry.birthDate,
+          'Birth Place': entry.birthPlace,
+          'Death Date': entry.deathDate,
+          'Death Place': entry.deathPlace,
+          'Sex': entry.sex,
+          'Notes': entry.notes
+        }
+      });
+    }
+  }
+
+  if (toApply.length === 0) {
+    alert('Keine Änderungen zum Anwenden.');
+    return;
+  }
+
+  // Apply using existing import logic
+  const report = _tiApplyWizardActions(toApply);
+  _fullRebuildGraph();
+  closeWizard();
+
+  const nAdd = report.filter(r => r.type === 'add').length;
+  const nUpd = report.filter(r => r.type === 'update').length;
+  const nFam = report.filter(r => r.type === 'fam').length;
+  alert(`Import abgeschlossen:\n• ${nAdd} Person(en) hinzugefügt\n• ${nUpd} Person(en) aktualisiert\n• ${nFam} Familie(n) erstellt`);
+}
+
+function _tiApplyWizardActions(actions) {
+  // Similar to _tiApplyActions but for wizard
+  let maxIndi = 0, maxFam = 0;
+  for (const [id] of individuals) { const m = id.match(/\d+/); if (m) maxIndi = Math.max(maxIndi,+m[0]); }
+  for (const [id] of families)    { const m = id.match(/\d+/); if (m) maxFam  = Math.max(maxFam, +m[0]); }
+
+  const nameToId = new Map();
+  for (const [id, indi] of individuals) nameToId.set(_tiNormName(indi.name||''), id);
+
+  const report = [];
+
+  // Apply updates
+  for (const action of actions) {
+    if (action.kind !== 'update') continue;
+    const indi = individuals.get(action.existingId);
+    if (!indi) continue;
+
+    if (action.fields['Birth Date']) indi.birth.date = action.fields['Birth Date'];
+    if (action.fields['Birth Place']) indi.birth.plac = action.fields['Birth Place'];
+    if (action.fields['Death Date']) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
+    if (action.fields['Death Place']) indi.death.plac = action.fields['Death Place'];
+    if (action.fields['Sex'] && (!indi.sex || indi.sex === 'U')) indi.sex = action.fields['Sex'];
+    if (action.fields['Notes']) indi.note = indi.note ? indi.note + '; ' + action.fields['Notes'] : action.fields['Notes'];
+
+    report.push({ type: 'update', msg: `${indi.name} updated` });
+  }
+
+  // Add new persons
+  for (const action of actions) {
+    if (action.kind !== 'person') continue;
+
+    const name = action.fields['Name'];
+    const nn = _tiNormName(name);
+
+    if (nameToId.has(nn)) {
+      report.push({ type: 'skip', msg: `${name} already exists` });
+      continue;
+    }
+
+    const xref = `@I${++maxIndi}@`;
+    nameToId.set(nn, xref);
+
+    individuals.set(xref, {
+      id: xref,
+      name: name,
+      sex: action.fields['Sex'] || 'U',
+      birth: { date: action.fields['Birth Date'] || '', plac: action.fields['Birth Place'] || '' },
+      death: { date: action.fields['Death Date'] || '', plac: action.fields['Death Place'] || '', caus: '' },
+      deceased: !!action.fields['Death Date'],
+      occu: '',
+      note: action.fields['Notes'] || '',
+      fams: [],
+      famc: ''
+    });
+
+    report.push({ type: 'add', msg: `${name} → ${xref}` });
+  }
+
+  return report;
+}
+
+function wizardAddMarriage() {
+  const container = document.getElementById('wizard-marriages-list');
+  const idx = container.children.length;
+
+  const row = document.createElement('div');
+  row.className = 'wizard-marriage-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="wizard-marriage-spouse-section">
+      <input type="text" placeholder="Ehepartner suchen..." class="wiz-marr-spouse"
+             oninput="wizardSearchSpouseForMarriage(${idx}, this.value)"
+             onfocus="wizardShowSpouseSearch(${idx})">
+      <div id="wiz-marr-search-${idx}" class="wizard-marriage-spouse-search" style="display:none"></div>
+      <input type="hidden" class="wiz-marr-spouse-id" value="">
+    </div>
+    <div class="wizard-marriage-dates">
+      <input type="text" placeholder="Hochzeitsdatum" class="wiz-marr-date">
+      <input type="text" placeholder="Hochzeitsort" class="wiz-marr-place">
+    </div>
+    <button onclick="wizardRemoveMarriage(${idx})" title="Ehe entfernen">&#x2715;</button>
+  `;
+
+  if (container.children[0]?.textContent?.includes('Keine Ehen')) {
+    container.innerHTML = '';
+  }
+  container.appendChild(row);
+
+  // Show spouse search immediately
+  wizardShowSpouseSearch(idx);
+}
+
+function wizardRemoveMarriage(idx) {
+  const row = document.querySelector(`.wizard-marriage-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function _wizardUpdateButtonStates(decision) {
+  // Visual feedback for button states could be added here
+  // For now, the decision is stored and applied on next/prev
+}
+
+function wizardHideAutoSkipNotice() {
+  document.getElementById('wizard-auto-skip-notice').style.display = 'none';
+}
+
+function wizardShowAutoLinkDetails() {
+  const decision = _wizardDecisions.get(_wizardCurrentIdx);
+  if (!decision?.autoLinked || !decision?.targetId) return;
+
+  const indi = individuals.get(decision.targetId);
+  if (indi) {
+    alert(`Auto-Verknüpfungsdetails:\n\nName: ${indi.name}\nID: ${decision.targetId}\nGeburt: ${indi.birth?.date || 'unbekannt'} ${indi.birth?.plac || ''}\nGeschlecht: ${indi.sex || 'U'}\n\nDiese Person wurde basierend auf hoher Übereinstimmung automatisch verknüpft.`);
+  }
+}
+
+function wizardBreakAutoLink() {
+  const decision = _wizardDecisions.get(_wizardCurrentIdx);
+  if (!decision?.autoLinked) return;
+
+  // Remove the auto-link and show entry for manual review
+  _wizardDecisions.delete(_wizardCurrentIdx);
+  document.getElementById('wizard-auto-link-notice').style.display = 'none';
+
+  // Re-render to show as new entry
+  _wizardRenderEntry(_wizardCurrentIdx);
+
+  alert('Auto-Verknüpfung aufgehoben. Sie können nun manuell entscheiden.');
+}
+
+// Spouse search for marriages
+let _wizardActiveSpouseSearchIdx = null;
+
+function wizardShowSpouseSearch(idx) {
+  _wizardActiveSpouseSearchIdx = idx;
+  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
+  if (searchEl) {
+    searchEl.style.display = 'block';
+    // Populate with top matches initially
+    wizardSearchSpouseForMarriage(idx, '');
+  }
+}
+
+function wizardHideSpouseSearch(idx) {
+  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
+  if (searchEl) {
+    searchEl.style.display = 'none';
+  }
+  if (_wizardActiveSpouseSearchIdx === idx) {
+    _wizardActiveSpouseSearchIdx = null;
+  }
+}
+
+function wizardSearchSpouseForMarriage(idx, query) {
+  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+
+  // Search in existing individuals and import entries
+  const candidates = [];
+
+  // Search GEDCOM
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    const birth = (indi.birth?.date || '').toLowerCase();
+    if (!query || name.includes(query) || birth.includes(query)) {
+      let score = 0;
+      if (query && name.includes(query)) score += 50;
+      if (query && birth.includes(query)) score += 30;
+      candidates.push({
+        type: 'gedcom',
+        id: id,
+        name: indi.name,
+        birth: indi.birth?.date || '',
+        sex: indi.sex || 'U',
+        score: score || 10
+      });
+    }
+  }
+
+  // Search import entries
+  _wizardEntries.forEach((entry, eIdx) => {
+    if (eIdx === _wizardCurrentIdx) return; // Skip self
+    const name = (entry.fullName || '').toLowerCase();
+    const birth = (entry.birthDate || '').toLowerCase();
+    if (!query || name.includes(query) || birth.includes(query)) {
+      let score = 0;
+      if (query && name.includes(query)) score += 40;
+      if (query && birth.includes(query)) score += 30;
+      candidates.push({
+        type: 'import',
+        idx: eIdx,
+        name: entry.fullName,
+        birth: entry.birthDate || '',
+        sex: entry.sex || 'U',
+        score: score || 5
+      });
+    }
+  });
+
+  // Sort by score and take top 5
+  candidates.sort((a, b) => b.score - a.score);
+  const topCandidates = candidates.slice(0, 5);
+
+  if (topCandidates.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = topCandidates.map(c => `
+      <div class="wizard-spouse-search-item" onclick="wizardSelectSpouseForMarriage(${idx}, '${c.type}', '${c.type === 'gedcom' ? c.id : c.idx}', '${escHtml(c.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(c.name)}</span>
+        <span class="details">${c.birth ? escHtml(c.birth) : ''} [${c.sex}]</span>
+        <span class="score">${c.type === 'gedcom' ? 'GEDCOM' : 'IMPORT'}</span>
+      </div>
+    `).join('');
+  }
+
+  searchEl.style.display = 'block';
+}
+
+function wizardSelectSpouseForMarriage(marriageIdx, type, targetId, name) {
+  const row = document.querySelector(`.wizard-marriage-row[data-idx="${marriageIdx}"]`);
+  if (!row) return;
+
+  // Update the spouse input
+  const spouseInput = row.querySelector('.wiz-marr-spouse');
+  const spouseIdInput = row.querySelector('.wiz-marr-spouse-id');
+  if (spouseInput) spouseInput.value = name;
+  if (spouseIdInput) spouseIdInput.value = type === 'gedcom' ? targetId : '';
+
+  // Mark as linked
+  const spouseSection = row.querySelector('.wizard-marriage-spouse-section');
+  let linkedBadge = spouseSection.querySelector('.wizard-marriage-spouse-linked');
+  if (!linkedBadge) {
+    linkedBadge = document.createElement('span');
+    linkedBadge.className = 'wizard-marriage-spouse-linked';
+    linkedBadge.innerHTML = '&#x1F517; Verknüpft';
+    spouseSection.appendChild(linkedBadge);
+  }
+
+  // Hide search
+  wizardHideSpouseSearch(marriageIdx);
+}
+
+function wizardSearchPersons() {
+  const query = document.getElementById('wizard-search-input').value.toLowerCase().trim();
+  if (!query) {
+    wizardCloseSearch();
+    return;
+  }
+
+  const results = [];
+
+  // Search in existing GEDCOM individuals
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    const birth = (indi.birth?.date || '').toLowerCase();
+    const place = (indi.birth?.plac || '').toLowerCase();
+
+    if (name.includes(query) || birth.includes(query) || place.includes(query)) {
+      results.push({
+        type: 'gedcom',
+        id: id,
+        name: indi.name,
+        birth: indi.birth?.date || '',
+        death: indi.death?.date || '',
+        sex: indi.sex || 'U'
+      });
+    }
+  }
+
+  // Search in wizard import entries
+  _wizardEntries.forEach((entry, idx) => {
+    const name = (entry.fullName || '').toLowerCase();
+    const birth = (entry.birthDate || '').toLowerCase();
+    const place = (entry.birthPlace || '').toLowerCase();
+
+    if (name.includes(query) || birth.includes(query) || place.includes(query)) {
+      results.push({
+        type: 'import',
+        idx: idx,
+        name: entry.fullName,
+        birth: entry.birthDate || '',
+        death: entry.deathDate || '',
+        sex: entry.sex || 'U',
+        current: idx === _wizardCurrentIdx
+      });
+    }
+  });
+
+  // Render results
+  const resultsEl = document.getElementById('wizard-search-results');
+  const contentEl = document.getElementById('wizard-search-results-content');
+
+  if (results.length === 0) {
+    contentEl.innerHTML = '<div style="color:#567;font-size:13px;text-align:center;padding:20px;">Keine Treffer gefunden</div>';
+  } else {
+    contentEl.innerHTML = results.slice(0, 10).map(r => `
+      <div class="wizard-search-result-item" onclick="wizardGotoSearchResult('${r.type}', '${r.type === 'gedcom' ? r.id : r.idx}')">
+        <span class="wizard-search-result-type ${r.type}">${r.type === 'gedcom' ? 'GEDCOM' : 'IMPORT'}</span>
+        <div class="wizard-search-result-info">
+          <div class="wizard-search-result-name">${escHtml(r.name)} ${r.current ? '<span style="color:#4caf7d;">(aktuell)</span>' : ''}</div>
+          <div class="wizard-search-result-details">${r.birth ? `geb. ${escHtml(r.birth)}` : ''} ${r.death ? `- gest. ${escHtml(r.death)}` : ''} [${r.sex}]</div>
+        </div>
+        <div class="wizard-search-result-actions">
+          <button class="btn-goto" onclick="event.stopPropagation();wizardGotoSearchResult('${r.type}', '${r.type === 'gedcom' ? r.id : r.idx}')">Gehe zu</button>
+          ${r.type === 'gedcom' ? `<button class="btn-link" onclick="event.stopPropagation();wizardLinkToSearchResult('${r.id}')">Verknüpfen</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  resultsEl.style.display = 'block';
+}
+
+function wizardCloseSearch() {
+  document.getElementById('wizard-search-results').style.display = 'none';
+  document.getElementById('wizard-search-input').value = '';
+}
+
+function wizardGotoSearchResult(type, target) {
+  if (type === 'import') {
+    const idx = parseInt(target);
+    wizardCloseSearch();
+    wizardShowEntry(idx);
+  } else {
+    // For GEDCOM entries, we could highlight them in the main view
+    // For now, just show a message
+    const indi = individuals.get(target);
+    if (indi) {
+      alert(`GEDCOM Person: ${indi.name}\nGeburt: ${indi.birth?.date || 'unbekannt'}\nID: ${target}`);
+    }
+  }
+}
+
+function wizardLinkToSearchResult(existingId) {
+  const indi = individuals.get(existingId);
+  if (!indi) return;
+
+  // Mark current entry as linked to this existing person
+  _wizardDecisions.set(_wizardCurrentIdx, {
+    action: 'link',
+    targetId: existingId,
+    entry: wizardCollectFieldData()
+  });
+
+  wizardCloseSearch();
+  wizardNextEntry();
+}
+
+window.openWizard              = openWizard;
+window.closeWizard             = closeWizard;
+window.handleWizardFileSelect  = handleWizardFileSelect;
+window.wizardParseText         = wizardParseText;
+window.wizardShowEntry         = wizardShowEntry;
+window._wizardRenderEntry      = _wizardRenderEntry;
+window.wizardPrevEntry         = wizardPrevEntry;
+window.wizardNextEntry         = wizardNextEntry;
+window.wizardApproveEntry      = wizardApproveEntry;
+window.wizardLinkToExisting    = wizardLinkToExisting;
+window.wizardUpdateExisting    = wizardUpdateExisting;
+window.wizardSkipEntry         = wizardSkipEntry;
+window.wizardSelectMatch       = wizardSelectMatch;
+window.wizardAddMarriage       = wizardAddMarriage;
+window.wizardRemoveMarriage    = wizardRemoveMarriage;
+window.wizardShowSummary       = wizardShowSummary;
+window.wizardBackToReview      = wizardBackToReview;
+window.wizardApplyAll          = wizardApplyAll;
+window.wizardHideAutoSkipNotice = wizardHideAutoSkipNotice;
+window.wizardShowAutoLinkDetails = wizardShowAutoLinkDetails;
+window.wizardBreakAutoLink     = wizardBreakAutoLink;
+window.wizardSearchPersons     = wizardSearchPersons;
+window.wizardCloseSearch       = wizardCloseSearch;
+window.wizardGotoSearchResult  = wizardGotoSearchResult;
+window.wizardLinkToSearchResult = wizardLinkToSearchResult;
+window.wizardShowSpouseSearch  = wizardShowSpouseSearch;
+window.wizardHideSpouseSearch  = wizardHideSpouseSearch;
+window.wizardSearchSpouseForMarriage = wizardSearchSpouseForMarriage;
+window.wizardSelectSpouseForMarriage = wizardSelectSpouseForMarriage;
+
+// ═══════════════════════════════════════════════════════════════
+// QUICK ENTRY FUNCTIONS - Fast Manual Data Entry
+// ═══════════════════════════════════════════════════════════════
+
+let _qeRecentPersons = []; // Recently edited persons
+let _qeCurrentTab = 'new';
+let _qeSpouseCount = 0;
+let _qeChildCount = 0;
+let _qeLinkMode = 'spouse'; // 'spouse' or 'parent'
+
+function openQuickEntry() {
+  document.getElementById('quick-entry-modal').style.display = 'flex';
+  _qeResetForm();
+  _qeUpdateRecentList();
+  document.getElementById('qe-name').focus();
+}
+
+function closeQuickEntry() {
+  document.getElementById('quick-entry-modal').style.display = 'none';
+  // Hide all dropdowns
+  document.querySelectorAll('.quick-dropdown').forEach(el => el.style.display = 'none');
+}
+
+function switchQuickTab(tab) {
+  _qeCurrentTab = tab;
+  // Update tab buttons
+  document.querySelectorAll('.quick-tab').forEach(btn => btn.classList.remove('active'));
+  document.querySelector(`.quick-tab[onclick="switchQuickTab('${tab}')"]`).classList.add('active');
+  // Show/hide content
+  document.querySelectorAll('.quick-tab-content').forEach(content => content.style.display = 'none');
+  document.getElementById(`quick-tab-${tab}`).style.display = 'flex';
+}
+
+function _qeResetForm() {
+  // Reset all fields
+  document.getElementById('qe-name').value = '';
+  document.getElementById('qe-sex').value = '';
+  document.getElementById('qe-birth-date').value = '';
+  document.getElementById('qe-birth-place').value = '';
+  document.getElementById('qe-death-date').value = '';
+  document.getElementById('qe-death-place').value = '';
+  document.getElementById('qe-father').value = '';
+  document.getElementById('qe-father-id').value = '';
+  document.getElementById('qe-mother').value = '';
+  document.getElementById('qe-mother-id').value = '';
+  document.getElementById('qe-notes').value = '';
+
+  // Reset lists
+  document.getElementById('qe-spouses-list').innerHTML = '';
+  document.getElementById('qe-children-list').innerHTML = '';
+  _qeSpouseCount = 0;
+  _qeChildCount = 0;
+
+  // Reset link tab
+  document.getElementById('qe-link-person1').value = '';
+  document.getElementById('qe-link-person1-id').value = '';
+  document.getElementById('qe-link-person2').value = '';
+  document.getElementById('qe-link-person2-id').value = '';
+
+  switchQuickTab('new');
+}
+
+function quickClearForm() {
+  _qeResetForm();
+  document.getElementById('qe-name').focus();
+}
+
+// Search for parents
+function quickSearchParent(type, query) {
+  const searchEl = document.getElementById(`qe-${type}-search`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    const birth = (indi.birth?.date || '').toLowerCase();
+    if (name.includes(query) || birth.includes(query)) {
+      // Filter by sex for parents
+      if (type === 'father' && indi.sex !== 'M') continue;
+      if (type === 'mother' && indi.sex !== 'F') continue;
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '', sex: indi.sex });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectParent('${type}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''} [${r.sex}]</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowParentSearch(type) {
+  const searchEl = document.getElementById(`qe-${type}-search`);
+  if (searchEl) {
+    quickSearchParent(type, document.getElementById(`qe-${type}`).value);
+  }
+}
+
+function quickSelectParent(type, id, name) {
+  document.getElementById(`qe-${type}`).value = name;
+  document.getElementById(`qe-${type}-id`).value = id;
+  document.getElementById(`qe-${type}-search`).style.display = 'none';
+}
+
+function quickCreateParent(type) {
+  // Show inline form for creating parent
+  const container = document.getElementById(`qe-${type}-search`);
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="quick-new-person-inline" data-type="${type}">
+      <div class="quick-field-row" style="padding:8px;">
+        <input type="text" class="quick-input qe-parent-new-name" placeholder="Vorname Nachname *" style="flex:1">
+        <input type="text" class="quick-input qe-parent-new-birth" placeholder="Geburtsdatum" style="width:100px">
+        <input type="text" class="quick-input qe-parent-new-death" placeholder="Sterbedatum" style="width:100px">
+        <button class="quick-btn-small" onclick="quickSaveNewParent('${type}')">&#x2713;</button>
+        <button class="quick-btn-small" onclick="document.getElementById('qe-${type}-search').style.display='none'">&#x2715;</button>
+      </div>
+    </div>
+  `;
+  container.style.display = 'block';
+
+  // Focus name field
+  setTimeout(() => container.querySelector('.qe-parent-new-name')?.focus(), 10);
+}
+
+function quickSaveNewParent(type) {
+  const container = document.getElementById(`qe-${type}-search`);
+  const name = container.querySelector('.qe-parent-new-name')?.value?.trim();
+  if (!name) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const sex = type === 'father' ? 'M' : 'F';
+  const birthDate = container.querySelector('.qe-parent-new-birth')?.value || '';
+  const deathDate = container.querySelector('.qe-parent-new-death')?.value || '';
+
+  const newId = _qeCreateNewPerson({
+    fullName: name,
+    sex,
+    birthDate,
+    deathDate
+  });
+
+  // Link as parent
+  document.getElementById(`qe-${type}`).value = name;
+  document.getElementById(`qe-${type}-id`).value = newId;
+  container.style.display = 'none';
+
+  // Add to recent
+  _qeAddToRecent({ id: newId, name, birth: birthDate });
+}
+
+// Spouses
+function quickAddSpouse() {
+  const container = document.getElementById('qe-spouses-list');
+  const idx = _qeSpouseCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-spouse-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" placeholder="Ehepartner suchen..." class="quick-input"
+             oninput="quickSearchSpouse(${idx}, this.value)"
+             onfocus="quickShowSpouseSearch(${idx})">
+      <div id="qe-spouse-search-${idx}" class="quick-dropdown" style="display:none"></div>
+      <input type="hidden" class="qe-spouse-id">
+    </div>
+    <input type="text" placeholder="Hochzeitsdatum" class="quick-input" style="width:120px">
+    <input type="text" placeholder="Ort" class="quick-input" style="width:100px">
+    <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function quickSearchSpouse(idx, query) {
+  const searchEl = document.getElementById(`qe-spouse-search-${idx}`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer - Klicken um neu zu erstellen</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectSpouse(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowSpouseSearch(idx) {
+  const searchEl = document.getElementById(`qe-spouse-search-${idx}`);
+  if (searchEl) searchEl.style.display = 'block';
+}
+
+function quickSelectSpouse(idx, id, name) {
+  const row = document.querySelector(`.quick-spouse-row[data-idx="${idx}"]`);
+  if (row) {
+    row.querySelector('input[type="text"]').value = name;
+    row.querySelector('.qe-spouse-id').value = id;
+  }
+  document.getElementById(`qe-spouse-search-${idx}`).style.display = 'none';
+}
+
+function quickRemoveSpouse(idx) {
+  const row = document.querySelector(`.quick-spouse-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function quickCreateNewSpouse() {
+  // Add to spouses list with inline edit form
+  const container = document.getElementById('qe-spouses-list');
+  const idx = _qeSpouseCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-spouse-row quick-new-person-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-new-person-form" data-type="spouse" data-idx="${idx}">
+      <div class="quick-new-person-header">Neuen Ehepartner erstellen:</div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
+        <select class="quick-select qe-new-sex" style="width:70px">
+          <option value="">Sex</option>
+          <option value="M">M</option>
+          <option value="F">F</option>
+        </select>
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
+        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
+        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input" placeholder="Hochzeitsdatum" style="width:120px">
+        <input type="text" class="quick-input" placeholder="Hochzeitsort" style="width:120px">
+        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'spouse')">&#x2713;</button>
+        <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
+      </div>
+    </div>
+  `;
+  container.appendChild(row);
+
+  // Focus name field
+  row.querySelector('.qe-new-name').focus();
+}
+
+// Children
+function quickAddChild() {
+  const container = document.getElementById('qe-children-list');
+  const idx = _qeChildCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-child-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" placeholder="Kind suchen..." class="quick-input"
+             oninput="quickSearchChild(${idx}, this.value)"
+             onfocus="quickShowChildSearch(${idx})">
+      <div id="qe-child-search-${idx}" class="quick-dropdown" style="display:none"></div>
+      <input type="hidden" class="qe-child-id">
+    </div>
+    <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function quickSearchChild(idx, query) {
+  const searchEl = document.getElementById(`qe-child-search-${idx}`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectChild(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowChildSearch(idx) {
+  const searchEl = document.getElementById(`qe-child-search-${idx}`);
+  if (searchEl) searchEl.style.display = 'block';
+}
+
+function quickSelectChild(idx, id, name) {
+  const row = document.querySelector(`.quick-child-row[data-idx="${idx}"]`);
+  if (row) {
+    row.querySelector('input[type="text"]').value = name;
+    row.querySelector('.qe-child-id').value = id;
+  }
+  document.getElementById(`qe-child-search-${idx}`).style.display = 'none';
+}
+
+function quickRemoveChild(idx) {
+  const row = document.querySelector(`.quick-child-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function quickSaveNewPersonFromRow(idx, type) {
+  const row = document.querySelector(`.quick-new-person-row[data-idx="${idx}"]`);
+  if (!row) return;
+
+  const form = row.querySelector('.quick-new-person-form');
+  const name = form.querySelector('.qe-new-name')?.value?.trim();
+  if (!name) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const sex = form.querySelector('.qe-new-sex')?.value || 'U';
+  const birthDate = form.querySelector('.qe-new-birth-date')?.value || '';
+  const birthPlace = form.querySelector('.qe-new-birth-place')?.value || '';
+  const deathDate = form.querySelector('.qe-new-death-date')?.value || '';
+  const deathPlace = form.querySelector('.qe-new-death-place')?.value || '';
+
+  const newId = _qeCreateNewPerson({
+    fullName: name,
+    sex,
+    birthDate,
+    birthPlace,
+    deathDate,
+    deathPlace
+  });
+
+  // Convert form to display mode with ID stored
+  if (type === 'spouse') {
+    const marriageDate = form.querySelector('input[placeholder="Hochzeitsdatum"]')?.value || '';
+    const marriagePlace = form.querySelector('input[placeholder="Hochzeitsort"]')?.value || '';
+
+    row.innerHTML = `
+      <div class="quick-search-wrap">
+        <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+        <input type="hidden" class="qe-spouse-id" value="${newId}">
+      </div>
+      <input type="text" placeholder="Hochzeitsdatum" class="quick-input" value="${escHtml(marriageDate)}" style="width:120px">
+      <input type="text" placeholder="Hochzeitsort" class="quick-input" value="${escHtml(marriagePlace)}" style="width:100px">
+      <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
+    `;
+  } else if (type === 'child') {
+    row.innerHTML = `
+      <div class="quick-search-wrap">
+        <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+        <input type="hidden" class="qe-child-id" value="${newId}">
+      </div>
+      <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
+    `;
+  }
+
+  // Add to recent
+  _qeAddToRecent({ id: newId, name, birth: birthDate });
+}
+
+function quickCreateNewChild() {
+  // Add to children list with inline edit form
+  const container = document.getElementById('qe-children-list');
+  const idx = _qeChildCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-child-row quick-new-person-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-new-person-form" data-type="child" data-idx="${idx}">
+      <div class="quick-new-person-header">Neues Kind erstellen:</div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
+        <select class="quick-select qe-new-sex" style="width:70px">
+          <option value="">Sex</option>
+          <option value="M">M</option>
+          <option value="F">F</option>
+        </select>
+        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'child')">&#x2713;</button>
+        <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
+        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
+        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
+      </div>
+    </div>
+  `;
+  container.appendChild(row);
+
+  // Focus name field
+  row.querySelector('.qe-new-name').focus();
+}
+
+// Save functions
+function quickSavePerson() {
+  const person = _qeCollectFormData();
+  if (!person.fullName) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const newId = _qeCreateNewPerson(person);
+  _qeAddToRecent({ id: newId, name: person.fullName, birth: person.birthDate });
+
+  alert(`Gespeichert: ${person.fullName}`);
+  _qeResetForm();
+  document.getElementById('qe-name').focus();
+}
+
+function quickSaveAndNext() {
+  quickSavePerson();
+}
+
+function _qeCollectFormData() {
+  const spouses = [];
+  document.querySelectorAll('.quick-spouse-row').forEach(row => {
+    const inputs = row.querySelectorAll('input[type="text"]');
+    spouses.push({
+      spouseName: inputs[0]?.value || '',
+      spouseId: row.querySelector('.qe-spouse-id')?.value || '',
+      date: inputs[1]?.value || '',
+      place: inputs[2]?.value || ''
+    });
+  });
+
+  const children = [];
+  document.querySelectorAll('.quick-child-row').forEach(row => {
+    children.push({
+      childName: row.querySelector('input[type="text"]')?.value || '',
+      childId: row.querySelector('.qe-child-id')?.value || ''
+    });
+  });
+
+  return {
+    fullName: document.getElementById('qe-name').value,
+    sex: document.getElementById('qe-sex').value,
+    birthDate: document.getElementById('qe-birth-date').value,
+    birthPlace: document.getElementById('qe-birth-place').value,
+    deathDate: document.getElementById('qe-death-date').value,
+    deathPlace: document.getElementById('qe-death-place').value,
+    fatherName: document.getElementById('qe-father').value,
+    fatherId: document.getElementById('qe-father-id').value,
+    motherName: document.getElementById('qe-mother').value,
+    motherId: document.getElementById('qe-mother-id').value,
+    notes: document.getElementById('qe-notes').value,
+    spouses,
+    children,
+    deceased: document.getElementById('qe-deceased')?.checked || false,
+    divorced: document.getElementById('qe-divorced')?.checked || false,
+    adopted: document.getElementById('qe-adopted')?.checked || false
+  };
+}
+
+function _qeCreateNewPerson(person) {
+  // Get next ID
+  let maxIndi = 0;
+  for (const [id] of individuals) {
+    const m = id.match(/\d+/);
+    if (m) maxIndi = Math.max(maxIndi, +m[0]);
+  }
+  const xref = `@I${++maxIndi}@`;
+
+  // Create person
+  const note = person.notes || '';
+  const statusNote = [];
+  if (person.divorced) statusNote.push('Geschieden');
+  if (person.adopted) statusNote.push('Adoptiert');
+  const fullNote = note + (statusNote.length ? (note ? '; ' : '') + statusNote.join(', ') : '');
+
+  individuals.set(xref, {
+    id: xref,
+    name: person.fullName,
+    sex: person.sex || 'U',
+    birth: { date: person.birthDate || '', plac: person.birthPlace || '' },
+    death: { date: person.deathDate || '', plac: person.deathPlace || '', caus: '' },
+    deceased: !!person.deathDate || person.deceased,
+    occu: '',
+    note: fullNote,
+    fams: [],
+    famc: ''
+  });
+
+  // Handle family creation with spouse
+  if (person.spouses && person.spouses.length > 0) {
+    person.spouses.forEach(s => {
+      if (s.spouseId) {
+        _qeCreateFamily(xref, s.spouseId, s.date, s.place);
+      }
+    });
+  }
+
+  // Handle parent link
+  if (person.fatherId || person.motherId) {
+    _qeLinkToParents(xref, person.fatherId, person.motherId);
+  }
+
+  _fullRebuildGraph();
+  return xref;
+}
+
+function _qeCreateFamily(husbId, wifeId, date, place) {
+  let maxFam = 0;
+  for (const [id] of families) {
+    const m = id.match(/\d+/);
+    if (m) maxFam = Math.max(maxFam, +m[0]);
+  }
+  const famXref = `@F${++maxFam}@`;
+
+  families.set(famXref, {
+    id: famXref,
+    husb: husbId,
+    wife: wifeId,
+    marr: { date: date || '', plac: place || '' },
+    children: []
+  });
+
+  // Update individuals
+  const husb = individuals.get(husbId);
+  const wife = individuals.get(wifeId);
+  if (husb && !husb.fams.includes(famXref)) husb.fams.push(famXref);
+  if (wife && !wife.fams.includes(famXref)) wife.fams.push(famXref);
+
+  return famXref;
+}
+
+function _qeLinkToParents(childId, fatherId, motherId) {
+  // Find or create family
+  let fam = null;
+  for (const [id, f] of families) {
+    if ((fatherId && f.husb === fatherId) || (motherId && f.wife === motherId)) {
+      fam = id;
+      break;
+    }
+  }
+
+  if (!fam && (fatherId || motherId)) {
+    fam = _qeCreateFamily(fatherId || '', motherId || '', '', '');
+  }
+
+  if (fam) {
+    const family = families.get(fam);
+    if (!family.children.includes(childId)) {
+      family.children.push(childId);
+    }
+    const child = individuals.get(childId);
+    if (child) child.famc = fam;
+  }
+}
+
+// Recent persons
+function _qeAddToRecent(person) {
+  // Remove if already exists
+  _qeRecentPersons = _qeRecentPersons.filter(p => p.id !== person.id);
+  // Add to front
+  _qeRecentPersons.unshift(person);
+  // Keep only 10
+  if (_qeRecentPersons.length > 10) _qeRecentPersons.pop();
+  _qeUpdateRecentList();
+}
+
+function _qeUpdateRecentList() {
+  const listEl = document.getElementById('quick-recent-list');
+  if (!listEl) return;
+
+  if (_qeRecentPersons.length === 0) {
+    listEl.innerHTML = '<div style="color:#567;font-size:12px;padding:8px;">Noch keine Einträge</div>';
+  } else {
+    listEl.innerHTML = _qeRecentPersons.map(p => `
+      <div class="quick-recent-item" onclick="quickEditPerson('${p.id}')">
+        <span class="name">${escHtml(p.name)}</span>
+        <span class="details">${p.birth ? escHtml(p.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+}
+
+// Edit mode
+function quickSearchForEdit(query) {
+  const resultsEl = document.getElementById('qe-edit-results');
+  if (!resultsEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    resultsEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    resultsEl.innerHTML = results.slice(0, 8).map(r => `
+      <div class="quick-search-item" onclick="quickLoadPersonForEdit('${r.id}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  resultsEl.style.display = 'block';
+}
+
+let _qeEditSpouseCount = 0;
+let _qeEditChildCount = 0;
+
+function quickLoadPersonForEdit(id) {
+  const indi = individuals.get(id);
+  if (!indi) return;
+
+  // Show edit form, hide search
+  document.getElementById('quick-edit-search').style.display = 'none';
+  document.getElementById('quick-edit-form').style.display = 'flex';
+  document.getElementById('qe-edit-id').value = id;
+
+  // Basic info
+  document.getElementById('qe-edit-name').value = indi.name || '';
+  document.getElementById('qe-edit-sex').value = indi.sex || '';
+  document.getElementById('qe-edit-birth-date').value = indi.birth?.date || '';
+  document.getElementById('qe-edit-birth-place').value = indi.birth?.plac || '';
+  document.getElementById('qe-edit-death-date').value = indi.death?.date || '';
+  document.getElementById('qe-edit-death-place').value = indi.death?.plac || '';
+  document.getElementById('qe-edit-notes').value = indi.note || '';
+
+  // Status checkboxes
+  document.getElementById('qe-edit-deceased').checked = indi.deceased || !!indi.death?.date;
+  document.getElementById('qe-edit-divorced').checked = (indi.note || '').includes('Geschieden');
+  document.getElementById('qe-edit-adopted').checked = (indi.note || '').includes('Adoptiert');
+
+  // Load parents
+  _qeLoadParentsForEdit(indi);
+
+  // Load spouses and children
+  _qeLoadSpousesAndChildrenForEdit(indi);
+
+  // Hide search results
+  document.getElementById('qe-edit-results').style.display = 'none';
+}
+
+function _qeLoadParentsForEdit(indi) {
+  // Clear parent fields
+  document.getElementById('qe-edit-father').value = '';
+  document.getElementById('qe-edit-father-id').value = '';
+  document.getElementById('qe-edit-mother').value = '';
+  document.getElementById('qe-edit-mother-id').value = '';
+
+  if (!indi.famc) return;
+
+  const fam = families.get(indi.famc);
+  if (!fam) return;
+
+  // Load father
+  if (fam.husb) {
+    const father = individuals.get(fam.husb);
+    if (father) {
+      document.getElementById('qe-edit-father').value = father.name;
+      document.getElementById('qe-edit-father-id').value = fam.husb;
+    }
+  }
+
+  // Load mother
+  if (fam.wife) {
+    const mother = individuals.get(fam.wife);
+    if (mother) {
+      document.getElementById('qe-edit-mother').value = mother.name;
+      document.getElementById('qe-edit-mother-id').value = fam.wife;
+    }
+  }
+}
+
+function _qeLoadSpousesAndChildrenForEdit(indi) {
+  // Reset counters and lists
+  _qeEditSpouseCount = 0;
+  _qeEditChildCount = 0;
+  document.getElementById('qe-edit-spouses-list').innerHTML = '';
+  document.getElementById('qe-edit-children-list').innerHTML = '';
+
+  // Load spouses from families
+  const processedChildren = new Set();
+
+  for (const famId of indi.fams || []) {
+    const fam = families.get(famId);
+    if (!fam) continue;
+
+    // Find spouse
+    const isHusb = fam.husb === indi.id;
+    const spouseId = isHusb ? fam.wife : fam.husb;
+
+    if (spouseId) {
+      const spouse = individuals.get(spouseId);
+      _qeAddSpouseToEditList(spouseId, spouse?.name || '', fam.marr?.date || '', fam.marr?.plac || '');
+    }
+
+    // Collect children from this family
+    for (const childId of fam.children || []) {
+      if (!processedChildren.has(childId)) {
+        processedChildren.add(childId);
+        const child = individuals.get(childId);
+        _qeAddChildToEditList(childId, child?.name || '');
+      }
+    }
+  }
+}
+
+function _qeAddSpouseToEditList(spouseId, name, marriageDate, marriagePlace) {
+  const container = document.getElementById('qe-edit-spouses-list');
+  const idx = _qeEditSpouseCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-spouse-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+      <input type="hidden" class="qe-edit-spouse-id" value="${spouseId}">
+    </div>
+    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" value="${escHtml(marriageDate)}" style="width:120px">
+    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" value="${escHtml(marriagePlace)}" style="width:100px">
+    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function _qeAddChildToEditList(childId, name) {
+  const container = document.getElementById('qe-edit-children-list');
+  const idx = _qeEditChildCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-child-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+      <input type="hidden" class="qe-edit-child-id" value="${childId}">
+    </div>
+    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function quickCancelEdit() {
+  document.getElementById('quick-edit-search').style.display = 'block';
+  document.getElementById('quick-edit-form').style.display = 'none';
+  document.getElementById('qe-edit-search-input').value = '';
+}
+
+function quickSaveEditPerson() {
+  const id = document.getElementById('qe-edit-id').value;
+  const indi = individuals.get(id);
+  if (!indi) return;
+
+  // Update basic info
+  indi.name = document.getElementById('qe-edit-name').value;
+  indi.sex = document.getElementById('qe-edit-sex').value;
+  indi.birth = {
+    date: document.getElementById('qe-edit-birth-date').value,
+    plac: document.getElementById('qe-edit-birth-place').value
+  };
+  indi.death = {
+    date: document.getElementById('qe-edit-death-date').value,
+    plac: document.getElementById('qe-edit-death-place').value,
+    caus: indi.death?.caus || ''
+  };
+  indi.deceased = document.getElementById('qe-edit-deceased').checked || !!indi.death.date;
+
+  // Update notes with status
+  let note = document.getElementById('qe-edit-notes').value || '';
+  const isDivorced = document.getElementById('qe-edit-divorced').checked;
+  const isAdopted = document.getElementById('qe-edit-adopted').checked;
+
+  const statusTags = [];
+  if (isDivorced) statusTags.push('Geschieden');
+  if (isAdopted) statusTags.push('Adoptiert');
+
+  if (statusTags.length > 0) {
+    note = note + (note ? '; ' : '') + statusTags.join(', ');
+  }
+  indi.note = note;
+
+  // Update parent links
+  _qeSaveParentLinks(id);
+
+  // Update marriage info
+  _qeSaveMarriageInfo(id);
+
+  // Refresh
+  _fullRebuildGraph();
+  _qeAddToRecent({ id, name: indi.name, birth: indi.birth?.date });
+
+  alert('Gespeichert: ' + indi.name);
+  quickCancelEdit();
+}
+
+function _qeSaveParentLinks(childId) {
+  const fatherId = document.getElementById('qe-edit-father-id').value;
+  const motherId = document.getElementById('qe-edit-mother-id').value;
+
+  if (!fatherId && !motherId) return;
+
+  // Find or create family with these parents
+  let famId = null;
+  for (const [id, fam] of families) {
+    if ((fatherId && fam.husb === fatherId) || (motherId && fam.wife === motherId)) {
+      famId = id;
+      break;
+    }
+  }
+
+  if (!famId) {
+    // Create new family
+    let maxFam = 0;
+    for (const [id] of families) {
+      const m = id.match(/\d+/);
+      if (m) maxFam = Math.max(maxFam, +m[0]);
+    }
+    famId = `@F${++maxFam}@`;
+    families.set(famId, {
+      id: famId,
+      husb: fatherId,
+      wife: motherId,
+      marr: { date: '', plac: '' },
+      children: []
+    });
+
+    // Update parents' fams arrays
+    if (fatherId) {
+      const father = individuals.get(fatherId);
+      if (father && !father.fams.includes(famId)) father.fams.push(famId);
+    }
+    if (motherId) {
+      const mother = individuals.get(motherId);
+      if (mother && !mother.fams.includes(famId)) mother.fams.push(famId);
+    }
+  }
+
+  // Add child to family if not already there
+  const fam = families.get(famId);
+  if (!fam.children.includes(childId)) {
+    fam.children.push(childId);
+  }
+
+  // Update child's famc
+  const child = individuals.get(childId);
+  if (child) child.famc = famId;
+}
+
+function _qeSaveMarriageInfo(indiId) {
+  // Update marriage dates/places from edit form
+  const rows = document.querySelectorAll('#qe-edit-spouses-list .quick-spouse-row');
+
+  rows.forEach(row => {
+    const spouseId = row.querySelector('.qe-edit-spouse-id')?.value;
+    const marriageDate = row.querySelector('.qe-edit-marr-date')?.value;
+    const marriagePlace = row.querySelector('.qe-edit-marr-place')?.value;
+
+    if (!spouseId) return;
+
+    // Find the family for this couple
+    for (const famId of individuals.get(indiId)?.fams || []) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+
+      const isSpouse = fam.husb === spouseId || fam.wife === spouseId;
+      if (isSpouse) {
+        fam.marr = { date: marriageDate || '', plac: marriagePlace || '' };
+        break;
+      }
+    }
+  });
+}
+
+// Edit mode helpers
+function quickSearchParentEdit(type, query) {
+  const searchEl = document.getElementById(`qe-edit-${type}-search`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      if (type === 'father' && indi.sex !== 'M') continue;
+      if (type === 'mother' && indi.sex !== 'F') continue;
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '', sex: indi.sex });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectParentEdit('${type}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''} [${r.sex}]</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowParentEditSearch(type) {
+  const searchEl = document.getElementById(`qe-edit-${type}-search`);
+  if (searchEl) {
+    quickSearchParentEdit(type, document.getElementById(`qe-edit-${type}`).value);
+  }
+}
+
+function quickSelectParentEdit(type, id, name) {
+  document.getElementById(`qe-edit-${type}`).value = name;
+  document.getElementById(`qe-edit-${type}-id`).value = id;
+  document.getElementById(`qe-edit-${type}-search`).style.display = 'none';
+}
+
+function quickCreateParentEdit(type) {
+  const container = document.getElementById(`qe-edit-${type}-search`);
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="quick-new-person-inline">
+      <div class="quick-field-row" style="padding:8px;">
+        <input type="text" class="quick-input qe-parent-new-name" placeholder="Vorname Nachname *" style="flex:1">
+        <input type="text" class="quick-input qe-parent-new-birth" placeholder="Geburtsdatum" style="width:100px">
+        <input type="text" class="quick-input qe-parent-new-death" placeholder="Sterbedatum" style="width:100px">
+        <button class="quick-btn-small" onclick="quickSaveNewParentEdit('${type}')">&#x2713;</button>
+        <button class="quick-btn-small" onclick="document.getElementById('qe-edit-${type}-search').style.display='none'">&#x2715;</button>
+      </div>
+    </div>
+  `;
+  container.style.display = 'block';
+  setTimeout(() => container.querySelector('.qe-parent-new-name')?.focus(), 10);
+}
+
+function quickSaveNewParentEdit(type) {
+  const container = document.getElementById(`qe-edit-${type}-search`);
+  const name = container.querySelector('.qe-parent-new-name')?.value?.trim();
+  if (!name) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const sex = type === 'father' ? 'M' : 'F';
+  const birthDate = container.querySelector('.qe-parent-new-birth')?.value || '';
+  const deathDate = container.querySelector('.qe-parent-new-death')?.value || '';
+
+  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, deathDate });
+
+  document.getElementById(`qe-edit-${type}`).value = name;
+  document.getElementById(`qe-edit-${type}-id`).value = newId;
+  container.style.display = 'none';
+
+  _qeAddToRecent({ id: newId, name, birth: birthDate });
+}
+
+function quickAddSpouseEdit() {
+  const container = document.getElementById('qe-edit-spouses-list');
+  const idx = _qeEditSpouseCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-spouse-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" placeholder="Ehepartner suchen..." class="quick-input"
+             oninput="quickSearchSpouseEdit(${idx}, this.value)"
+             onfocus="quickShowSpouseEditSearch(${idx})">
+      <div id="qe-edit-spouse-search-${idx}" class="quick-dropdown" style="display:none"></div>
+      <input type="hidden" class="qe-edit-spouse-id">
+    </div>
+    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" style="width:120px">
+    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" style="width:100px">
+    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function quickSearchSpouseEdit(idx, query) {
+  const searchEl = document.getElementById(`qe-edit-spouse-search-${idx}`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectSpouseEdit(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowSpouseEditSearch(idx) {
+  const searchEl = document.getElementById(`qe-edit-spouse-search-${idx}`);
+  if (searchEl) searchEl.style.display = 'block';
+}
+
+function quickSelectSpouseEdit(idx, id, name) {
+  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
+  if (row) {
+    row.querySelector('input[type="text"]').value = name;
+    row.querySelector('.qe-edit-spouse-id').value = id;
+  }
+  document.getElementById(`qe-edit-spouse-search-${idx}`).style.display = 'none';
+}
+
+function quickRemoveSpouseEdit(idx) {
+  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function quickCreateNewSpouseEdit() {
+  const container = document.getElementById('qe-edit-spouses-list');
+  const idx = _qeEditSpouseCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-spouse-row quick-new-person-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-new-person-form" style="width:100%;">
+      <div class="quick-new-person-header">Neuen Ehepartner erstellen:</div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
+        <select class="quick-select qe-new-sex" style="width:70px">
+          <option value="">Sex</option>
+          <option value="M">M</option>
+          <option value="F">F</option>
+        </select>
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
+        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
+        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-marr-date" placeholder="Hochzeitsdatum" style="width:120px">
+        <input type="text" class="quick-input qe-marr-place" placeholder="Hochzeitsort" style="width:120px">
+        <button class="quick-btn-small" onclick="quickSaveNewSpouseFromEditRow(${idx})">&#x2713;</button>
+        <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
+      </div>
+    </div>
+  `;
+  container.appendChild(row);
+  row.querySelector('.qe-new-name').focus();
+}
+
+function quickSaveNewSpouseFromEditRow(idx) {
+  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
+  if (!row) return;
+
+  const name = row.querySelector('.qe-new-name')?.value?.trim();
+  if (!name) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const sex = row.querySelector('.qe-new-sex')?.value || 'U';
+  const birthDate = row.querySelector('.qe-new-birth-date')?.value || '';
+  const birthPlace = row.querySelector('.qe-new-birth-place')?.value || '';
+  const deathDate = row.querySelector('.qe-new-death-date')?.value || '';
+  const deathPlace = row.querySelector('.qe-new-death-place')?.value || '';
+  const marrDate = row.querySelector('.qe-marr-date')?.value || '';
+  const marrPlace = row.querySelector('.qe-marr-place')?.value || '';
+
+  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, birthPlace, deathDate, deathPlace });
+
+  // Convert to display row
+  row.className = 'quick-spouse-row';
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+      <input type="hidden" class="qe-edit-spouse-id" value="${newId}">
+    </div>
+    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" value="${escHtml(marrDate)}" style="width:120px">
+    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" value="${escHtml(marrPlace)}" style="width:100px">
+    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
+  `;
+
+  _qeAddToRecent({ id: newId, name, birth: birthDate });
+
+  // Link to current person being edited
+  const currentId = document.getElementById('qe-edit-id').value;
+  if (currentId) {
+    _qeCreateFamily(currentId, newId, marrDate, marrPlace);
+  }
+}
+
+function quickAddChildEdit() {
+  const container = document.getElementById('qe-edit-children-list');
+  const idx = _qeEditChildCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-child-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" placeholder="Kind suchen..." class="quick-input"
+             oninput="quickSearchChildEdit(${idx}, this.value)"
+             onfocus="quickShowChildEditSearch(${idx})">
+      <div id="qe-edit-child-search-${idx}" class="quick-dropdown" style="display:none"></div>
+      <input type="hidden" class="qe-edit-child-id">
+    </div>
+    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
+  `;
+  container.appendChild(row);
+}
+
+function quickSearchChildEdit(idx, query) {
+  const searchEl = document.getElementById(`qe-edit-child-search-${idx}`);
+  if (!searchEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    searchEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    searchEl.innerHTML = results.slice(0, 5).map(r => `
+      <div class="quick-search-item" onclick="quickSelectChildEdit(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  searchEl.style.display = 'block';
+}
+
+function quickShowChildEditSearch(idx) {
+  const searchEl = document.getElementById(`qe-edit-child-search-${idx}`);
+  if (searchEl) searchEl.style.display = 'block';
+}
+
+function quickSelectChildEdit(idx, id, name) {
+  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
+  if (row) {
+    row.querySelector('input[type="text"]').value = name;
+    row.querySelector('.qe-edit-child-id').value = id;
+  }
+  document.getElementById(`qe-edit-child-search-${idx}`).style.display = 'none';
+}
+
+function quickRemoveChildEdit(idx) {
+  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function quickCreateNewChildEdit() {
+  const container = document.getElementById('qe-edit-children-list');
+  const idx = _qeEditChildCount++;
+
+  const row = document.createElement('div');
+  row.className = 'quick-child-row quick-new-person-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="quick-new-person-form" style="width:100%;">
+      <div class="quick-new-person-header">Neues Kind erstellen:</div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
+        <select class="quick-select qe-new-sex" style="width:70px">
+          <option value="">Sex</option>
+          <option value="M">M</option>
+          <option value="F">F</option>
+        </select>
+        <button class="quick-btn-small" onclick="quickSaveNewChildFromEditRow(${idx})">&#x2713;</button>
+        <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
+      </div>
+      <div class="quick-field-row">
+        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
+        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
+        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
+      </div>
+    </div>
+  `;
+  container.appendChild(row);
+  row.querySelector('.qe-new-name').focus();
+}
+
+function quickSaveNewChildFromEditRow(idx) {
+  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
+  if (!row) return;
+
+  const name = row.querySelector('.qe-new-name')?.value?.trim();
+  if (!name) {
+    alert('Bitte einen Namen eingeben');
+    return;
+  }
+
+  const sex = row.querySelector('.qe-new-sex')?.value || 'U';
+  const birthDate = row.querySelector('.qe-new-birth-date')?.value || '';
+  const birthPlace = row.querySelector('.qe-new-birth-place')?.value || '';
+  const deathDate = row.querySelector('.qe-new-death-date')?.value || '';
+
+  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, birthPlace, deathDate });
+
+  // Convert to display row
+  row.className = 'quick-child-row';
+  row.innerHTML = `
+    <div class="quick-search-wrap">
+      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
+      <input type="hidden" class="qe-edit-child-id" value="${newId}">
+    </div>
+    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
+  `;
+
+  _qeAddToRecent({ id: newId, name, birth: birthDate });
+
+  // Link as child to current person's families
+  const currentId = document.getElementById('qe-edit-id').value;
+  if (currentId) {
+    // Find a family where current person is parent
+    for (const famId of individuals.get(currentId)?.fams || []) {
+      const fam = families.get(famId);
+      if (fam) {
+        if (!fam.children.includes(newId)) {
+          fam.children.push(newId);
+        }
+        const child = individuals.get(newId);
+        if (child) child.famc = famId;
+        break;
+      }
+    }
+  }
+}
+
+function quickEditPerson(id) {
+  quickLoadPersonForEdit(id);
+  openQuickEntry();
+}
+
+// Link mode
+function setQuickRel(mode) {
+  _qeLinkMode = mode;
+  document.querySelectorAll('.quick-rel-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector(`.quick-rel-btn[onclick="setQuickRel('${mode}')"]`).classList.add('active');
+
+  // Show/hide marriage fields
+  document.getElementById('qe-link-spouse-fields').style.display = mode === 'spouse' ? 'block' : 'none';
+}
+
+function quickSearchForLink(personNum, query) {
+  const resultsEl = document.getElementById(`qe-link-${personNum}-results`);
+  if (!resultsEl) return;
+
+  query = query.toLowerCase().trim();
+  if (!query) {
+    resultsEl.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  for (const [id, indi] of individuals) {
+    const name = (indi.name || '').toLowerCase();
+    if (name.includes(query)) {
+      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+    }
+  }
+
+  if (results.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
+  } else {
+    resultsEl.innerHTML = results.slice(0, 6).map(r => `
+      <div class="quick-search-item" onclick="quickSelectLinkPerson('${personNum}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}</span>
+        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
+      </div>
+    `).join('');
+  }
+  resultsEl.style.display = 'block';
+}
+
+function quickSelectLinkPerson(personNum, id, name) {
+  document.getElementById(`qe-link-${personNum}`).value = name;
+  document.getElementById(`qe-link-${personNum}-id`).value = id;
+  document.getElementById(`qe-link-${personNum}-results`).style.display = 'none';
+}
+
+function quickCreateLink() {
+  const id1 = document.getElementById('qe-link-person1-id').value;
+  const id2 = document.getElementById('qe-link-person2-id').value;
+
+  if (!id1 || !id2) {
+    alert('Bitte beide Personen auswählen');
+    return;
+  }
+
+  if (_qeLinkMode === 'spouse') {
+    const date = document.getElementById('qe-link-marriage-date').value;
+    const place = document.getElementById('qe-link-marriage-place').value;
+    _qeCreateFamily(id1, id2, date, place);
+    alert('Ehe erstellt');
+  } else {
+    // Parent-child: id1 is parent, id2 is child
+    const parent = individuals.get(id1);
+    const isFather = parent?.sex === 'M';
+    _qeLinkToParents(id2, isFather ? id1 : '', isFather ? '' : id1);
+    alert('Eltern-Kind-Verknüpfung erstellt');
+  }
+
+  _fullRebuildGraph();
+
+  // Clear
+  document.getElementById('qe-link-person1').value = '';
+  document.getElementById('qe-link-person1-id').value = '';
+  document.getElementById('qe-link-person2').value = '';
+  document.getElementById('qe-link-person2-id').value = '';
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (document.getElementById('quick-entry-modal').style.display === 'none') return;
+
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    quickSavePerson();
+  } else if (e.ctrlKey && e.key === 'n') {
+    e.preventDefault();
+    quickSaveAndNext();
+  }
+});
+
+// Window exports
+window.openQuickEntry = openQuickEntry;
+window.closeQuickEntry = closeQuickEntry;
+window.switchQuickTab = switchQuickTab;
+window.quickClearForm = quickClearForm;
+window.quickSavePerson = quickSavePerson;
+window.quickSaveAndNext = quickSaveAndNext;
+window.quickSearchParent = quickSearchParent;
+window.quickShowParentSearch = quickShowParentSearch;
+window.quickSelectParent = quickSelectParent;
+window.quickCreateParent = quickCreateParent;
+window.quickSaveNewParent = quickSaveNewParent;
+window.quickSearchParentEdit = quickSearchParentEdit;
+window.quickShowParentEditSearch = quickShowParentEditSearch;
+window.quickSelectParentEdit = quickSelectParentEdit;
+window.quickCreateParentEdit = quickCreateParentEdit;
+window.quickSaveNewParentEdit = quickSaveNewParentEdit;
+window.quickAddSpouse = quickAddSpouse;
+window.quickAddSpouseEdit = quickAddSpouseEdit;
+window.quickSearchSpouseEdit = quickSearchSpouseEdit;
+window.quickShowSpouseEditSearch = quickShowSpouseEditSearch;
+window.quickSelectSpouseEdit = quickSelectSpouseEdit;
+window.quickRemoveSpouseEdit = quickRemoveSpouseEdit;
+window.quickCreateNewSpouseEdit = quickCreateNewSpouseEdit;
+window.quickSaveNewSpouseFromEditRow = quickSaveNewSpouseFromEditRow;
+window.quickAddChildEdit = quickAddChildEdit;
+window.quickSearchChildEdit = quickSearchChildEdit;
+window.quickShowChildEditSearch = quickShowChildEditSearch;
+window.quickSelectChildEdit = quickSelectChildEdit;
+window.quickRemoveChildEdit = quickRemoveChildEdit;
+window.quickCreateNewChildEdit = quickCreateNewChildEdit;
+window.quickSaveNewChildFromEditRow = quickSaveNewChildFromEditRow;
+window.quickSaveEditPerson = quickSaveEditPerson;
+window.quickCancelEdit = quickCancelEdit;
+window.quickSearchSpouse = quickSearchSpouse;
+window.quickShowSpouseSearch = quickShowSpouseSearch;
+window.quickSelectSpouse = quickSelectSpouse;
+window.quickRemoveSpouse = quickRemoveSpouse;
+window.quickCreateNewSpouse = quickCreateNewSpouse;
+window.quickSaveNewPersonFromRow = quickSaveNewPersonFromRow;
+window.quickAddChild = quickAddChild;
+window.quickSearchChild = quickSearchChild;
+window.quickShowChildSearch = quickShowChildSearch;
+window.quickSelectChild = quickSelectChild;
+window.quickRemoveChild = quickRemoveChild;
+window.quickCreateNewChild = quickCreateNewChild;
+window.quickSearchForEdit = quickSearchForEdit;
+window.quickLoadPersonForEdit = quickLoadPersonForEdit;
+window.quickEditPerson = quickEditPerson;
+window.setQuickRel = setQuickRel;
+window.quickSearchForLink = quickSearchForLink;
+window.quickSelectLinkPerson = quickSelectLinkPerson;
+window.quickCreateLink = quickCreateLink;

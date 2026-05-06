@@ -18,6 +18,8 @@
   <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
   <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
   <button id="import-text-btn" onclick="openTextImport()" title="Text-Datei importieren und Änderungen prüfen">&#x1F4C4; Text Import</button>
+  <button id="wizard-btn" onclick="openWizard()" title="Schritt-für-Schritt PDF/Text Import mit manueller Prüfung">&#x1F50D; Wizard Import</button>
+  <button id="quick-entry-btn" onclick="openQuickEntry()" title="Schnelleingabe für neue Personen und Verknüpfungen">&#x26A1; Schnelleingabe</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
   <button id="relation-tool-btn" onclick="openRelationTool()" title="Verwandtschaft berechnen" disabled>&#x1F517; Verwandtschaft</button>
@@ -30,7 +32,13 @@
   <div id="sidebar">
     <input type="text" id="search-input" placeholder="Name suchen...">
     <div id="search-results"></div>
-    <div class="sidebar-label">Familiennamen</div>
+    <div class="sidebar-label">
+      Familiennamen
+      <label class="surname-color-toggle" title="Beschriftung einfärben: aktiviert = Nachname, deaktiviert = Geschlecht">
+        <input type="checkbox" id="color-by-surname" checked>
+        <span id="color-mode-label">Nachname</span>
+      </label>
+    </div>
     <div id="surname-list"></div>
     <div id="sidebar-buttons">
       <label class="sidebar-toggle" style="display:none">
@@ -105,8 +113,14 @@
         <input type="color" id="nc-fam-div" value="#e74c3c">
         <span>Familie (geschieden)</span>
       </div>
+      <div class="phys-row" style="margin-top:6px">
+        <span class="phys-label">Familien-Knoten Größe</span>
+        <span id="fam-node-size-val">7</span>
+      </div>
+      <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:#4a7abf;cursor:pointer;margin-bottom:4px">
       <button id="node-colors-reset" onclick="resetNodeColors()">Zurücksetzen</button>
     </details>
+
 
     <details id="appearance-panel">
       <summary>3D Darstellung</summary>
@@ -293,6 +307,12 @@
         <div class="spinner"></div>
         <span>Simulation läuft...</span>
       </div>
+      <button id="reset-view-btn" onclick="resetView()" title="Ansicht zurücksetzen (0)">&#x1F5D8;</button>
+      <div id="zoom-controls">
+        <button id="zoom-in-btn"  onclick="svgZoomBy(1.4)"  title="Vergrößern (+)">+</button>
+        <button id="zoom-out-btn" onclick="svgZoomBy(1/1.4)" title="Verkleinern (-)">−</button>
+        <button id="zoom-fit-btn" onclick="zoomToFit()" title="Alles anzeigen">⤢</button>
+      </div>
       <svg id="graph-svg"></svg>
     </div>
     <div id="graph-3d-container" style="display:none"></div>
@@ -362,10 +382,10 @@
 
     <!-- Step 1: Input -->
     <div id="import-step-input">
-      <p class="import-hint">Lade eine Textdatei (aus PDF exportiert) oder füge den Text direkt ein. Erwartet wird englischer Genealogietext mit Mustern wie <i>«was born on … married … son/daughter of …»</i>.</p>
+      <p class="import-hint">Lade eine Textdatei (aus PDF exportiert), eine strukturierte JSON-Datei (wie <code>*_structured.json</code>), oder füge den Text direkt ein. Erwartet wird englischer Genealogietext mit Mustern wie <i>«was born on … married … son/daughter of …»</i>.</p>
       <div class="import-file-row">
         <label class="import-file-label" for="import-file-input">&#x1F4C2; Datei wählen</label>
-        <input type="file" id="import-file-input" accept=".txt,.text" onchange="handleImportFileSelect(event)">
+        <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged" onchange="handleImportFileSelect(event)">
         <span id="import-file-name" class="import-file-name-lbl">Keine Datei gewählt</span>
       </div>
       <textarea id="import-text-area" placeholder="…oder Text hier einfügen"></textarea>
@@ -383,6 +403,437 @@
         <button class="import-action-btn import-action-btn--primary" onclick="applyImport()">&#x2713; Änderungen anwenden</button>
         <button class="import-action-btn" onclick="backToInputImport()">&#x2190; Zurück</button>
         <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
+      </div>
+    </div>
+
+    <!-- Progress overlay (shown during apply) -->
+    <div id="import-progress-overlay" style="display:none">
+      <div id="import-progress-label">Wird angewendet…</div>
+      <div id="import-progress-track"><div id="import-progress-bar"></div></div>
+      <div id="import-progress-count"></div>
+    </div>
+
+    <!-- Match Selection Dialog -->
+    <div id="import-match-dialog" style="display:none" role="dialog" aria-modal="true" aria-label="Person auswählen">
+      <div id="import-match-backdrop" onclick="closeMatchDialog()"></div>
+      <div id="import-match-panel">
+        <div id="import-match-header">
+          <h3>&#x1F50D; Person auswählen</h3>
+          <button id="import-match-close" onclick="closeMatchDialog()" title="Schliessen">&#x2715;</button>
+        </div>
+        <div id="import-match-current">
+          <div class="import-match-section-title">Aktueller Eintrag:</div>
+          <div id="import-match-current-content"></div>
+        </div>
+        <div id="import-match-search">
+          <input type="text" id="import-match-search-input" placeholder="Nach Name suchen..." oninput="searchMatchCandidates()">
+        </div>
+        <div id="import-match-candidates">
+          <div class="import-match-section-title">Vorschläge:</div>
+          <div id="import-match-list"></div>
+        </div>
+        <div id="import-match-actions">
+          <button class="import-action-btn" onclick="closeMatchDialog()">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Quick Entry Modal ───────────────────────────────────────────────── -->
+<div id="quick-entry-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Schnelleingabe">
+  <div id="quick-entry-backdrop" onclick="closeQuickEntry()"></div>
+  <div id="quick-entry-panel">
+    <div id="quick-entry-header">
+      <h2>&#x26A1; Schnelleingabe</h2>
+      <div id="quick-entry-tabs">
+        <button class="quick-tab active" onclick="switchQuickTab('new')">+ Neue Person</button>
+        <button class="quick-tab" onclick="switchQuickTab('edit')">&#x270F; Bearbeiten</button>
+        <button class="quick-tab" onclick="switchQuickTab('link')">&#x1F517; Verknüpfen</button>
+      </div>
+      <button id="quick-entry-close" onclick="closeQuickEntry()">&#x2715;</button>
+    </div>
+
+    <!-- Tab: New Person -->
+    <div id="quick-tab-new" class="quick-tab-content">
+      <div id="quick-entry-form">
+        <div class="quick-field-row">
+          <input type="text" id="qe-name" placeholder="Vorname Nachname *" class="quick-input-large">
+          <select id="qe-sex" class="quick-select">
+            <option value="">Geschl.</option>
+            <option value="M">M</option>
+            <option value="F">F</option>
+          </select>
+        </div>
+        <div class="quick-field-row">
+          <input type="text" id="qe-birth-date" placeholder="Geburtsdatum" class="quick-input">
+          <input type="text" id="qe-birth-place" placeholder="Geburtsort" class="quick-input">
+        </div>
+        <div class="quick-field-row">
+          <input type="text" id="qe-death-date" placeholder="Sterbedatum" class="quick-input">
+          <input type="text" id="qe-death-place" placeholder="Sterbeort" class="quick-input">
+        </div>
+
+        <!-- Parents Section -->
+        <div class="quick-section">
+          <div class="quick-section-title">Eltern</div>
+          <div class="quick-field-row">
+            <div class="quick-search-wrap">
+              <input type="text" id="qe-father" placeholder="Vater suchen..." class="quick-input"
+                     oninput="quickSearchParent('father', this.value)"
+                     onfocus="quickShowParentSearch('father')">
+              <div id="qe-father-search" class="quick-dropdown" style="display:none"></div>
+              <input type="hidden" id="qe-father-id">
+            </div>
+            <button class="quick-btn-small" onclick="quickCreateParent('father')">+ Neu</button>
+          </div>
+          <div class="quick-field-row">
+            <div class="quick-search-wrap">
+              <input type="text" id="qe-mother" placeholder="Mutter suchen..." class="quick-input"
+                     oninput="quickSearchParent('mother', this.value)"
+                     onfocus="quickShowParentSearch('mother')">
+              <div id="qe-mother-search" class="quick-dropdown" style="display:none"></div>
+              <input type="hidden" id="qe-mother-id">
+            </div>
+            <button class="quick-btn-small" onclick="quickCreateParent('mother')">+ Neu</button>
+          </div>
+        </div>
+
+        <!-- Spouse Section -->
+        <div class="quick-section">
+          <div class="quick-section-title">Ehepartner</div>
+          <div id="qe-spouses-list"></div>
+          <div class="quick-add-row">
+            <button class="quick-btn-add" onclick="quickAddSpouse()">+ Bestehenden verknüpfen</button>
+            <button class="quick-btn-add" onclick="quickCreateNewSpouse()">+ Neuen erstellen</button>
+          </div>
+        </div>
+
+        <!-- Children Section -->
+        <div class="quick-section">
+          <div class="quick-section-title">Kinder</div>
+          <div id="qe-children-list"></div>
+          <div class="quick-add-row">
+            <button class="quick-btn-add" onclick="quickAddChild()">+ Bestehendes verknüpfen</button>
+            <button class="quick-btn-add" onclick="quickCreateNewChild()">+ Neues erstellen</button>
+          </div>
+        </div>
+
+        <div class="quick-field-row">
+          <textarea id="qe-notes" placeholder="Notizen..." rows="2" class="quick-textarea"></textarea>
+        </div>
+      </div>
+
+      <!-- Status Markings -->
+      <div class="quick-status-section">
+        <span class="quick-section-title">Status:</span>
+        <label class="quick-check"><input type="checkbox" id="qe-deceased"> Verstorben</label>
+        <label class="quick-check"><input type="checkbox" id="qe-divorced"> Geschieden</label>
+        <label class="quick-check"><input type="checkbox" id="qe-adopted"> Adoptiert</label>
+      </div>
+
+      <div id="quick-entry-actions">
+        <button class="quick-btn-primary" onclick="quickSavePerson()">&#x2713; Speichern</button>
+        <button class="quick-btn-secondary" onclick="quickSaveAndNext()">+ Weiter</button>
+        <button class="quick-btn-secondary" onclick="quickClearForm()">&#x2715; Leeren</button>
+      </div>
+    </div>
+
+    <!-- Tab: Edit Person -->
+    <div id="quick-tab-edit" class="quick-tab-content" style="display:none;flex-direction:column;height:100%;">
+      <div id="quick-edit-search">
+        <input type="text" id="qe-edit-search-input" placeholder="Person suchen..." class="quick-input-large"
+               oninput="quickSearchForEdit(this.value)">
+        <div id="qe-edit-results" class="quick-dropdown-large" style="display:none"></div>
+      </div>
+
+      <div id="quick-edit-form" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+        <input type="hidden" id="qe-edit-id">
+
+        <!-- Scrollable form area -->
+        <div id="quick-edit-form-content" style="flex:1;overflow-y:auto;padding:16px 20px;">
+          <div class="quick-field-row">
+            <input type="text" id="qe-edit-name" placeholder="Vorname Nachname *" class="quick-input-large">
+            <select id="qe-edit-sex" class="quick-select">
+              <option value="">Geschl.</option>
+              <option value="M">M</option>
+              <option value="F">F</option>
+            </select>
+          </div>
+          <div class="quick-field-row">
+            <input type="text" id="qe-edit-birth-date" placeholder="Geburtsdatum" class="quick-input">
+            <input type="text" id="qe-edit-birth-place" placeholder="Geburtsort" class="quick-input">
+          </div>
+          <div class="quick-field-row">
+            <input type="text" id="qe-edit-death-date" placeholder="Sterbedatum" class="quick-input">
+            <input type="text" id="qe-edit-death-place" placeholder="Sterbeort" class="quick-input">
+          </div>
+
+          <!-- Parents Section -->
+          <div class="quick-section">
+            <div class="quick-section-title">Eltern</div>
+            <div class="quick-field-row">
+              <div class="quick-search-wrap">
+                <input type="text" id="qe-edit-father" placeholder="Vater suchen..." class="quick-input"
+                       oninput="quickSearchParentEdit('father', this.value)"
+                       onfocus="quickShowParentEditSearch('father')">
+                <div id="qe-edit-father-search" class="quick-dropdown" style="display:none"></div>
+                <input type="hidden" id="qe-edit-father-id">
+              </div>
+              <button class="quick-btn-small" onclick="quickCreateParentEdit('father')">+ Neu</button>
+            </div>
+            <div class="quick-field-row">
+              <div class="quick-search-wrap">
+                <input type="text" id="qe-edit-mother" placeholder="Mutter suchen..." class="quick-input"
+                       oninput="quickSearchParentEdit('mother', this.value)"
+                       onfocus="quickShowParentEditSearch('mother')">
+                <div id="qe-edit-mother-search" class="quick-dropdown" style="display:none"></div>
+                <input type="hidden" id="qe-edit-mother-id">
+              </div>
+              <button class="quick-btn-small" onclick="quickCreateParentEdit('mother')">+ Neu</button>
+            </div>
+          </div>
+
+          <!-- Spouse Section -->
+          <div class="quick-section">
+            <div class="quick-section-title">Ehepartner</div>
+            <div id="qe-edit-spouses-list"></div>
+            <div class="quick-add-row">
+              <button class="quick-btn-add" onclick="quickAddSpouseEdit()">+ Bestehenden verknüpfen</button>
+              <button class="quick-btn-add" onclick="quickCreateNewSpouseEdit()">+ Neuen erstellen</button>
+            </div>
+          </div>
+
+          <!-- Children Section -->
+          <div class="quick-section">
+            <div class="quick-section-title">Kinder</div>
+            <div id="qe-edit-children-list"></div>
+            <div class="quick-add-row">
+              <button class="quick-btn-add" onclick="quickAddChildEdit()">+ Bestehendes verknüpfen</button>
+              <button class="quick-btn-add" onclick="quickCreateNewChildEdit()">+ Neues erstellen</button>
+            </div>
+          </div>
+
+          <div class="quick-field-row">
+            <textarea id="qe-edit-notes" placeholder="Notizen..." rows="2" class="quick-textarea"></textarea>
+          </div>
+        </div>
+
+        <!-- Status -->
+        <div class="quick-status-section">
+          <span class="quick-section-title">Status:</span>
+          <label class="quick-check"><input type="checkbox" id="qe-edit-deceased"> Verstorben</label>
+          <label class="quick-check"><input type="checkbox" id="qe-edit-divorced"> Geschieden</label>
+          <label class="quick-check"><input type="checkbox" id="qe-edit-adopted"> Adoptiert</label>
+        </div>
+
+        <!-- Actions -->
+        <div id="quick-entry-actions">
+          <button class="quick-btn-primary" onclick="quickSaveEditPerson()">&#x2713; Speichern</button>
+          <button class="quick-btn-secondary" onclick="quickCancelEdit()">&#x2715; Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Quick Link -->
+    <div id="quick-tab-link" class="quick-tab-content" style="display:none">
+      <div class="quick-link-mode">
+        <div class="quick-field-row">
+          <div class="quick-search-wrap">
+            <input type="text" id="qe-link-person1" placeholder="Person 1..." class="quick-input-large"
+                   oninput="quickSearchForLink('person1', this.value)">
+            <div id="qe-link-person1-results" class="quick-dropdown" style="display:none"></div>
+            <input type="hidden" id="qe-link-person1-id">
+          </div>
+        </div>
+        <div class="quick-relation-selector">
+          <button class="quick-rel-btn active" onclick="setQuickRel('spouse')">&#x1F48D; Ehe</button>
+          <button class="quick-rel-btn" onclick="setQuickRel('parent')">&#x1F46A; Eltern-Kind</button>
+        </div>
+        <div class="quick-field-row">
+          <div class="quick-search-wrap">
+            <input type="text" id="qe-link-person2" placeholder="Person 2..." class="quick-input-large"
+                   oninput="quickSearchForLink('person2', this.value)">
+            <div id="qe-link-person2-results" class="quick-dropdown" style="display:none"></div>
+            <input type="hidden" id="qe-link-person2-id">
+          </div>
+        </div>
+        <div id="qe-link-spouse-fields" style="display:none">
+          <input type="text" id="qe-link-marriage-date" placeholder="Hochzeitsdatum" class="quick-input">
+          <input type="text" id="qe-link-marriage-place" placeholder="Hochzeitsort" class="quick-input">
+        </div>
+        <button class="quick-btn-primary" onclick="quickCreateLink()">&#x1F517; Verknüpfung erstellen</button>
+      </div>
+    </div>
+
+    <!-- Recent Persons Sidebar -->
+    <div id="quick-entry-sidebar">
+      <div class="quick-sidebar-title">Zuletzt bearbeitet</div>
+      <div id="quick-recent-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Step-by-Step Wizard Modal ───────────────────────────────────────────────── -->
+<div id="wizard-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Schritt-für-Schritt Import">
+  <div id="wizard-modal-backdrop" onclick="closeWizard()"></div>
+  <div id="wizard-modal-panel">
+    <div id="wizard-modal-header">
+      <h2>&#x1F4C4; Schritt-für-Schritt Import</h2>
+      <button id="wizard-close-btn" onclick="closeWizard()" title="Schliessen">&#x2715;</button>
+    </div>
+
+    <!-- Step 1: Load Text -->
+    <div id="wizard-step-load">
+      <div id="wizard-progress-bar">
+        <div id="wizard-progress-fill"></div>
+        <div id="wizard-progress-text">Schritt 1/3: Text laden</div>
+      </div>
+      <p class="wizard-hint">Lade eine Textdatei (aus PDF exportiert) oder füge den Text direkt ein. Jeder Eintrag wird einzeln geprüft.</p>
+      <div class="wizard-file-row">
+        <label class="wizard-file-label" for="wizard-file-input">&#x1F4C2; Datei wählen</label>
+        <input type="file" id="wizard-file-input" accept=".txt,.text" onchange="handleWizardFileSelect(event)">
+        <span id="wizard-file-name">Keine Datei gewählt</span>
+      </div>
+      <textarea id="wizard-text-area" placeholder="…oder Text hier einfügen"></textarea>
+      <div class="wizard-footer">
+        <button class="wizard-btn wizard-btn--primary" onclick="wizardParseText()">&#x1F50D; Text analysieren</button>
+        <button class="wizard-btn" onclick="closeWizard()">Abbrechen</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Review Entry -->
+    <div id="wizard-step-review" style="display:none">
+      <div id="wizard-progress-bar">
+        <div id="wizard-progress-fill"></div>
+        <div id="wizard-progress-text">Schritt 2/3: Einträge prüfen</div>
+      </div>
+
+      <div id="wizard-entry-counter">
+        <span>Eintrag <span id="wizard-current-idx">1</span> von <span id="wizard-total-count">0</span></span>
+        <div id="wizard-search-box">
+          <input type="text" id="wizard-search-input" placeholder="Person suchen... (in GEDCOM + Import)" onkeydown="if(event.key==='Enter')wizardSearchPersons()">
+          <button onclick="wizardSearchPersons()">&#x1F50D;</button>
+        </div>
+      </div>
+
+      <!-- Search Results -->
+      <div id="wizard-search-results" style="display:none">
+        <div id="wizard-search-results-content"></div>
+        <button class="wizard-btn wizard-btn--small" onclick="wizardCloseSearch()">Schliessen</button>
+      </div>
+
+      <!-- Auto-Skip Notification -->
+      <div id="wizard-auto-skip-notice" style="display:none">
+        <span id="wizard-auto-skip-text"></span>
+        <button class="wizard-btn wizard-btn--small" onclick="wizardHideAutoSkipNotice()">OK</button>
+      </div>
+
+      <!-- Auto-Link Notification -->
+      <div id="wizard-auto-link-notice" style="display:none">
+        <span id="wizard-auto-link-text"></span>
+        <button class="wizard-btn wizard-btn--small" onclick="wizardShowAutoLinkDetails()">Details</button>
+        <button class="wizard-btn wizard-btn--small" onclick="wizardBreakAutoLink()">Verknüpfung aufheben</button>
+      </div>
+
+      <!-- Scrollable Content -->
+      <div id="wizard-scrollable-content">
+        <!-- Source Text Preview -->
+        <div id="wizard-source-box">
+          <div class="wizard-section-title">&#x1F4D6; Original Text</div>
+          <div id="wizard-source-text"></div>
+        </div>
+
+        <!-- Parsed Data Editor -->
+        <div id="wizard-editor">
+          <div class="wizard-section-title">&#x270F; Geparste Daten (frei editierbar)</div>
+          <div id="wizard-fields">
+            <div class="wizard-field-row">
+              <label>Name:</label>
+              <input type="text" id="wizard-field-name" placeholder="Vorname Nachname">
+            </div>
+            <div class="wizard-field-row">
+              <label>Geschlecht:</label>
+              <select id="wizard-field-sex">
+                <option value="">Unbekannt</option>
+                <option value="M">Männlich</option>
+                <option value="F">Weiblich</option>
+              </select>
+            </div>
+            <div class="wizard-field-row">
+              <label>Geburtsdatum:</label>
+              <input type="text" id="wizard-field-birth-date" placeholder="z.B. 15 Jun 1840">
+            </div>
+            <div class="wizard-field-row">
+              <label>Geburtsort:</label>
+              <input type="text" id="wizard-field-birth-place" placeholder="z.B. Luterbach, Solothurn">
+            </div>
+            <div class="wizard-field-row">
+              <label>Sterbedatum:</label>
+              <input type="text" id="wizard-field-death-date" placeholder="z.B. 21 Feb 1921">
+            </div>
+            <div class="wizard-field-row">
+              <label>Sterbeort:</label>
+              <input type="text" id="wizard-field-death-place" placeholder="z.B. Luterbach, Solothurn">
+            </div>
+            <div class="wizard-field-row">
+              <label>Vater:</label>
+              <input type="text" id="wizard-field-father" placeholder="Name des Vaters">
+            </div>
+            <div class="wizard-field-row">
+              <label>Mutter:</label>
+              <input type="text" id="wizard-field-mother" placeholder="Name der Mutter">
+            </div>
+            <div class="wizard-field-row wizard-field-row--wide">
+              <label>Ehen:</label>
+              <div id="wizard-marriages-list"></div>
+              <button class="wizard-btn wizard-btn--small" onclick="wizardAddMarriage()">+ Ehe hinzufügen</button>
+            </div>
+            <div class="wizard-field-row wizard-field-row--wide">
+              <label>Notizen:</label>
+              <textarea id="wizard-field-notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proposed Changes -->
+        <div id="wizard-changes-box">
+          <div class="wizard-section-title">&#x1F504; Vorgeschlagene Änderungen</div>
+          <div id="wizard-changes-list"></div>
+        </div>
+
+        <!-- Match Suggestions -->
+        <div id="wizard-matches-box">
+          <div class="wizard-section-title">&#x1F50D; Passende Personen gefunden</div>
+          <div id="wizard-matches-list"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="wizard-footer wizard-footer--review">
+        <button class="wizard-btn wizard-btn--secondary" onclick="wizardPrevEntry()">&#x2190; Zurück</button>
+        <button class="wizard-btn wizard-btn--success" onclick="wizardApproveEntry()">&#x2713; Als NEU speichern</button>
+        <button class="wizard-btn wizard-btn--primary" onclick="wizardLinkToExisting()">&#x1F517; Mit bestehendem verknüpfen</button>
+        <button class="wizard-btn wizard-btn--warning" onclick="wizardUpdateExisting()">&#x270F; Bestehende aktualisieren</button>
+        <button class="wizard-btn wizard-btn--danger" onclick="wizardSkipEntry()">&#x2715; Überspringen</button>
+        <button class="wizard-btn wizard-btn--secondary" onclick="wizardNextEntry()">Weiter &#x2192;</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Summary -->
+    <div id="wizard-step-summary" style="display:none">
+      <div id="wizard-progress-bar">
+        <div id="wizard-progress-fill" style="width:100%"></div>
+        <div id="wizard-progress-text">Schritt 3/3: Zusammenfassung</div>
+      </div>
+      <div id="wizard-summary-content">
+        <h3>Import Zusammenfassung</h3>
+        <div id="wizard-stats"></div>
+        <div id="wizard-pending-list"></div>
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn wizard-btn--primary" onclick="wizardApplyAll()">&#x2713; Alle genehmigten anwenden</button>
+        <button class="wizard-btn" onclick="wizardBackToReview()">Zurück zur Prüfung</button>
       </div>
     </div>
   </div>
