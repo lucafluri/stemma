@@ -119,6 +119,17 @@ const PALETTE = [
   '#d37295','#a0cbe8','#fabfd2','#8cd17d','#b6992d'
 ];
 
+// ── Dirty-state tracking ─────────────────────────────────────
+let _gedcomDirty = false;
+function _setDirty(v) {
+  _gedcomDirty = v;
+  const btn = document.getElementById('dl-btn');
+  if (btn) btn.classList.toggle('has-unsaved', v);
+}
+window.addEventListener('beforeunload', e => {
+  if (_gedcomDirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
 // ═══════════════════════════════════════════════════════════════
 // PHYSICS PARAMETERS  (single source of truth)
 // ═══════════════════════════════════════════════════════════════
@@ -491,6 +502,7 @@ function parseGEDCOM(raw) {
 // Full in-memory rebuild — call after any structural change
 // ═══════════════════════════════════════════════════════════════
 function _fullRebuildGraph() {
+  _setDirty(true);
   console.time('[rebuild] total');
   console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
   console.time('[rebuild] surnameList');     buildSurnameList(sorted);               console.timeEnd('[rebuild] surnameList');
@@ -2023,6 +2035,7 @@ document.getElementById('file-input').addEventListener('change', function (e) {
       document.getElementById('relation-tool-btn').style.display = 'inline-block';
       document.getElementById('relation-tool-btn').disabled = false;
       window._gedcomFilename = file.name;
+      _setDirty(false);
 
       // Ensure we're in 3D view
       currentView = '3d';
@@ -2238,6 +2251,7 @@ function downloadGEDCOM() {
   a.download = base + '_edited.ged';
   a.click();
   URL.revokeObjectURL(url);
+  _setDirty(false);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2532,6 +2546,7 @@ function showIndiEditForm(id) {
     </div>`;
 
   _renderExistingRelations(id);
+  _acAttachEditForm();
 }
 
 function commitIndiEdit() {
@@ -8076,3 +8091,154 @@ window.setQuickRel = setQuickRel;
 window.quickSearchForLink = quickSearchForLink;
 window.quickSelectLinkPerson = quickSelectLinkPerson;
 window.quickCreateLink = quickCreateLink;
+
+// ═══════════════════════════════════════════════════════════════
+// AUTOCOMPLETE
+// ═══════════════════════════════════════════════════════════════
+
+let _acEl    = null;  // singleton dropdown element
+let _acInput = null;  // currently active input
+let _acList  = [];    // current item list
+let _acIdx   = -1;    // keyboard-selected index
+
+function _acInit() {
+  if (_acEl) return;
+  _acEl = document.createElement('div');
+  _acEl.id = 'ac-dropdown';
+  document.body.appendChild(_acEl);
+}
+
+function _acShow(input, items) {
+  _acInit();
+  _acInput = input;
+  _acList  = items;
+  _acIdx   = -1;
+
+  const r = input.getBoundingClientRect();
+  _acEl.style.left  = r.left + 'px';
+  _acEl.style.top   = (r.bottom + 2) + 'px';
+  _acEl.style.width = r.width + 'px';
+
+  _acEl.innerHTML = items.map((v, i) => {
+    const label = (v && typeof v === 'object') ? v.label : v;
+    return `<div class="ac-item" data-i="${i}">${escHtml(label)}</div>`;
+  }).join('');
+  _acEl.querySelectorAll('.ac-item').forEach(el =>
+    el.addEventListener('mousedown', e => { e.preventDefault(); _acPick(+el.dataset.i); })
+  );
+  _acEl.style.display = 'block';
+}
+
+function _acHide() {
+  if (_acEl) _acEl.style.display = 'none';
+  _acInput = null;
+  _acIdx   = -1;
+}
+
+function _acPick(i) {
+  if (!_acInput || i < 0 || i >= _acList.length) return;
+  const item = _acList[i];
+  _acInput.value = (item && typeof item === 'object') ? item.value : item;
+  _acInput.dispatchEvent(new Event('input', { bubbles: true }));
+  _acHide();
+}
+
+function _acNav(dir) {
+  if (!_acEl || _acEl.style.display === 'none') return false;
+  const els = _acEl.querySelectorAll('.ac-item');
+  if (!els.length) return false;
+  _acIdx = Math.max(0, Math.min(els.length - 1, _acIdx + dir));
+  els.forEach((el, i) => el.classList.toggle('ac-active', i === _acIdx));
+  els[_acIdx]?.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+// Data source helpers — called lazily so they always reflect current data
+function _acPlaces() {
+  const s = new Set();
+  for (const [, i] of individuals) {
+    if (i.birth.plac) s.add(i.birth.plac);
+    if (i.death.plac) s.add(i.death.plac);
+  }
+  for (const [, f] of families) if (f.marr.plac) s.add(f.marr.plac);
+  return [...s].sort();
+}
+function _acSurnames() {
+  const m = new Map();
+  for (const [, i] of individuals) if (i.surn) m.set(i.surn, (m.get(i.surn) || 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([s]) => s);
+}
+function _acOccupations() {
+  const s = new Set();
+  for (const [, i] of individuals) if (i.occu) s.add(i.occu);
+  return [...s].sort();
+}
+function _acNames() {
+  // Returns {label, value, searchText} objects; label includes maiden name for display.
+  const seen = new Map(); // name -> {count, maidenName}
+  for (const [, i] of individuals) {
+    if (!i.name) continue;
+    const prev = seen.get(i.name);
+    seen.set(i.name, {
+      count:      (prev?.count || 0) + 1,
+      maidenName: prev?.maidenName || i.maidenName || '',
+    });
+  }
+  return [...seen.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([name, { maidenName }]) => ({
+      value:      name,
+      label:      maidenName ? `${name} (geb. ${maidenName})` : name,
+      searchText: (name + ' ' + maidenName).toLowerCase(),
+    }));
+}
+
+// Attach autocomplete to a single input.
+// getFn() returns the full candidate list; called on each keystroke so it's always fresh.
+function _acAttach(input, getFn) {
+  if (!input || input.dataset.acAttached) return;
+  input.dataset.acAttached = '1';
+  input.setAttribute('autocomplete', 'off');
+
+  const refresh = () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { _acHide(); return; }
+    const hits = getFn().filter(v => {
+      const text = (v && typeof v === 'object') ? (v.searchText ?? v.label) : v;
+      return text.toLowerCase().includes(q);
+    }).slice(0, 12);
+    if (hits.length) _acShow(input, hits); else _acHide();
+  };
+
+  input.addEventListener('input',  refresh);
+  input.addEventListener('focus',  refresh);
+  input.addEventListener('blur',   () => setTimeout(_acHide, 160));
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown')  { e.preventDefault(); _acNav(+1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _acNav(-1); }
+    else if (e.key === 'Enter' && _acIdx >= 0) { e.preventDefault(); _acPick(_acIdx); }
+    else if (e.key === 'Escape') _acHide();
+  });
+}
+
+// Attach to the dynamically-rendered edit form fields (called after innerHTML is set)
+function _acAttachEditForm() {
+  _acAttach(document.getElementById('ef-surn'),   _acSurnames);
+  _acAttach(document.getElementById('ef-maiden'), _acSurnames);
+  _acAttach(document.getElementById('ef-bplac'),  _acPlaces);
+  _acAttach(document.getElementById('ef-dplac'),  _acPlaces);
+  _acAttach(document.getElementById('ef-occu'),   _acOccupations);
+  // new-person subform inside edit form
+  _acAttach(document.getElementById('ef-np-surn'), _acSurnames);
+}
+
+// Attach to static quick-entry form fields (called once on DOMContentLoaded)
+function _acAttachQuickEntry() {
+  _acAttach(document.getElementById('qe-name'),              _acNames);
+  _acAttach(document.getElementById('qe-birth-place'),       _acPlaces);
+  _acAttach(document.getElementById('qe-death-place'),       _acPlaces);
+  _acAttach(document.getElementById('qe-edit-birth-place'),  _acPlaces);
+  _acAttach(document.getElementById('qe-edit-death-place'),  _acPlaces);
+}
+
+document.addEventListener('DOMContentLoaded', _acAttachQuickEntry);
