@@ -557,6 +557,7 @@ function buildGraphData() {
 // 3. SURNAME COLOR MAP
 // ═══════════════════════════════════════════════════════════════
 function buildSurnameColorMap() {
+  // 1. Count surname frequencies
   const counts = new Map();
   let noSurnCount = 0;
   for (const [, indi] of individuals) {
@@ -566,26 +567,98 @@ function buildSurnameColorMap() {
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
 
+  // 2. Build surname adjacency graph — two surnames are adjacent when they
+  //    appear together in the same family (spouses or parent/child).
+  const adj = new Map();
+  for (const s of counts.keys()) adj.set(s, new Set());
+  const addEdge = (a, b) => {
+    if (!a || !b || a === b) return;
+    if (!adj.has(a)) adj.set(a, new Set());
+    if (!adj.has(b)) adj.set(b, new Set());
+    adj.get(a).add(b);
+    adj.get(b).add(a);
+  };
+  for (const [, fam] of families) {
+    const gs = id => (id ? individuals.get(id)?.surn : null) || null;
+    const hS = gs(fam.husb), wS = gs(fam.wife);
+    addEdge(hS, wS);
+    for (const cid of fam.chil) {
+      const cS = gs(cid);
+      addEdge(hS, cS);
+      addEdge(wS, cS);
+    }
+  }
+
+  // 3. DSATUR ordering — process most-constrained surnames first so they
+  //    get the most freedom when choosing their hue.
+  const surns = [...counts.keys()];
+  const assignOrder = [];
+  const nbSlots = new Map(); // surname -> Set<dummy slot> (just for ordering)
+  for (const s of surns) nbSlots.set(s, new Set());
+  const unordered = new Set(surns);
+  while (unordered.size > 0) {
+    let best = null, bestSat = -1, bestDeg = -1, bestFreq = -1;
+    for (const s of unordered) {
+      const sat = nbSlots.get(s).size, deg = adj.get(s)?.size ?? 0, freq = counts.get(s) || 0;
+      if (sat > bestSat || (sat === bestSat && deg > bestDeg) || (sat === bestSat && deg === bestDeg && freq > bestFreq))
+        [best, bestSat, bestDeg, bestFreq] = [s, sat, deg, freq];
+    }
+    assignOrder.push(best);
+    const used = nbSlots.get(best);
+    let slot = 0; while (used.has(slot)) slot++;
+    for (const nb of (adj.get(best) ?? [])) nbSlots.get(nb)?.add(slot);
+    unordered.delete(best);
+  }
+
+  // 4. Greedy hue assignment: each surname gets a unique hue chosen as the
+  //    midpoint of the largest arc on the colour wheel that is free from its
+  //    already-coloured neighbours (hard constraint). Surnames with no
+  //    neighbours fill the largest gap among all globally assigned hues so
+  //    they spread across the remaining space rather than clustering.
+  const largestGapMid = (angles) => {
+    const pts = [...new Set(angles)].sort((a, b) => a - b);
+    let maxGap = 0, mid = pts[0];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = i + 1 < pts.length ? pts[i + 1] : pts[0] + 360;
+      const gap = b - a;
+      if (gap > maxGap) { maxGap = gap; mid = (a + gap / 2) % 360; }
+    }
+    return mid;
+  };
+
+  const assignedHue = new Map(); // surname -> hue [0,360)
+  const allHues = [];            // every hue assigned so far (for spreading isolates)
+
+  for (const surn of assignOrder) {
+    if (surnameCustomColors.has(surn)) { assignedHue.set(surn, -1); continue; }
+    const nbHues = [];
+    for (const nb of (adj.get(surn) ?? [])) {
+      const h = assignedHue.get(nb);
+      if (h != null && h >= 0) nbHues.push(h);
+    }
+    const hue = nbHues.length > 0
+      ? largestGapMid(nbHues)                             // max separation from neighbours
+      : (allHues.length > 0 ? largestGapMid(allHues) : 30); // fill global gaps for isolates
+    assignedHue.set(surn, hue);
+    allHues.push(hue);
+  }
+
+  // 5. Apply colours (custom overrides respected)
   surnameColors.clear();
   surnameEnabled.clear();
   _surnameColorCache.clear();
-
-  // Assign golden-angle spaced hues so the most common surnames are maximally distinct.
-  // Hue starts at 30° (warm, avoids clash with sex colors blue/pink) and steps by golden angle.
-  sorted.forEach(([surn], i) => {
+  for (const [surn] of sorted) {
     if (surnameCustomColors.has(surn)) {
-      // User override wins; still seed the cache so surnameColor() is fast
       const c = surnameCustomColors.get(surn);
       surnameColors.set(surn, c);
       _surnameColorCache.set(surn, c);
     } else {
-      const h = (30 + i * GOLDEN_ANGLE) % 360;
-      const color = hslToHex(h, 62, 52);
+      const color = hslToHex(assignedHue.get(surn) ?? 30, 62, 52);
       surnameColors.set(surn, color);
       _surnameColorCache.set(surn, color);
     }
     surnameEnabled.set(surn, true);
-  });
+  }
 
   if (noSurnCount > 0) {
     surnameEnabled.set(null, true);
