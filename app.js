@@ -216,42 +216,7 @@ function toggleSidebar() {
 // TOUCH SUPPORT
 // ═══════════════════════════════════════════════════════════════
 
-// ── 3D pinch-to-zoom ──
-let _pinch3d = null;  // { dist0, camDist0, midX, midY }
-
-function _onTouch3DStart(evt) {
-  if (evt.touches.length === 2 && graph3d && _orbitControls3d) {
-    evt.preventDefault();
-    const t0 = evt.touches[0], t1 = evt.touches[1];
-    _pinch3d = {
-      dist0:    Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
-      camDist0: graph3d.camera().position.distanceTo(_orbitControls3d.target),
-      midX: (t0.clientX + t1.clientX) / 2,
-      midY: (t0.clientY + t1.clientY) / 2,
-    };
-  }
-}
-
-function _onTouch3DMove(evt) {
-  if (!_pinch3d || evt.touches.length !== 2 || !graph3d || !_orbitControls3d) return;
-  evt.preventDefault();
-  const t0 = evt.touches[0], t1 = evt.touches[1];
-  const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
-
-  // Correct scale: wider pinch = smaller distance (zoom in)
-  const scale = _pinch3d.dist0 / Math.max(dist, 1);
-  const newDist = Math.max(1, _pinch3d.camDist0 * scale);
-
-  const cam = graph3d.camera();
-  const ctrl = _orbitControls3d;
-  const dir = cam.position.clone().sub(ctrl.target).normalize();
-  cam.position.copy(ctrl.target).addScaledVector(dir, newDist);
-  ctrl.update();
-}
-
-function _onTouch3DEnd(evt) {
-  if (evt.touches.length < 2) _pinch3d = null;
-}
+// (Touch zoom + pan handled natively by OrbitControls with DOLLY_PAN)
 
 // ── Detail panel bottom-sheet swipe-to-dismiss ──
 let _panelSwipe = null;  // { startY, startTranslate }
@@ -3379,27 +3344,26 @@ function initGraph3D() {
     _orbitControls3d.dampingFactor  = 0.10;
     _orbitControls3d.rotateSpeed    = 0.5;
     _orbitControls3d.panSpeed       = 0.9;
-    _orbitControls3d.enableZoom     = false;   // wheel zoom handled manually (zoom-to-cursor)
+    _orbitControls3d.enableZoom     = true;    // needed for touch dolly; wheel intercepted below
     _orbitControls3d.enablePan      = true;
-    _orbitControls3d.minDistance    = 1;       // unrestricted — no hard floor
+    _orbitControls3d.minDistance    = 1;
     _orbitControls3d.maxDistance    = Infinity;
-    // Touch: 1-finger = ROTATE, 2-finger = PAN only (zoom via our pinch handler)
+    // Touch: 1-finger = ROTATE, 2-finger = DOLLY (zoom) + PAN
     if (_orbitControls3d.touches) {
       _orbitControls3d.touches = {
         ONE: THREE.TOUCH.ROTATE,
-        TWO: THREE.TOUCH.PAN,
+        TWO: THREE.TOUCH.DOLLY_PAN,
       };
     }
     cam.up.set(0, 1, 0);
     _orbitControls3d.update();
 
-    // Zoom toward cursor position (scroll wheel)
-    domEl.addEventListener('wheel', _onWheel3D, { passive: false });
-
-    // Touch pinch-to-zoom (since OrbitControls zoom is disabled for custom cursor-zoom)
-    domEl.addEventListener('touchstart', _onTouch3DStart, { passive: false });
-    domEl.addEventListener('touchmove', _onTouch3DMove, { passive: false });
-    domEl.addEventListener('touchend', _onTouch3DEnd, { passive: true });
+    // Zoom toward cursor position (scroll wheel) — capture phase + stopImmediatePropagation
+    // so our custom zoom-to-cursor fires instead of OrbitControls' default wheel zoom
+    domEl.addEventListener('wheel', (evt) => {
+      evt.stopImmediatePropagation();
+      _onWheel3D(evt);
+    }, { passive: false, capture: true });
 
     // Redirect the render-loop's update() call to our OrbitControls + orbit target tracking
     old.update = () => { _tickOrbitTarget(); _orbitControls3d.update(); };
