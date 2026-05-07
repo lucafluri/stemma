@@ -158,7 +158,8 @@ let _3dMousePos    = { x: 0, y: 0 };
 
 // Display mode flags
 let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
-let sortByTime3D   = true;   // Y-stratify 3D sim by birth year + show 3D timeline
+let sortByTime3D   = true;   // Y-stratify 3D sim by birth year
+let showTimeline3D = true;   // show the visual timeline axis (spine + rings)
 let show3DNames    = true;   // render name+year labels above nodes in 3D
 let _nodeDragEnabled = false; // node dragging disabled by default
 let _timeline3DObj    = null;   // THREE.Group holding timeline meshes in the 3D scene
@@ -371,8 +372,7 @@ function parseGEDCOM(raw) {
         cur = {
           id: tag,
           husb: null, wife: null, chil: [],
-          marr: { date: '', plac: '' },
-          div: false
+          marriages: [], div: false, divDate: ''
         };
         families.set(tag, cur);
         curType = 'FAM';
@@ -459,12 +459,20 @@ function parseGEDCOM(raw) {
           case 'HUSB': cur.husb = val; break;
           case 'WIFE': cur.wife = val; break;
           case 'CHIL': if (val) cur.chil.push(val); break;
-          case 'MARR': subCtx = 'MARR'; break;
-          case 'DIV':  cur.div = true; break;
+          case 'MARR': cur.marriages.push({ date: '', plac: '', types: [] }); subCtx = 'MARR'; break;
+          case 'DIV':  cur.div = true; subCtx = 'DIV'; break;
         }
-      } else if (level === 2 && subCtx === 'MARR') {
-        if (tag === 'DATE') cur.marr.date = val;
-        else if (tag === 'PLAC') cur.marr.plac = val;
+      } else if (level === 2) {
+        if (subCtx === 'MARR') {
+          const m = cur.marriages[cur.marriages.length - 1];
+          if (m) {
+            if (tag === 'DATE') m.date = val;
+            else if (tag === 'PLAC') m.plac = val;
+            else if (tag === 'TYPE') m.types = val.split(',').map(s => s.trim()).filter(Boolean);
+          }
+        } else if (subCtx === 'DIV') {
+          if (tag === 'DATE') cur.divDate = val;
+        }
       }
     }
   }
@@ -1524,8 +1532,8 @@ function onHover(evt, d) {
       .map(id => escHtml(individuals.get(id)?.name || id)).join(' &amp; ');
     html = `<div class="tt-name">Familie</div>`;
     if (names) html += `<div class="tt-detail">${names}</div>`;
-    if (f.marr.date) html += `<div class="tt-detail">⚭ ${escHtml(f.marr.date)}</div>`;
-    if (f.div) html += `<div class="tt-detail" style="color:#e74c3c">Geschieden</div>`;
+    if (f.marriages?.[0]?.date) html += `<div class="tt-detail">⚭ ${escHtml(f.marriages[0].date)}</div>`;
+    if (f.div) html += `<div class="tt-detail" style="color:#e74c3c">Geschieden${f.divDate ? ' ' + escHtml(f.divDate) : ''}</div>`;
     html += `<div class="tt-detail">${f.chil.length} ${f.chil.length === 1 ? 'Kind' : 'Kinder'}</div>`;
   }
   tt.innerHTML = html;
@@ -1601,7 +1609,8 @@ function showIndiDetail(id) {
         const p = individuals.get(pid);
         return p ? `<span class="clickable-name" onclick="showIndiDetail('${escAttr(pid)}')">${escHtml(p.name)}</span>` : escHtml(pid);
       }).join(' &amp; ');
-      if (ps) parentLines.push(ps);
+      const famLink = `<span class="clickable-fam-badge" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">&#x25C6;</span>`;
+      if (ps || famLink) parentLines.push((ps || '') + ' ' + famLink);
     }
     if (parentLines.length) html += row('Eltern', parentLines.join('<br>'));
   }
@@ -1615,10 +1624,12 @@ function showIndiDetail(id) {
       const spId = fam.husb === id ? fam.wife : fam.husb;
       const sp = spId ? individuals.get(spId) : null;
       const spName = sp ? `<span class="clickable-name" onclick="showIndiDetail('${escAttr(spId)}')">${escHtml(sp.name)}</span>` : (spId ? escHtml(spId) : '<em>unbekannt</em>');
-      const mInfo = fam.marr.date ? ` &mdash; ⚭ ${escHtml(fam.marr.date)}${fam.marr.plac ? ', ' + escHtml(fam.marr.plac) : ''}` : '';
-      const dInfo = fam.div ? ` <span style="color:#e74c3c">[Geschieden]</span>` : '';
+      const m0 = fam.marriages?.[0];
+      const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
+      const dInfo = fam.div ? ` <span style="color:#e74c3c">[Geschieden${fam.divDate ? ' ' + escHtml(fam.divDate) : ''}]</span>` : '';
       const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? 'Kind' : 'Kinder'}</span>` : '';
-      html += `<div class="detail-marriage">${spName}${mInfo}${dInfo}${kids}</div>`;
+      const famLink = `<span class="clickable-fam-badge" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">&#x25C6;</span>`;
+      html += `<div class="detail-marriage">${spName}${famLink}${mInfo}${dInfo}${kids}</div>`;
     }
     html += `</div>`;
   }
@@ -1649,8 +1660,17 @@ function showFamDetail(id) {
   document.getElementById('detail-name').textContent = 'Familie' + (names ? ': ' + names : '');
 
   let html = '';
-  if (fam.marr.date || fam.marr.plac) html += row('Heirat', fmtPlace(fam.marr.date, fam.marr.plac));
-  if (fam.div) html += row('Status', '<span style="color:#e74c3c">Geschieden</span>');
+  (fam.marriages || []).forEach((m, i) => {
+    if (!m.date && !m.plac && !m.types?.length) return;
+    let marrVal = fmtPlace(m.date, m.plac);
+    if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:#7ac;font-size:11px">${escHtml(m.types.join(', '))}</span>`;
+    const label = (fam.marriages.length > 1) ? `Heirat ${i + 1}` : 'Heirat';
+    html += row(label, marrVal);
+  });
+  if (fam.div) {
+    const divTxt = `<span style="color:#e74c3c">Geschieden${fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : ''}</span>`;
+    html += row('Status', divTxt);
+  }
 
   const spouses = [fam.husb, fam.wife].filter(Boolean);
   if (spouses.length) {
@@ -2109,11 +2129,11 @@ function _buildFamEditSections(personId) {
       <div class="ef-fam-header">&#x26a1; ${spouseLbl}</div>
       <div class="edit-section">
         <div class="edit-label">Heiratsdatum</div>
-        ${_gedcomDateWidget('ef-fam-' + sid + '-mdate', fam.marr.date)}
+        ${_gedcomDateWidget('ef-fam-' + sid + '-mdate', fam.marriages?.[0]?.date || '')}
       </div>
       <div class="edit-section">
         <div class="edit-label">Heiratsort</div>
-        <input class="edit-input" id="ef-fam-${sid}-mplac" value="${escAttr(fam.marr.plac)}">
+        <input class="edit-input" id="ef-fam-${sid}-mplac" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
       </div>
       <label class="edit-checkbox-row">
         <input type="checkbox" id="ef-fam-${sid}-div"${fam.div ? ' checked' : ''}>
@@ -2229,12 +2249,17 @@ function serializeGEDCOM() {
     if (f.husb) lines.push(`1 HUSB ${f.husb}`);
     if (f.wife) lines.push(`1 WIFE ${f.wife}`);
     for (const cid of f.chil) lines.push(`1 CHIL ${cid}`);
-    if (f.marr.date || f.marr.plac) {
+    for (const m of (f.marriages || [])) {
+      if (!m.date && !m.plac && !m.types?.length) continue;
       lines.push('1 MARR');
-      if (f.marr.date) lines.push(`2 DATE ${f.marr.date}`);
-      if (f.marr.plac) lines.push(`2 PLAC ${f.marr.plac}`);
+      if (m.date) lines.push(`2 DATE ${m.date}`);
+      if (m.plac) lines.push(`2 PLAC ${m.plac}`);
+      if (m.types?.length) lines.push(`2 TYPE ${m.types.join(', ')}`);
     }
-    if (f.div) lines.push('1 DIV Y');
+    if (f.div) {
+      lines.push('1 DIV Y');
+      if (f.divDate) lines.push(`2 DATE ${f.divDate}`);
+    }
   }
 
   lines.push('0 TRLR');
@@ -2264,12 +2289,17 @@ let _editingType = null;   // 'INDI' | 'FAM'
 // Pending relationships to be committed with the new/edited person
 let _pendingRelations = [];   // [{ targetId, type: 'parent'|'child'|'spouse', isNew? }]
 let _removedRelations = [];   // [{ targetId, type, famId }]
+let _famEditRemovedChil = new Set(); // child IDs removed during fam edit
+let _famEditPendingChil = [];        // [{id, name, isNew}] children added during fam edit
+let _famEditMarriages   = [];        // working copy of marriages during fam edit
 
 function _buildPersonDatalist(excludeId) {
   let opts = '';
   for (const [pid, p] of individuals) {
     if (pid === excludeId) continue;
-    const display = `${p.name || pid}`;
+    const yr = p.birthYear || (_estimatedYears?.get(pid));
+    const maiden = p.maidenName ? ` (geb. ${p.maidenName})` : '';
+    const display = `${p.name || pid}${maiden}${yr ? ` *${yr}` : ''}`;
     opts += `<option value="${escAttr(display)}" data-id="${escAttr(pid)}">`;
   }
   return opts;
@@ -2280,12 +2310,15 @@ function _resolvePersonInput(val) {
   val = val.trim();
   // Direct ID match
   if (individuals.has(val)) return val;
-  // Match by name (exact or first match)
+  // Strip maiden name / year suffix added by _buildPersonDatalist (e.g. "Name (geb. X) *1900")
+  const baseName = val.replace(/\s*\(geb\.[^)]*\)/, '').replace(/\s*\*\d{4}$/, '').trim();
+  // Exact match on full datalist label or base name
   for (const [pid, p] of individuals) {
-    if ((p.name || pid) === val) return pid;
+    const name = p.name || pid;
+    if (name === val || name === baseName) return pid;
   }
-  // Partial match
-  const lower = val.toLowerCase();
+  // Partial match on base name
+  const lower = baseName.toLowerCase();
   for (const [pid, p] of individuals) {
     if ((p.name || pid).toLowerCase().includes(lower)) return pid;
   }
@@ -2587,8 +2620,9 @@ function commitIndiEdit() {
     const sid = _safeId(famId);
     const mdateEl = document.getElementById('ef-fam-' + sid + '-mdate');
     if (fam && mdateEl) {
-      fam.marr.date = _gedcomDateValue('ef-fam-' + sid + '-mdate');
-      fam.marr.plac = (document.getElementById('ef-fam-' + sid + '-mplac')?.value || '').trim();
+      if (!fam.marriages[0]) fam.marriages[0] = { date: '', plac: '', types: [] };
+      fam.marriages[0].date = _gedcomDateValue('ef-fam-' + sid + '-mdate');
+      fam.marriages[0].plac = (document.getElementById('ef-fam-' + sid + '-mplac')?.value || '').trim();
       fam.div       = document.getElementById('ef-fam-' + sid + '-div')?.checked ?? fam.div;
     }
   }
@@ -2658,7 +2692,7 @@ function commitIndiEdit() {
         const famId = getNextFamId();
         const newFam = {
           id: famId, husb: null, wife: null, chil: [],
-          marr: { date: '', plac: '' }, div: false
+          marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: ''
         };
         // Assign husb/wife based on sex
         if (i.sex === 'M') { newFam.husb = _editingId; newFam.wife = rel.targetId; }
@@ -2703,7 +2737,7 @@ function _findOrCreateFamAsParent(personId) {
   const famId = getNextFamId();
   const fam = {
     id: famId, husb: null, wife: null, chil: [],
-    marr: { date: '', plac: '' }, div: false
+    marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: ''
   };
   if (person?.sex === 'F') fam.wife = personId;
   else fam.husb = personId;
@@ -2712,39 +2746,279 @@ function _findOrCreateFamAsParent(personId) {
   return fam;
 }
 
+const _FAM_MARR_TYPES = [
+  { val: 'civil',         label: 'Standesamtlich' },
+  { val: 'kirchlich',     label: 'Kirchlich' },
+  { val: 'partnerschaft', label: 'Partnerschaft' },
+  { val: 'eheähnlich',   label: 'Eheähnlich' },
+];
+
 function showFamEditForm(id) {
   const f = families.get(id);
   if (!f) return;
 
+  _famEditRemovedChil = new Set();
+  _famEditPendingChil = [];
+
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
 
+  const dl = _buildPersonDatalist(null);
+  const husbName = f.husb ? (individuals.get(f.husb)?.name || f.husb) : '';
+  const wifeName = f.wife ? (individuals.get(f.wife)?.name || f.wife) : '';
+
+  _famEditMarriages = (f.marriages && f.marriages.length)
+    ? f.marriages.map(m => ({ date: m.date || '', plac: m.plac || '', types: [...(m.types || [])] }))
+    : [{ date: '', plac: '', types: [] }];
+
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
-      <div class="edit-label">Heiratsdatum</div>
-      ${_gedcomDateWidget('ef-mdate', f.marr.date)}
+      <div class="edit-label">Partner 1</div>
+      <div class="ef-rel-add-row">
+        <input class="edit-input" id="ef-husb" list="ef-husb-dl" value="${escAttr(husbName)}" placeholder="Person suchen…" autocomplete="off">
+        <datalist id="ef-husb-dl">${dl}</datalist>
+        <button class="ef-rel-remove" onclick="document.getElementById('ef-husb').value=''" title="Leeren">&#x2715;</button>
+      </div>
     </div>
     <div class="edit-section">
-      <div class="edit-label">Heiratsort</div>
-      <input class="edit-input" id="ef-mplac" value="${escAttr(f.marr.plac)}">
+      <div class="edit-label">Partner 2</div>
+      <div class="ef-rel-add-row">
+        <input class="edit-input" id="ef-wife" list="ef-wife-dl" value="${escAttr(wifeName)}" placeholder="Person suchen…" autocomplete="off">
+        <datalist id="ef-wife-dl">${dl}</datalist>
+        <button class="ef-rel-remove" onclick="document.getElementById('ef-wife').value=''" title="Leeren">&#x2715;</button>
+      </div>
     </div>
-    <label class="edit-checkbox-row">
-      <input type="checkbox" id="ef-div"${f.div?' checked':''}>
-      Geschieden
-    </label>
+    <div class="edit-section">
+      <div class="edit-label">Zeremonien</div>
+      <div id="ef-fam-marr-list"></div>
+      <button class="ef-toggle-new-btn" onclick="_famEditAddMarr()" style="margin-top:4px">&#x2795; Zeremonie hinzufügen</button>
+    </div>
+    <div class="edit-section">
+      <label class="edit-checkbox-row" style="margin-bottom:4px">
+        <input type="checkbox" id="ef-div"${f.div ? ' checked' : ''} onchange="_famEditToggleDivDate(this.checked)">
+        Geschieden
+      </label>
+      <div id="ef-div-date-row" style="display:${f.div ? 'block' : 'none'}">
+        <div class="edit-label" style="margin-top:4px">Scheidungsdatum</div>
+        ${_gedcomDateWidget('ef-divdate', f.divDate || '')}
+      </div>
+    </div>
+    <div class="edit-section">
+      <div class="edit-label">Kinder</div>
+      <div id="ef-fam-chil-list"></div>
+      <div class="ef-rel-add-row" style="margin-top:4px">
+        <input class="edit-input" id="ef-fam-chil-search" list="ef-fam-chil-dl" placeholder="Kind suchen…" autocomplete="off">
+        <datalist id="ef-fam-chil-dl">${dl}</datalist>
+        <button class="ef-rel-add-btn" onclick="_famEditAddChild()" title="Kind hinzufügen">+</button>
+      </div>
+      <button class="ef-toggle-new-btn" onclick="_famEditToggleNewChild()" style="margin-top:4px">&#x2795; Neues Kind</button>
+      <div id="ef-fam-new-child-form" style="display:none;margin-top:6px">
+        <div class="ef-rel-add-row">
+          <input class="edit-input" id="ef-fnc-givn" placeholder="Vorname" style="flex:1">
+          <input class="edit-input" id="ef-fnc-surn" placeholder="Familienname" style="flex:1">
+        </div>
+        <div class="ef-rel-add-row" style="margin-top:4px">
+          <select class="edit-select" id="ef-fnc-sex" style="flex:1">
+            <option value="U">Geschlecht</option>
+            <option value="M">Männlich</option>
+            <option value="F">Weiblich</option>
+          </select>
+          <button class="ef-rel-add-btn" onclick="_famEditCreateChild()" title="Kind erstellen" style="width:auto;padding:0 10px">Hinzufügen</button>
+        </div>
+      </div>
+    </div>
     <div class="edit-form-buttons">
       <button class="edit-save-btn" onclick="commitFamEdit()">&#x2713; Speichern</button>
       <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
     </div>`;
+
+  _famEditRenderMarriages();
+  _famEditRenderChildren(f);
+}
+
+function _famEditRenderMarriages() {
+  const el = document.getElementById('ef-fam-marr-list');
+  if (!el) return;
+  el.innerHTML = _famEditMarriages.map((m, i) => {
+    const typesHtml = _FAM_MARR_TYPES.map(t =>
+      `<label class="fam-type-check"><input type="checkbox" data-marr-idx="${i}" data-marr-type="${escAttr(t.val)}"${m.types.includes(t.val) ? ' checked' : ''}> ${escHtml(t.label)}</label>`
+    ).join('');
+    const canRemove = _famEditMarriages.length > 1;
+    return `<div class="fam-marr-block">
+      <div class="fam-marr-block-header">
+        <span>Zeremonie ${i + 1}</span>
+        ${canRemove ? `<button class="ef-rel-remove" onclick="_famEditRemoveMarr(${i})" title="Entfernen">&#x2715;</button>` : ''}
+      </div>
+      <div class="fam-type-checks" style="margin-bottom:6px">${typesHtml}</div>
+      <div class="edit-label" style="font-size:11px">Datum</div>
+      ${_gedcomDateWidget('ef-marr-' + i + '-date', m.date)}
+      <div class="edit-label" style="font-size:11px;margin-top:4px">Ort</div>
+      <input class="edit-input" id="ef-marr-${i}-plac" value="${escAttr(m.plac)}" placeholder="Ort">
+    </div>`;
+  }).join('');
+}
+
+function _famEditAddMarr() {
+  _famEditSyncMarriagesFromDom();
+  _famEditMarriages.push({ date: '', plac: '', types: [] });
+  _famEditRenderMarriages();
+}
+
+function _famEditRemoveMarr(idx) {
+  _famEditSyncMarriagesFromDom();
+  _famEditMarriages.splice(idx, 1);
+  _famEditRenderMarriages();
+}
+
+function _famEditSyncMarriagesFromDom() {
+  _famEditMarriages.forEach((m, i) => {
+    m.date = _gedcomDateValue('ef-marr-' + i + '-date');
+    m.plac = (document.getElementById('ef-marr-' + i + '-plac')?.value || '').trim();
+    m.types = [...document.querySelectorAll(`input[data-marr-idx="${i}"][data-marr-type]:checked`)].map(cb => cb.dataset.marrType);
+  });
+}
+
+function _famEditToggleDivDate(checked) {
+  const row = document.getElementById('ef-div-date-row');
+  if (row) row.style.display = checked ? 'block' : 'none';
+}
+
+function _famEditRenderChildren(f) {
+  const el = document.getElementById('ef-fam-chil-list');
+  if (!el) return;
+  const existing = (f.chil || [])
+    .filter(cid => !_famEditRemovedChil.has(cid))
+    .map(cid => {
+      const p = individuals.get(cid);
+      const name = p ? escHtml(p.name || cid) : escHtml(cid);
+      return `<div class="ef-rel-item">
+        <span class="ef-rel-name">${name}</span>
+        <button class="ef-rel-remove" onclick="_famEditRemoveChild('${escAttr(cid)}')" title="Entfernen">&#x2715;</button>
+      </div>`;
+    });
+  const pending = _famEditPendingChil.map((c, i) => {
+    return `<div class="ef-rel-item">
+      <span class="ef-rel-name">${escHtml(c.name)}</span>
+      <span class="ef-rel-new-badge">neu</span>
+      <button class="ef-rel-remove" onclick="_famEditRemovePending(${i})" title="Entfernen">&#x2715;</button>
+    </div>`;
+  });
+  el.innerHTML = (existing.length || pending.length)
+    ? existing.join('') + pending.join('')
+    : '<div style="color:#555;font-size:11px;padding:2px 0">Keine Kinder</div>';
+}
+
+function _famEditRemoveChild(cid) {
+  _famEditRemovedChil.add(cid);
+  const f = families.get(_editingId);
+  if (f) _famEditRenderChildren(f);
+}
+
+function _famEditRemovePending(idx) {
+  const removed = _famEditPendingChil.splice(idx, 1)[0];
+  if (removed?.isNew) individuals.delete(removed.id);
+  const f = families.get(_editingId);
+  if (f) _famEditRenderChildren(f);
+}
+
+function _famEditAddChild() {
+  const inp = document.getElementById('ef-fam-chil-search');
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (!val) return;
+  const id = _resolvePersonInput(val);
+  if (!id) { inp.style.borderColor = '#e74c3c'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
+  const f = families.get(_editingId);
+  if (!f) return;
+  if (f.chil.includes(id) && !_famEditRemovedChil.has(id)) return;
+  if (_famEditPendingChil.some(c => c.id === id)) return;
+  const p = individuals.get(id);
+  _famEditPendingChil.push({ id, name: p?.name || id, isNew: false });
+  _famEditRemovedChil.delete(id);
+  inp.value = '';
+  _famEditRenderChildren(f);
+}
+
+function _famEditToggleNewChild() {
+  const sf = document.getElementById('ef-fam-new-child-form');
+  if (!sf) return;
+  sf.style.display = sf.style.display === 'none' ? 'block' : 'none';
+  if (sf.style.display !== 'none') document.getElementById('ef-fnc-givn')?.focus();
+}
+
+function _famEditCreateChild() {
+  const givn = document.getElementById('ef-fnc-givn')?.value.trim() || '';
+  const surn = document.getElementById('ef-fnc-surn')?.value.trim() || '';
+  const sex  = document.getElementById('ef-fnc-sex')?.value || 'U';
+  const fullName = (givn + ' ' + surn).trim();
+  if (!fullName) {
+    document.getElementById('ef-fnc-givn').style.borderColor = '#e74c3c';
+    setTimeout(() => { document.getElementById('ef-fnc-givn').style.borderColor = ''; }, 1200);
+    return;
+  }
+  const newId = getNextIndiId();
+  individuals.set(newId, {
+    id: newId, name: fullName, givn, surn, maidenName: '', sex,
+    birth: { date: '', plac: '' }, death: { date: '', plac: '', caus: '' },
+    deceased: false, birthYear: null, famc: [], fams: [], occu: '', note: '',
+    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
+  });
+  _famEditPendingChil.push({ id: newId, name: fullName, isNew: true });
+  document.getElementById('ef-fnc-givn').value = '';
+  document.getElementById('ef-fnc-surn').value = '';
+  document.getElementById('ef-fnc-sex').value  = 'U';
+  document.getElementById('ef-fam-new-child-form').style.display = 'none';
+  const f = families.get(_editingId);
+  if (f) _famEditRenderChildren(f);
 }
 
 function commitFamEdit() {
   const f = families.get(_editingId);
   if (!f) return;
 
-  f.marr.date = _gedcomDateValue('ef-mdate');
-  f.marr.plac = document.getElementById('ef-mplac').value.trim();
-  f.div       = document.getElementById('ef-div').checked;
+  // Marriages
+  _famEditSyncMarriagesFromDom();
+  f.marriages = _famEditMarriages.filter(m => m.date || m.plac || m.types.length);
+  if (!f.marriages.length) f.marriages = [{ date: '', plac: '', types: [] }];
+  _famEditMarriages = [];
+
+  // Divorce
+  f.div     = document.getElementById('ef-div').checked;
+  f.divDate = f.div ? _gedcomDateValue('ef-divdate') : '';
+
+  // Parents
+  const oldHusb = f.husb;
+  const oldWife = f.wife;
+  const husbVal = document.getElementById('ef-husb').value.trim();
+  const wifeVal = document.getElementById('ef-wife').value.trim();
+  f.husb = husbVal ? (_resolvePersonInput(husbVal) || f.husb) : null;
+  f.wife = wifeVal ? (_resolvePersonInput(wifeVal) || f.wife) : null;
+
+  if (oldHusb !== f.husb) {
+    if (oldHusb) { const p = individuals.get(oldHusb); if (p) p.fams = p.fams.filter(fid => fid !== _editingId); }
+    if (f.husb)  { const p = individuals.get(f.husb);  if (p && !p.fams.includes(_editingId)) p.fams.push(_editingId); }
+  }
+  if (oldWife !== f.wife) {
+    if (oldWife) { const p = individuals.get(oldWife); if (p) p.fams = p.fams.filter(fid => fid !== _editingId); }
+    if (f.wife)  { const p = individuals.get(f.wife);  if (p && !p.fams.includes(_editingId)) p.fams.push(_editingId); }
+  }
+
+  // Remove children
+  for (const cid of _famEditRemovedChil) {
+    f.chil = f.chil.filter(c => c !== cid);
+    const c = individuals.get(cid);
+    if (c) c.famc = c.famc.filter(fid => fid !== _editingId);
+  }
+
+  // Add pending children
+  for (const { id: cid } of _famEditPendingChil) {
+    if (!f.chil.includes(cid)) f.chil.push(cid);
+    const c = individuals.get(cid);
+    if (c && !c.famc.includes(_editingId)) c.famc.push(_editingId);
+  }
+
+  _famEditRemovedChil = new Set();
+  _famEditPendingChil = [];
 
   const id = _editingId;
   _editingId = null; _editingType = null;
@@ -2760,6 +3034,12 @@ function cancelEdit() {
   }
   _pendingRelations = [];
   _removedRelations = [];
+  for (const c of _famEditPendingChil) {
+    if (c.isNew) individuals.delete(c.id);
+  }
+  _famEditPendingChil = [];
+  _famEditRemovedChil = new Set();
+  _famEditMarriages   = [];
   if (_isNewRecord) {
     _isNewRecord = false;
     // Discard the stub record that was created for this cancelled new entry
@@ -3101,8 +3381,8 @@ function initGraph3D() {
     // Touch: 1-finger = ROTATE, 2-finger = PAN only (zoom via our pinch handler)
     if (_orbitControls3d.touches) {
       _orbitControls3d.touches = {
-        ONE: THREE.TOUCH.ROTATE,
-        TWO: THREE.TOUCH.PAN,
+        ONE: THREE.TOUCH.PAN,
+        TWO: THREE.TOUCH.ROTATE,
       };
     }
     cam.up.set(0, 1, 0);
@@ -3139,7 +3419,8 @@ function initGraph3D() {
     build3DTimeline();
     update3DNames();
 
-    setTimeout(() => graph3d?.zoomToFit(800, 60), 2500);
+    // Set render orders after the scene has first rendered
+    setTimeout(() => { refresh3D(); graph3d?.zoomToFit(800, 60); }, 2500);
   }, 150);
 }
 
@@ -3185,8 +3466,10 @@ function refresh3D() {
     if (!obj) continue;
     const color = new THREE.Color(compute3DNodeColor(n));
     const inHL = !hasHL || hlSet.has(n.id);
+    obj.renderOrder = 2;
     obj.traverse(child => {
       if (child.isMesh && child.material) {
+        child.renderOrder = 2;
         if (child.material.color) child.material.color.copy(color);
         if (hasHL) {
           child.material.opacity = inHL ? 1.0 : 0.06;
@@ -3220,7 +3503,9 @@ function refresh3D() {
     const tid = typeof l.target === 'object' ? l.target.id : l.target;
     const inHL = !hasHL || (hlSet.has(sid) && hlSet.has(tid));
     const lColor = new THREE.Color(_compute3DLinkColor(l, hasHL));
+    obj.renderOrder = 1;
     obj.traverse(child => {
+      child.renderOrder = 1;
       if (child.material) {
         if (child.material.color) child.material.color.copy(lColor);
         if (hasHL) {
@@ -3322,8 +3607,9 @@ function makeTextSprite3D(drawFn, logicalW, logicalH) {
   ctx.scale(DPR, DPR);
   drawFn(ctx, logicalW, logicalH);
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, sizeAttenuation: true });
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false, sizeAttenuation: true });
   const sprite = new THREE.Sprite(mat);
+  sprite.renderOrder = 3;
   return sprite;
 }
 
@@ -3358,7 +3644,7 @@ function build3DTimeline() {
     graph3d.scene().remove(_timeline3DObj);
     _timeline3DObj = null;
   }
-  if (!sortByTime3D || !_birthYearRange) return;
+  if (!sortByTime3D || !_birthYearRange || !showTimeline3D) return;
 
   const { min: minYr, max: maxYr } = _birthYearRange;
   const span = Math.max(maxYr - minYr, 1);
@@ -3371,15 +3657,18 @@ function build3DTimeline() {
 
   // ── Vertical spine ──
   const spineGeo = new THREE.CylinderGeometry(0.6, 0.6, totalH, 8);
-  const spineMat = new THREE.MeshBasicMaterial({ color: 0x4466bb, transparent: true, opacity: 0.75 });
+  const spineMat = new THREE.MeshBasicMaterial({ color: 0x4466bb, transparent: true, opacity: 0.75,
+    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
   const spine = new THREE.Mesh(spineGeo, spineMat);
+  spine.renderOrder = 0;
   spine.position.set(0, (topY + botY) / 2, 0);
   group.add(spine);
 
   // ── Year ticks + labels ──
   const step = span > 200 ? 50 : span > 80 ? 25 : 10;
   const startYr = Math.ceil(minYr / step) * step;
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide });
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
 
   for (let yr = startYr; yr <= maxYr; yr += step) {
     const y = yearTo3DY(yr); // exact same function → rings sit at node level
@@ -3387,6 +3676,7 @@ function build3DTimeline() {
     // Horizontal ring (torus lying flat)
     const ringGeo = new THREE.TorusGeometry(14, 0.5, 8, 40);
     const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.renderOrder = 0;
     ring.rotation.x = Math.PI / 2;
     ring.position.set(0, y, 0);
     group.add(ring);
@@ -3855,6 +4145,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // 3D: show/hide visual timeline axis (independent of Y stratification)
+  document.getElementById('show-timeline-toggle').addEventListener('change', function () {
+    showTimeline3D = this.checked;
+    build3DTimeline();
+  });
+
   // 3D: show names instead of spheres
   document.getElementById('show-names-3d-toggle').addEventListener('change', function () {
     show3DNames = this.checked;
@@ -4265,8 +4561,16 @@ window.autoSettle        = autoSettle;
 window.resetPhysics      = resetPhysics;
 window.startEdit         = startEdit;
 window.commitIndiEdit    = commitIndiEdit;
-window.commitFamEdit     = commitFamEdit;
-window.cancelEdit        = cancelEdit;
+window.commitFamEdit          = commitFamEdit;
+window.cancelEdit             = cancelEdit;
+window._famEditRemoveChild    = _famEditRemoveChild;
+window._famEditRemovePending  = _famEditRemovePending;
+window._famEditAddChild       = _famEditAddChild;
+window._famEditToggleNewChild = _famEditToggleNewChild;
+window._famEditCreateChild    = _famEditCreateChild;
+window._famEditAddMarr        = _famEditAddMarr;
+window._famEditRemoveMarr     = _famEditRemoveMarr;
+window._famEditToggleDivDate  = _famEditToggleDivDate;
 window.savePreset        = savePreset;
 window.deletePreset      = deletePreset;
 window.applyPreset       = applyPreset;
@@ -4823,7 +5127,7 @@ function _tiApplyActions(actions) {
 
     families.set(famXref, {
       id: famXref, husb: husbId, wife: wifeId, chil: childIds,
-      marr: { date: action.fields['Marriage Date']||'', plac: action.fields['Marriage Place']||'' },
+      marriages: [{ date: action.fields['Marriage Date']||'', plac: action.fields['Marriage Place']||'', types: [] }], div: false, divDate: '',
       div: false,
     });
     report.push({ type:'fam', msg:`${husbName} + ${wifeName} → ${famXref}` });
@@ -4999,7 +5303,7 @@ function _tiParseGedcomForMerge(raw) {
         cur = { id: tag, name:'', sex:'', birth:{date:'',plac:''}, death:{date:'',plac:''}, fams:[], famc:[], note:'' };
         indiMap.set(tag, cur); curType = 'INDI';
       } else if (tag.startsWith('@') && val === 'FAM') {
-        cur = { id: tag, husb:null, wife:null, chil:[], marr:{date:'',plac:''} };
+        cur = { id: tag, husb:null, wife:null, chil:[], marriages:[{date:'',plac:'',types:[]}] };
         famMap.set(tag, cur); curType = 'FAM';
       } else { cur = null; curType = null; }
       continue;
@@ -5031,10 +5335,13 @@ function _tiParseGedcomForMerge(raw) {
         if      (tag === 'HUSB') cur.husb = val;
         else if (tag === 'WIFE') cur.wife = val;
         else if (tag === 'CHIL' && val) cur.chil.push(val);
-        else if (tag === 'MARR') subCtx = 'MARR';
+        else if (tag === 'MARR') { if (!cur.marriages.length) cur.marriages.push({date:'',plac:'',types:[]}); subCtx = 'MARR'; }
       } else if (level === 2 && subCtx === 'MARR') {
-        if      (tag === 'DATE') cur.marr.date = val;
-        else if (tag === 'PLAC') cur.marr.plac = val;
+        const m = cur.marriages[cur.marriages.length - 1];
+        if (m) {
+          if (tag === 'DATE') m.date = val;
+          else if (tag === 'PLAC') m.plac = val;
+        }
       }
     }
   }
@@ -5083,8 +5390,8 @@ function _tiParseGedcomForMerge(raw) {
       if (!spouse?.name) continue;
       p.marriages.push({
         spouseName: spouse.name,
-        date:       fam.marr.date,
-        place:      fam.marr.plac,
+        date:       fam.marriages?.[0]?.date || '',
+        place:      fam.marriages?.[0]?.plac || '',
         children:   fam.chil.map(cid => indiMap.get(cid))
                             .filter(c => c?.name)
                             .map(c => ({ fullName: c.name })),
@@ -7192,7 +7499,7 @@ function _qeCreateFamily(husbId, wifeId, date, place) {
     id: famXref,
     husb: husbId,
     wife: wifeId,
-    marr: { date: date || '', plac: place || '' },
+    marriages: [{ date: date || '', plac: place || '', types: [] }], div: false, divDate: '',
     children: []
   });
 
@@ -7375,7 +7682,7 @@ function _qeLoadSpousesAndChildrenForEdit(indi) {
 
     if (spouseId) {
       const spouse = individuals.get(spouseId);
-      _qeAddSpouseToEditList(spouseId, spouse?.name || '', fam.marr?.date || '', fam.marr?.plac || '');
+      _qeAddSpouseToEditList(spouseId, spouse?.name || '', fam.marriages?.[0]?.date || '', fam.marriages?.[0]?.plac || '');
     }
 
     // Collect children from this family
@@ -7505,8 +7812,8 @@ function _qeSaveParentLinks(childId) {
       id: famId,
       husb: fatherId,
       wife: motherId,
-      marr: { date: '', plac: '' },
-      children: []
+      marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: '',
+      chil: []
     });
 
     // Update parents' fams arrays
@@ -7549,7 +7856,10 @@ function _qeSaveMarriageInfo(indiId) {
 
       const isSpouse = fam.husb === spouseId || fam.wife === spouseId;
       if (isSpouse) {
-        fam.marr = { date: marriageDate || '', plac: marriagePlace || '' };
+        if (!fam.marriages) fam.marriages = [];
+        if (!fam.marriages[0]) fam.marriages[0] = { date: '', plac: '', types: [] };
+        fam.marriages[0].date = marriageDate || '';
+        fam.marriages[0].plac = marriagePlace || '';
         break;
       }
     }
@@ -8160,7 +8470,7 @@ function _acPlaces() {
     if (i.birth.plac) s.add(i.birth.plac);
     if (i.death.plac) s.add(i.death.plac);
   }
-  for (const [, f] of families) if (f.marr.plac) s.add(f.marr.plac);
+  for (const [, f] of families) for (const m of (f.marriages || [])) if (m.plac) s.add(m.plac);
   return [...s].sort();
 }
 function _acSurnames() {

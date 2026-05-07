@@ -17,8 +17,7 @@
   <input type="file" id="file-input" accept=".ged">
   <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
   <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
-  <button id="import-text-btn" onclick="openTextImport()" title="Text-Datei importieren und Änderungen prüfen">&#x1F4C4; Text Import</button>
-  <button id="wizard-btn" onclick="openWizard()" title="Schritt-für-Schritt PDF/Text Import mit manueller Prüfung">&#x1F50D; Wizard Import</button>
+  <button id="import-text-btn" onclick="openTextImport()" title="Text oder GEDCOM importieren und Änderungen prüfen">&#x1F4C4; Import</button>
   <button id="quick-entry-btn" onclick="openQuickEntry()" title="Schnelleingabe für neue Personen und Verknüpfungen">&#x26A1; Schnelleingabe</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
@@ -50,6 +49,10 @@
         <span>Nach Zeit sortieren (3D)</span>
       </label>
       <div id="time-spread-row" style="padding:4px 2px 2px 2px;border-top:none">
+        <label class="sidebar-toggle" style="border-top:none;padding-top:0;margin-bottom:4px">
+          <input type="checkbox" id="show-timeline-toggle" checked>
+          <span>Zeitachse anzeigen</span>
+        </label>
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
           <span>Zeitachsen-Spreizung</span>
           <span id="time-spread-val">500</span>
