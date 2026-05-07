@@ -3261,8 +3261,11 @@ function toggleView() {
     document.getElementById('show-names-3d-row').style.display = 'flex';
     if (!graph3d) initGraph3D();
     else { graph3d.resumeAnimation(); resize3D(); }
-    // If a person is already selected, orbit around them
-    if (selectedIndiId) setTimeout(() => _setOrbitTarget3D(selectedIndiId), 200);
+    // Orbit around selected person, or graph centroid
+    setTimeout(() => {
+      if (selectedIndiId) _setOrbitTarget3D(selectedIndiId);
+      else if (_orbitControls3d) _orbitControls3d.target.copy(_graphCentroid3D());
+    }, 200);
   } else {
     currentView = '2d';
     c3d.style.display = 'none';
@@ -3842,8 +3845,10 @@ function export3DTopDown() {
     const toY = p => (p.y - wy0) * scale + MARGIN;
 
     // Font sizes scale with world→canvas ratio
-    const FONT_NAME = Math.round(_3dFontSize * scale * 0.45);   // matches sprite scale
-    const FONT_YEAR = Math.round(FONT_NAME * 0.72);
+    const FONT_NAME   = Math.round(_3dFontSize * scale * 0.45);   // matches sprite scale
+    const FONT_MAIDEN = Math.round(FONT_NAME * 0.72);
+    const FONT_YEAR   = Math.round(FONT_NAME * 0.72);
+    const LINE_GAP    = Math.round(FONT_NAME * 0.1);
     const PAD_X = Math.round(FONT_NAME * 0.6);
     const PAD_Y = Math.round(FONT_NAME * 0.3);
     const FAM_R  = Math.max(4, Math.round(scale * 1.5));
@@ -3899,6 +3904,7 @@ function export3DTopDown() {
       if (p.n.type !== 'INDI') continue;
       const indi = p.n.data;
       const name = indi.displayName || indi.name || p.n.id;
+      const maidenLine = indi.maidenName ? `geb. ${indi.maidenName}` : '';
       let born = indi.birthYear ? `*${indi.birthYear}` : '';
       if (!born && _estimatedYears?.has(p.n.id)) born = `~${_estimatedYears.get(p.n.id)}`;
       const died = indi.deceased ? '†' + (indi.death.date?.match(/\d{4}/)?.[0] ?? '') : '';
@@ -3906,11 +3912,16 @@ function export3DTopDown() {
 
       tmpCtx.font = `bold ${FONT_NAME}px Arial`;
       const nameW = tmpCtx.measureText(name).width;
+      tmpCtx.font = `italic ${FONT_MAIDEN}px Arial`;
+      const maidenW = maidenLine ? tmpCtx.measureText(maidenLine).width : 0;
       tmpCtx.font = `${FONT_YEAR}px Arial`;
       const yearW = yearLine ? tmpCtx.measureText(yearLine).width : 0;
 
-      const boxW = Math.ceil(Math.max(nameW, yearW)) + PAD_X * 2;
-      const boxH = FONT_NAME + (yearLine ? FONT_YEAR + Math.round(FONT_NAME * 0.15) : 0) + PAD_Y * 2;
+      const boxW = Math.ceil(Math.max(nameW, maidenW, yearW)) + PAD_X * 2;
+      const boxH = FONT_NAME
+        + (maidenLine ? FONT_MAIDEN + LINE_GAP : 0)
+        + (yearLine   ? FONT_YEAR   + LINE_GAP : 0)
+        + PAD_Y * 2;
       const cx = toX(p), cy = toY(p);
       const bx = cx - boxW / 2, by = cy - boxH / 2;
 
@@ -3926,14 +3937,23 @@ function export3DTopDown() {
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
+      let ty = by + PAD_Y;
       ctx.font = `bold ${FONT_NAME}px Arial`;
       ctx.fillStyle = textColor;
-      ctx.fillText(name, cx, by + PAD_Y);
+      ctx.fillText(name, cx, ty);
+      ty += FONT_NAME + LINE_GAP;
+
+      if (maidenLine) {
+        ctx.font = `italic ${FONT_MAIDEN}px Arial`;
+        ctx.fillStyle = textColor + 'cc';
+        ctx.fillText(maidenLine, cx, ty);
+        ty += FONT_MAIDEN + LINE_GAP;
+      }
 
       if (yearLine) {
         ctx.font = `${FONT_YEAR}px Arial`;
         ctx.fillStyle = textColor + 'bb';
-        ctx.fillText(yearLine, cx, by + PAD_Y + FONT_NAME + Math.round(FONT_NAME * 0.15));
+        ctx.fillText(yearLine, cx, ty);
       }
     }
 
@@ -3954,7 +3974,16 @@ function export3DTopDown() {
 // Resize 3D view when window resizes
 window.addEventListener('resize', () => { if (currentView === '3d') resize3D(); });
 
-// ── Orbit target: smoothly animate to a node or back to origin ──
+function _graphCentroid3D() {
+  if (!graph3d) return new THREE.Vector3(0, 0, 0);
+  const nodes = graph3d.graphData().nodes;
+  if (!nodes.length) return new THREE.Vector3(0, 0, 0);
+  let sx = 0, sy = 0, sz = 0;
+  for (const n of nodes) { sx += n.x || 0; sy += n.y || 0; sz += n.z || 0; }
+  return new THREE.Vector3(sx / nodes.length, sy / nodes.length, sz / nodes.length);
+}
+
+// ── Orbit target: smoothly animate to a node or back to graph centroid ──
 function _setOrbitTarget3D(nodeId) {
   if (!_orbitControls3d) return;
   _orbitTrackNodeId = nodeId || null;
@@ -3966,7 +3995,7 @@ function _setOrbitTarget3D(nodeId) {
     const n = gd.nodes.find(nd => nd.id === nodeId);
     if (n) to = new THREE.Vector3(n.x || 0, n.y || 0, n.z || 0);
   }
-  if (!to) to = new THREE.Vector3(0, 0, 0);
+  if (!to) to = _graphCentroid3D();
   if (from.distanceTo(to) < 0.5) return; // already there
   _orbitTargetAnim = { from, to, start: performance.now(), duration: 600 };
 }
