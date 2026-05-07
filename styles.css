@@ -382,22 +382,21 @@ body {
   font-size: 12px;
   line-height: 1.5;
 }
+.detail-fam-card {
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.detail-fam-card:hover {
+  background: #1a4a80;
+  border-color: #4a8abf;
+}
 .clickable-name {
   color: #7ac;
   cursor: pointer;
 }
 .clickable-name:hover { text-decoration: underline; }
 
-.clickable-fam-badge {
-  color: #9b59b6;
-  cursor: pointer;
-  font-size: 10px;
-  vertical-align: middle;
-  margin-left: 4px;
-  opacity: 0.7;
-  transition: opacity 0.15s;
-}
-.clickable-fam-badge:hover { opacity: 1; }
 
 #detail-buttons {
   display: flex;

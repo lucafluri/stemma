@@ -1601,18 +1601,19 @@ function showIndiDetail(id) {
 
   // Parents
   if (indi.famc.length) {
-    const parentLines = [];
+    html += `<div class="detail-section"><div class="detail-label">Eltern</div>`;
     for (const famId of indi.famc) {
       const fam = families.get(famId);
       if (!fam) continue;
       const ps = [fam.husb, fam.wife].filter(Boolean).map(pid => {
         const p = individuals.get(pid);
-        return p ? `<span class="clickable-name" onclick="showIndiDetail('${escAttr(pid)}')">${escHtml(p.name)}</span>` : escHtml(pid);
+        return p
+          ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escAttr(pid)}')">${escHtml(p.name)}</span>`
+          : escHtml(pid);
       }).join(' &amp; ');
-      const famLink = `<span class="clickable-fam-badge" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">&#x25C6;</span>`;
-      if (ps || famLink) parentLines.push((ps || '') + ' ' + famLink);
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">${ps || '<em>unbekannt</em>'}</div>`;
     }
-    if (parentLines.length) html += row('Eltern', parentLines.join('<br>'));
+    html += `</div>`;
   }
 
   // Marriages / partners
@@ -1623,13 +1624,14 @@ function showIndiDetail(id) {
       if (!fam) continue;
       const spId = fam.husb === id ? fam.wife : fam.husb;
       const sp = spId ? individuals.get(spId) : null;
-      const spName = sp ? `<span class="clickable-name" onclick="showIndiDetail('${escAttr(spId)}')">${escHtml(sp.name)}</span>` : (spId ? escHtml(spId) : '<em>unbekannt</em>');
+      const spName = sp
+        ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escAttr(spId)}')">${escHtml(sp.name)}</span>`
+        : (spId ? escHtml(spId) : '<em>unbekannt</em>');
       const m0 = fam.marriages?.[0];
       const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
       const dInfo = fam.div ? ` <span style="color:#e74c3c">[Geschieden${fam.divDate ? ' ' + escHtml(fam.divDate) : ''}]</span>` : '';
       const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? 'Kind' : 'Kinder'}</span>` : '';
-      const famLink = `<span class="clickable-fam-badge" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">&#x25C6;</span>`;
-      html += `<div class="detail-marriage">${spName}${famLink}${mInfo}${dInfo}${kids}</div>`;
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">${spName}${mInfo}${dInfo}${kids}</div>`;
     }
     html += `</div>`;
   }
