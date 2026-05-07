@@ -3383,8 +3383,8 @@ function initGraph3D() {
     // Touch: 1-finger = ROTATE, 2-finger = PAN only (zoom via our pinch handler)
     if (_orbitControls3d.touches) {
       _orbitControls3d.touches = {
-        ONE: THREE.TOUCH.PAN,
-        TWO: THREE.TOUCH.ROTATE,
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.PAN,
       };
     }
     cam.up.set(0, 1, 0);
