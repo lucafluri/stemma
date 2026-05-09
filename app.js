@@ -288,186 +288,14 @@ function _initTouchDragGuard() {
 function wasTouchDrag() { return _touchDragged; }
 
 // ═══════════════════════════════════════════════════════════════
-// 1. GEDCOM PARSER
+// 1. GEDCOM PARSER  (delegates to GEDCOMModule in gedcom.js)
 // ═══════════════════════════════════════════════════════════════
 function parseGEDCOM(raw) {
-  // Strip UTF-8 BOM if present
-  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-
+  const result = GEDCOMModule.parseGEDCOM(raw);
   individuals.clear();
   families.clear();
-
-  const lines = raw.split(/\r?\n/);
-
-  let cur     = null;
-  let curType = null;   // 'INDI' | 'FAM' | null
-  let subCtx  = null;  // 'BIRT' | 'DEAT' | 'MARR' | null
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    // GEDCOM line: level tag [value]
-    const m = line.match(/^(\d+)\s+(\S+)\s*(.*)/);
-    if (!m) continue;
-
-    const level = +m[1];
-    const tag   = m[2];
-    const val   = m[3].trim();
-
-    // Level 0 — new record
-    if (level === 0) {
-      subCtx = null;
-      if (tag.startsWith('@') && val === 'INDI') {
-        cur = {
-          id: tag,
-          name: '', givn: '', surn: '', maidenName: '',
-          sex: 'U',
-          birth: { date: '', plac: '' },
-          death: { date: '', plac: '', caus: '' },
-          deceased: false,
-          birthYear: null,
-          famc: [], fams: [],
-          occu: '', note: '',
-          displayName: ''
-        };
-        individuals.set(tag, cur);
-        curType = 'INDI';
-      } else if (tag.startsWith('@') && val === 'FAM') {
-        cur = {
-          id: tag,
-          husb: null, wife: null, chil: [],
-          marriages: [], div: false, divDate: ''
-        };
-        families.set(tag, cur);
-        curType = 'FAM';
-      } else {
-        cur = null; curType = null;
-      }
-      continue;
-    }
-
-    if (!cur) continue;
-
-    if (curType === 'INDI') {
-      if (level === 1) {
-        subCtx = null;
-        switch (tag) {
-          case 'NAME':
-            if (!cur.name) {
-              // First NAME record — primary name like "Luca /Fluri/" or "/Kuhn/"
-              if (val && val !== '//' && val.trim()) {
-                const clean = val.replace(/\//g, '').replace(/\s+/g, ' ').trim();
-                if (clean) {
-                  cur.name = clean;
-                  const sm = val.match(/\/([^/]+)\//);
-                  if (sm) cur.surn = sm[1].trim();
-                  const gm = val.match(/^([^/]*)\s*\//);
-                  if (gm) cur.givn = gm[1].trim();
-                }
-              }
-              subCtx = 'NAME';
-            } else if (!cur.maidenName) {
-              // Second NAME record — treat as maiden/birth name
-              const sm2 = val.match(/\/([^/]+)\//);
-              cur.maidenName = sm2 ? sm2[1].trim() : val.replace(/\//g, '').trim();
-              subCtx = 'NAME2';
-            }
-            break;
-          case '_MARN': if (val && !cur.maidenName) cur.maidenName = val; break;
-          case 'SEX':  cur.sex = val; break;
-          case 'BIRT': subCtx = 'BIRT'; break;
-          case 'DEAT':
-            subCtx = 'DEAT';
-            cur.deceased = true;
-            break;
-          case 'FAMC': if (val) cur.famc.push(val); break;
-          case 'FAMS': if (val) cur.fams.push(val); break;
-          case 'OCCU': cur.occu = val; break;
-          case 'NOTE': cur.note = val; break;
-        }
-      } else if (level === 2) {
-        switch (subCtx) {
-          case 'BIRT':
-            if (tag === 'DATE') {
-              cur.birth.date = val;
-              const ym = val.match(/\b(\d{4})\b/);
-              if (ym) cur.birthYear = +ym[1];
-            } else if (tag === 'PLAC') cur.birth.plac = val;
-            break;
-          case 'DEAT':
-            if (tag === 'DATE') cur.death.date = val;
-            else if (tag === 'PLAC') cur.death.plac = val;
-            else if (tag === 'CAUS') cur.death.caus = val;
-            break;
-          case 'NAME':
-            if (tag === 'GIVN') cur.givn = cur.givn || val;
-            else if (tag === 'SURN') cur.surn = cur.surn || val;
-            else if (tag === 'CONT') cur.note += '\n' + val;
-            break;
-          case 'NAME2':
-            if (tag === 'SURN') cur.maidenName = val;  // explicit SURN beats parsed value
-            break;
-          default:
-            if (tag === 'GIVN' && !cur.givn) cur.givn = val;
-            else if (tag === 'SURN' && !cur.surn) cur.surn = val;
-            else if (tag === 'CONT') cur.note += '\n' + val;
-        }
-      } else if (level === 3 && tag === 'CONT') {
-        cur.note += '\n' + val;
-      }
-
-    } else if (curType === 'FAM') {
-      if (level === 1) {
-        subCtx = null;
-        switch (tag) {
-          case 'HUSB': cur.husb = val; break;
-          case 'WIFE': cur.wife = val; break;
-          case 'CHIL': if (val) cur.chil.push(val); break;
-          case 'MARR': cur.marriages.push({ date: '', plac: '', types: [] }); subCtx = 'MARR'; break;
-          case 'DIV':  cur.div = true; subCtx = 'DIV'; break;
-        }
-      } else if (level === 2) {
-        if (subCtx === 'MARR') {
-          const m = cur.marriages[cur.marriages.length - 1];
-          if (m) {
-            if (tag === 'DATE') m.date = val;
-            else if (tag === 'PLAC') m.plac = val;
-            else if (tag === 'TYPE') m.types = val.split(',').map(s => s.trim()).filter(Boolean);
-          }
-        } else if (subCtx === 'DIV') {
-          if (tag === 'DATE') cur.divDate = val;
-        }
-      }
-    }
-  }
-
-  // Post-process individuals
-  for (const [id, indi] of individuals) {
-    // Fallback name
-    if (!indi.name) {
-      indi.name = id.replace(/@/g, '');
-    }
-    // Fallback given/surname if only one part parsed
-    if (!indi.surn && indi.name) {
-      const parts = indi.name.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        indi.surn = parts[parts.length - 1];
-        indi.givn = parts.slice(0, -1).join(' ');
-      }
-    }
-    // Display name (shorter)
-    if (indi.givn && indi.surn) {
-      indi.displayName = indi.givn + ' ' + indi.surn;
-    } else {
-      indi.displayName = indi.name;
-    }
-    if (indi.displayName.length > 24) {
-      indi.displayName = indi.givn
-        ? indi.givn + (indi.surn ? ' ' + indi.surn[0] + '.' : '')
-        : indi.displayName.slice(0, 22) + '…';
-    }
-  }
+  for (const [k, v] of result.individuals) individuals.set(k, v);
+  for (const [k, v] of result.families)    families.set(k, v);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2154,96 +1982,70 @@ function escAttr(s) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GEDCOM SERIALIZER + DOWNLOAD
+// GEDCOM SERIALIZER + DOWNLOAD  (delegates to GEDCOMModule)
 // ═══════════════════════════════════════════════════════════════
 function serializeGEDCOM() {
-  const lines = [];
+  return GEDCOMModule.serializeGEDCOM(individuals, families);
+}
 
-  lines.push('0 HEAD');
-  lines.push('1 SOUR Stammbaum Vis');
-  lines.push('1 GEDC');
-  lines.push('2 VERS 5.5.1');
-  lines.push('2 FORM LINEAGE-LINKED');
-  lines.push('1 CHAR UTF-8');
+function _downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-  for (const [id, i] of individuals) {
-    lines.push(`0 ${id} INDI`);
-
-    // NAME line: "Givn /Surn/" or just "/Surn/" or givn
-    if (i.givn || i.surn) {
-      const nameLine = (i.givn ? i.givn + ' ' : '') + '/' + (i.surn || '') + '/';
-      lines.push(`1 NAME ${nameLine}`);
-      if (i.givn) lines.push(`2 GIVN ${i.givn}`);
-      if (i.surn) lines.push(`2 SURN ${i.surn}`);
-    } else if (i.name) {
-      lines.push(`1 NAME ${i.name}`);
-    }
-
-    if (i.maidenName) lines.push(`1 _MARN ${i.maidenName}`);
-    if (i.sex && i.sex !== 'U') lines.push(`1 SEX ${i.sex}`);
-
-    if (i.birth.date || i.birth.plac) {
-      lines.push('1 BIRT');
-      if (i.birth.date) lines.push(`2 DATE ${i.birth.date}`);
-      if (i.birth.plac) lines.push(`2 PLAC ${i.birth.plac}`);
-    }
-
-    if (i.deceased || i.death.date || i.death.plac || i.death.caus) {
-      if (i.death.date || i.death.plac || i.death.caus) {
-        lines.push('1 DEAT');
-        if (i.death.date) lines.push(`2 DATE ${i.death.date}`);
-        if (i.death.plac) lines.push(`2 PLAC ${i.death.plac}`);
-        if (i.death.caus) lines.push(`2 CAUS ${i.death.caus}`);
-      } else {
-        lines.push('1 DEAT Y');
-      }
-    }
-
-    for (const famId of i.famc) lines.push(`1 FAMC ${famId}`);
-    for (const famId of i.fams) lines.push(`1 FAMS ${famId}`);
-
-    if (i.occu) lines.push(`1 OCCU ${i.occu}`);
-
-    if (i.note) {
-      const noteLines = i.note.split('\n');
-      lines.push(`1 NOTE ${noteLines[0]}`);
-      for (let k = 1; k < noteLines.length; k++) lines.push(`2 CONT ${noteLines[k]}`);
-    }
-  }
-
-  for (const [id, f] of families) {
-    lines.push(`0 ${id} FAM`);
-    if (f.husb) lines.push(`1 HUSB ${f.husb}`);
-    if (f.wife) lines.push(`1 WIFE ${f.wife}`);
-    for (const cid of f.chil) lines.push(`1 CHIL ${cid}`);
-    for (const m of (f.marriages || [])) {
-      if (!m.date && !m.plac && !m.types?.length) continue;
-      lines.push('1 MARR');
-      if (m.date) lines.push(`2 DATE ${m.date}`);
-      if (m.plac) lines.push(`2 PLAC ${m.plac}`);
-      if (m.types?.length) lines.push(`2 TYPE ${m.types.join(', ')}`);
-    }
-    if (f.div) {
-      lines.push('1 DIV Y');
-      if (f.divDate) lines.push(`2 DATE ${f.divDate}`);
-    }
-  }
-
-  lines.push('0 TRLR');
-  return lines.join('\r\n');
+function _baseFilename() {
+  return (window._gedcomFilename || 'stammbaum').replace(/\.\w+$/i, '');
 }
 
 function downloadGEDCOM() {
   const text = serializeGEDCOM();
-  const blob = new Blob(['﻿' + text], { type: 'text/plain;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  const base = (window._gedcomFilename || 'stammbaum').replace(/\.ged$/i, '');
-  a.href     = url;
-  a.download = base + '_edited.ged';
-  a.click();
-  URL.revokeObjectURL(url);
+  _downloadBlob('﻿' + text, _baseFilename() + '_edited.ged', 'text/plain;charset=utf-8');
   _setDirty(false);
+}
+
+function downloadJSON() {
+  const text = GEDCOMModule.exportJSON(individuals, families);
+  _downloadBlob(text, _baseFilename() + '.famtree.json', 'application/json;charset=utf-8');
+}
+
+function downloadYAML() {
+  const text = GEDCOMModule.exportYAML(individuals, families);
+  _downloadBlob(text, _baseFilename() + '.famtree.yaml', 'text/yaml;charset=utf-8');
+}
+
+function loadFamtreeFile(file) {
+  if (!file) return;
+  const ext = file.name.toLowerCase();
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      let result;
+      if (ext.endsWith('.json')) {
+        result = GEDCOMModule.importJSON(evt.target.result);
+      } else if (ext.endsWith('.yaml') || ext.endsWith('.yml')) {
+        result = GEDCOMModule.importYAML(evt.target.result);
+      } else {
+        alert('Unbekanntes Format. Bitte .json oder .yaml wählen.');
+        return;
+      }
+      individuals.clear();
+      families.clear();
+      for (const [k, v] of result.individuals) individuals.set(k, v);
+      for (const [k, v] of result.families)    families.set(k, v);
+      window._gedcomFilename = file.name;
+      _fullRebuildGraph();
+      document.getElementById('status').textContent =
+        `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien geladen`;
+    } catch (e) {
+      alert('Fehler beim Laden: ' + e.message);
+    }
+  };
+  reader.readAsText(file, 'utf-8');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4570,6 +4372,9 @@ window.savePreset        = savePreset;
 window.deletePreset      = deletePreset;
 window.applyPreset       = applyPreset;
 window.downloadGEDCOM    = downloadGEDCOM;
+window.downloadJSON      = downloadJSON;
+window.downloadYAML      = downloadYAML;
+window.loadFamtreeFile   = loadFamtreeFile;
 window.export3DTopDown   = export3DTopDown;
 window.toggleNodeDrag    = toggleNodeDrag;
 window.openRelationTool  = openRelationTool;
