@@ -421,6 +421,13 @@ body {
 .highlight-btn:hover { background: #1a5a9a; color: #e0e0e0; }
 .highlight-btn.active { background: #e94560; color: #fff; border-color: #e94560; }
 .highlight-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#hl-count-info {
+  font-size: 11px;
+  color: #7ac;
+  text-align: center;
+  padding: 3px 4px;
+  letter-spacing: 0.02em;
+}
 
 #close-panel-btn {
   position: absolute;
