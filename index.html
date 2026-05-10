@@ -13,14 +13,17 @@
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Menü öffnen">&#9776;</button>
   <h1>&#127795; Stammbaum</h1>
-  <button id="load-btn" onclick="document.getElementById('file-input').click()">GEDCOM laden</button>
-  <input type="file" id="file-input" accept=".ged">
-  <input type="file" id="famtree-input" accept=".json,.yaml,.yml" style="display:none" onchange="loadFamtreeFile(this.files[0])">
+  <button id="load-btn" onclick="document.getElementById('file-input').click()">Laden</button>
+  <input type="file" id="file-input" accept=".ged,.json,.yaml,.yml">
   <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
-  <button id="dl-btn" onclick="downloadGEDCOM()" title="Geänderte GEDCOM-Datei herunterladen">&#x2B07; Speichern</button>
-  <button id="dl-json-btn" onclick="downloadJSON()" title="Als JSON exportieren">&#x2B07; JSON</button>
-  <button id="dl-yaml-btn" onclick="downloadYAML()" title="Als YAML exportieren">&#x2B07; YAML</button>
-  <button id="load-famtree-btn" onclick="document.getElementById('famtree-input').click()" title="JSON oder YAML Datei laden">&#x1F4C2; JSON/YAML</button>
+  <div id="dl-wrap" style="display:none">
+    <button id="dl-btn" onclick="downloadGEDCOM()" title="Als GEDCOM speichern">&#x2B07; Speichern</button><button id="dl-format-btn" onclick="toggleExportMenu(event)" title="Exportformat wählen">&#x25BE;</button>
+    <div id="export-dropdown">
+      <button onclick="downloadGEDCOM();closeExportMenu()">GEDCOM (.ged)</button>
+      <button onclick="downloadJSON();closeExportMenu()">JSON (.json)</button>
+      <button onclick="downloadYAML();closeExportMenu()">YAML (.yaml)</button>
+    </div>
+  </div>
   <button id="import-text-btn" onclick="openTextImport()" title="Text oder GEDCOM importieren und Änderungen prüfen">&#x1F4C4; Import</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
