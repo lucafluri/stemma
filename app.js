@@ -25,6 +25,8 @@ let currentZoom  = 1;
 let selectedIndiId = null;    // currently shown in detail panel
 let hlMode = null;            // null | 'ancestors' | 'descendants' | 'both'
 let hlSet  = new Set();       // highlighted node ids
+let _hlAncestorCount   = 0;  // individual ancestors (excl. self)
+let _hlDescendantCount = 0;  // individual descendants (excl. self)
 
 let surnameColors  = new Map();   // surname -> color string
 let surnameEnabled = new Map();   // surname -> bool
@@ -1602,6 +1604,12 @@ function collectDescendants(id, visited = new Set(), isRoot = true) {
   return visited;
 }
 
+function _countPeople(idSet) {
+  let n = 0;
+  for (const id of idSet) if (individuals.has(id)) n++;
+  return n;
+}
+
 function highlightMode(mode) {
   if (!selectedIndiId) return;
 
@@ -1613,8 +1621,21 @@ function highlightMode(mode) {
 
   hlMode = mode;
   hlSet = new Set();
-  if (mode === 'ancestors' || mode === 'both') collectAncestors(selectedIndiId, hlSet);
-  if (mode === 'descendants' || mode === 'both') collectDescendants(selectedIndiId, hlSet);
+  _hlAncestorCount   = 0;
+  _hlDescendantCount = 0;
+
+  if (mode === 'ancestors' || mode === 'both') {
+    const aSet = new Set();
+    collectAncestors(selectedIndiId, aSet);
+    aSet.forEach(id => hlSet.add(id));
+    _hlAncestorCount = _countPeople(aSet) - 1; // -1 to exclude self
+  }
+  if (mode === 'descendants' || mode === 'both') {
+    const dSet = new Set();
+    collectDescendants(selectedIndiId, dSet);
+    dSet.forEach(id => hlSet.add(id));
+    _hlDescendantCount = _countPeople(dSet) - 1; // -1 to exclude self
+  }
 
   applyHighlight();
   updateHLButtons();
@@ -1645,7 +1666,9 @@ function applyHighlight() {
 
 function resetHighlight() {
   hlMode = null;
-  hlSet = new Set();
+  hlSet  = new Set();
+  _hlAncestorCount   = 0;
+  _hlDescendantCount = 0;
   applyHighlight();
   updateHLButtons();
   refreshNodeColors();
@@ -1688,14 +1711,48 @@ function _applyFamNodeSize() {
 
 function updateHLButtons() {
   const hasSource = selectedIndiId != null;
-  ['btn-ancestors', 'btn-descendants', 'btn-both'].forEach(bid => {
-    const btn = document.getElementById(bid);
+
+  // Reset labels and active state
+  const btnA = document.getElementById('btn-ancestors');
+  const btnD = document.getElementById('btn-descendants');
+  const btnB = document.getElementById('btn-both');
+  [btnA, btnD, btnB].forEach(btn => {
     btn.disabled = !hasSource;
     btn.classList.remove('active');
   });
-  if (hlMode === 'ancestors')   document.getElementById('btn-ancestors').classList.add('active');
-  if (hlMode === 'descendants') document.getElementById('btn-descendants').classList.add('active');
-  if (hlMode === 'both')        document.getElementById('btn-both').classList.add('active');
+  btnA.textContent = '↑ Vorfahren';
+  btnD.textContent = '↓ Nachfahren';
+  btnB.textContent = '↕ Beide';
+
+  // Apply counts and active class for current mode
+  if (hlMode === 'ancestors') {
+    btnA.textContent = `↑ Vorfahren (${_hlAncestorCount})`;
+    btnA.classList.add('active');
+  } else if (hlMode === 'descendants') {
+    btnD.textContent = `↓ Nachfahren (${_hlDescendantCount})`;
+    btnD.classList.add('active');
+  } else if (hlMode === 'both') {
+    btnA.textContent = `↑ Vorfahren (${_hlAncestorCount})`;
+    btnD.textContent = `↓ Nachfahren (${_hlDescendantCount})`;
+    btnB.classList.add('active');
+  }
+
+  // Summary line below the buttons
+  const info = document.getElementById('hl-count-info');
+  if (!info) return;
+  if (!hlMode) {
+    info.textContent = '';
+    info.style.display = 'none';
+  } else if (hlMode === 'ancestors') {
+    info.textContent = `${_hlAncestorCount} Vorfahren hervorgehoben`;
+    info.style.display = '';
+  } else if (hlMode === 'descendants') {
+    info.textContent = `${_hlDescendantCount} Nachfahren hervorgehoben`;
+    info.style.display = '';
+  } else if (hlMode === 'both') {
+    info.textContent = `${_hlAncestorCount} Vorfahren · ${_hlDescendantCount} Nachfahren`;
+    info.style.display = '';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
