@@ -1811,7 +1811,7 @@ document.addEventListener('click', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 13. FILE LOADER — entry point
+// 13. FILE LOADER — entry point (.ged / .json / .yaml / .yml)
 // ═══════════════════════════════════════════════════════════════
 document.getElementById('file-input').addEventListener('change', function (e) {
   const file = e.target.files[0];
@@ -1823,7 +1823,20 @@ document.getElementById('file-input').addEventListener('change', function (e) {
   const reader = new FileReader();
   reader.onload = evt => {
     try {
-      parseGEDCOM(evt.target.result);
+      const ext = file.name.toLowerCase();
+      if (ext.endsWith('.json')) {
+        const result = GEDCOMModule.importJSON(evt.target.result);
+        individuals.clear(); families.clear();
+        result.individuals.forEach((v, k) => individuals.set(k, v));
+        result.families.forEach((v, k) => families.set(k, v));
+      } else if (ext.endsWith('.yaml') || ext.endsWith('.yml')) {
+        const result = GEDCOMModule.importYAML(evt.target.result);
+        individuals.clear(); families.clear();
+        result.individuals.forEach((v, k) => individuals.set(k, v));
+        result.families.forEach((v, k) => families.set(k, v));
+      } else {
+        parseGEDCOM(evt.target.result);
+      }
 
       const iCount = individuals.size;
       const fCount = families.size;
@@ -1843,7 +1856,7 @@ document.getElementById('file-input').addEventListener('change', function (e) {
 
       _firstLoad = true;
       buildAndRunSimulation();
-      document.getElementById('dl-btn').style.display = 'inline-block';
+      document.getElementById('dl-wrap').style.display = 'flex';
       document.getElementById('center-view-btn').style.display = 'inline-block';
       document.getElementById('center-view-btn').disabled = false;
       document.getElementById('center-person-btn').style.display = 'inline-block';
@@ -2018,34 +2031,17 @@ function downloadYAML() {
   _downloadBlob(text, _baseFilename() + '.famtree.yaml', 'text/yaml;charset=utf-8');
 }
 
-function loadFamtreeFile(file) {
-  if (!file) return;
-  const ext = file.name.toLowerCase();
-  const reader = new FileReader();
-  reader.onload = evt => {
-    try {
-      let result;
-      if (ext.endsWith('.json')) {
-        result = GEDCOMModule.importJSON(evt.target.result);
-      } else if (ext.endsWith('.yaml') || ext.endsWith('.yml')) {
-        result = GEDCOMModule.importYAML(evt.target.result);
-      } else {
-        alert('Unbekanntes Format. Bitte .json oder .yaml wählen.');
-        return;
-      }
-      individuals.clear();
-      families.clear();
-      for (const [k, v] of result.individuals) individuals.set(k, v);
-      for (const [k, v] of result.families)    families.set(k, v);
-      window._gedcomFilename = file.name;
-      _fullRebuildGraph();
-      document.getElementById('status').textContent =
-        `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien geladen`;
-    } catch (e) {
-      alert('Fehler beim Laden: ' + e.message);
-    }
-  };
-  reader.readAsText(file, 'utf-8');
+// ── Export dropdown ───────────────────────────────────────────
+function toggleExportMenu(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('export-dropdown');
+  const open = dd.classList.toggle('open');
+  if (open) {
+    document.addEventListener('click', closeExportMenu, { once: true });
+  }
+}
+function closeExportMenu() {
+  document.getElementById('export-dropdown').classList.remove('open');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2482,7 +2478,7 @@ function commitIndiEdit() {
 
   _isNewRecord = false;
   if (needsRebuild) {
-    document.getElementById('dl-btn').style.display = 'inline-block';
+    document.getElementById('dl-wrap').style.display = 'flex';
     document.getElementById('center-view-btn').style.display = 'inline-block';
     document.getElementById('center-view-btn').disabled = false;
     document.getElementById('center-person-btn').style.display = 'inline-block';
@@ -4374,7 +4370,8 @@ window.applyPreset       = applyPreset;
 window.downloadGEDCOM    = downloadGEDCOM;
 window.downloadJSON      = downloadJSON;
 window.downloadYAML      = downloadYAML;
-window.loadFamtreeFile   = loadFamtreeFile;
+window.toggleExportMenu  = toggleExportMenu;
+window.closeExportMenu   = closeExportMenu;
 window.export3DTopDown   = export3DTopDown;
 window.toggleNodeDrag    = toggleNodeDrag;
 window.openRelationTool  = openRelationTool;
