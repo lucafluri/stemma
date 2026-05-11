@@ -405,10 +405,11 @@
     const s = String(v);
     const needsQuote =
       s === '' ||
-      /[:\[\]{},#&*!|>'"\\%@`]/.test(s) ||
+      /[:\[\]{},#&*!|>'"\\%@`\n\r]/.test(s) ||
       /^\s|\s$/.test(s) ||
       /^[-?]/.test(s) ||
-      /^(true|false|null|yes|no|on|off)$/i.test(s);
+      /^(true|false|null|yes|no|on|off)$/i.test(s) ||
+      /^\d+(\.\d+)?$/.test(s);
     if (!needsQuote) return s;
     return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '') + '"';
   }
