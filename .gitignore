@@ -2,3 +2,4 @@
 scripts/
 .claude/settings.local.json
 CLAUDE.md
+config.local.js

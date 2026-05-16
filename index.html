@@ -13,8 +13,7 @@
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Menü öffnen">&#9776;</button>
   <h1>&#127795; Stammbaum</h1>
-  <button id="load-btn" onclick="document.getElementById('file-input').click()">Laden</button>
-  <input type="file" id="file-input" accept=".ged,.json,.yaml,.yml">
+  <button id="import-btn" onclick="openImport()" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; Import</button>
   <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
   <div id="dl-wrap" style="display:none">
     <button id="dl-btn" onclick="downloadGEDCOM()" title="Als GEDCOM speichern">&#x2B07; Speichern</button><button id="dl-format-btn" onclick="toggleExportMenu(event)" title="Exportformat wählen">&#x25BE;</button>
@@ -24,7 +23,6 @@
       <button onclick="downloadYAML();closeExportMenu()">YAML (.yaml)</button>
     </div>
   </div>
-  <button id="import-text-btn" onclick="openTextImport()" title="Text oder GEDCOM importieren und Änderungen prüfen">&#x1F4C4; Import</button>
   <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
   <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
   <button id="relation-tool-btn" onclick="openRelationTool()" title="Verwandtschaft berechnen" disabled>&#x1F517; Verwandtschaft</button>
@@ -381,26 +379,55 @@
 </div>
 <div id="tooltip"></div>
 
-<!-- ── Text Import Modal ───────────────────────────────────────────────── -->
-<div id="import-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Text Import">
+<!-- ── Unified Import Modal ────────────────────────────────────────────── -->
+<div id="import-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Import">
   <div id="import-modal-backdrop" onclick="closeTextImport()"></div>
   <div id="import-modal-panel">
     <div id="import-modal-header">
-      <h2>&#x1F4C4; Text Import</h2>
+      <h2>&#x1F4E5; Import</h2>
       <button id="import-close-btn" onclick="closeTextImport()" title="Schliessen">&#x2715;</button>
     </div>
 
     <!-- Step 1: Input -->
     <div id="import-step-input">
-      <p class="import-hint">Lade eine Textdatei (aus PDF exportiert), eine strukturierte JSON-Datei (wie <code>*_structured.json</code>), oder füge den Text direkt ein. Erwartet wird englischer Genealogietext mit Mustern wie <i>«was born on … married … son/daughter of …»</i>.</p>
-      <div class="import-file-row">
-        <label class="import-file-label" for="import-file-input">&#x1F4C2; Datei wählen</label>
-        <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged" onchange="handleImportFileSelect(event)">
-        <span id="import-file-name" class="import-file-name-lbl">Keine Datei gewählt</span>
+      <p class="import-hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR (offline) gelesen; bei Bedarf steht KI als Fallback bereit.</p>
+
+      <div id="import-drop-zone" ondragover="_imDragOver(event)" ondragleave="_imDragLeave(event)" ondrop="_imDrop(event)" onclick="document.getElementById('import-file-input').click()">
+        <div id="import-drop-label">&#x1F4C2; Datei ablegen, klicken zum Wählen, oder Strg+V zum Einfügen</div>
+        <div id="import-drop-filename" style="display:none"></div>
+        <img id="import-image-preview" style="display:none" alt="Vorschau">
       </div>
+      <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged,.yaml,.yml,image/jpeg,image/png,image/gif,image/webp" onchange="handleImportFileSelect(event)" style="display:none">
+      <span id="import-file-name" style="display:none"></span>
+
       <textarea id="import-text-area" placeholder="…oder Text hier einfügen"></textarea>
+
+      <!-- Image-only options -->
+      <div id="import-image-options" style="display:none">
+        <button class="import-action-btn" onclick="runImportOcr()" id="import-ocr-btn">&#x1F50D; OCR (Tesseract)</button>
+        <button class="import-action-btn" onclick="runImportAi()" id="import-ai-btn">&#x1F916; KI-Fallback</button>
+      </div>
+      <div id="import-ocr-status" class="import-ocr-status"></div>
+
+      <!-- AI key (only shown when AI fallback is used) -->
+      <div id="import-ai-key-row" style="display:none">
+        <label for="ai-api-key-input">API Key</label>
+        <input type="password" id="ai-api-key-input" placeholder="sk-ant-… (oder config.local.js)" autocomplete="off" spellcheck="false">
+        <button onclick="_aiToggleKeyVisibility()" title="Anzeigen">&#x1F441;</button>
+        <button onclick="_aiSaveKey()" title="Speichern">&#x1F4BE;</button>
+        <select id="ai-model-select">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+        </select>
+        <span id="ai-key-status"></span>
+      </div>
+
+      <div id="import-error-msg" style="display:none"></div>
+
       <div class="import-step-footer">
-        <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()">&#x1F50D; Analysieren</button>
+        <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()" id="import-parse-btn">&#x1F50D; Analysieren &amp; zusammenführen</button>
+        <button class="import-action-btn" onclick="runImportAi('text')" id="import-ai-text-btn" title="Text per KI in strukturierte Daten umwandeln">&#x1F916; KI-Analyse</button>
+        <button class="import-action-btn" onclick="importReplaceDataset()" id="import-replace-btn" style="display:none" title="Aktuelle Daten komplett ersetzen">&#x21BB; Ersetzen</button>
         <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
       </div>
     </div>
@@ -684,171 +711,8 @@
   </div>
 </div>
 
-<!-- ── Step-by-Step Wizard Modal ───────────────────────────────────────────────── -->
-<div id="wizard-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Schritt-für-Schritt Import">
-  <div id="wizard-modal-backdrop" onclick="closeWizard()"></div>
-  <div id="wizard-modal-panel">
-    <div id="wizard-modal-header">
-      <h2>&#x1F4C4; Schritt-für-Schritt Import</h2>
-      <button id="wizard-close-btn" onclick="closeWizard()" title="Schliessen">&#x2715;</button>
-    </div>
 
-    <!-- Step 1: Load Text -->
-    <div id="wizard-step-load">
-      <div id="wizard-progress-bar">
-        <div id="wizard-progress-fill"></div>
-        <div id="wizard-progress-text">Schritt 1/3: Text laden</div>
-      </div>
-      <p class="wizard-hint">Lade eine Textdatei (aus PDF exportiert) oder füge den Text direkt ein. Jeder Eintrag wird einzeln geprüft.</p>
-      <div class="wizard-file-row">
-        <label class="wizard-file-label" for="wizard-file-input">&#x1F4C2; Datei wählen</label>
-        <input type="file" id="wizard-file-input" accept=".txt,.text" onchange="handleWizardFileSelect(event)">
-        <span id="wizard-file-name">Keine Datei gewählt</span>
-      </div>
-      <textarea id="wizard-text-area" placeholder="…oder Text hier einfügen"></textarea>
-      <div class="wizard-footer">
-        <button class="wizard-btn wizard-btn--primary" onclick="wizardParseText()">&#x1F50D; Text analysieren</button>
-        <button class="wizard-btn" onclick="closeWizard()">Abbrechen</button>
-      </div>
-    </div>
-
-    <!-- Step 2: Review Entry -->
-    <div id="wizard-step-review" style="display:none">
-      <div id="wizard-progress-bar">
-        <div id="wizard-progress-fill"></div>
-        <div id="wizard-progress-text">Schritt 2/3: Einträge prüfen</div>
-      </div>
-
-      <div id="wizard-entry-counter">
-        <span>Eintrag <span id="wizard-current-idx">1</span> von <span id="wizard-total-count">0</span></span>
-        <div id="wizard-search-box">
-          <input type="text" id="wizard-search-input" placeholder="Person suchen... (in GEDCOM + Import)" onkeydown="if(event.key==='Enter')wizardSearchPersons()">
-          <button onclick="wizardSearchPersons()">&#x1F50D;</button>
-        </div>
-      </div>
-
-      <!-- Search Results -->
-      <div id="wizard-search-results" style="display:none">
-        <div id="wizard-search-results-content"></div>
-        <button class="wizard-btn wizard-btn--small" onclick="wizardCloseSearch()">Schliessen</button>
-      </div>
-
-      <!-- Auto-Skip Notification -->
-      <div id="wizard-auto-skip-notice" style="display:none">
-        <span id="wizard-auto-skip-text"></span>
-        <button class="wizard-btn wizard-btn--small" onclick="wizardHideAutoSkipNotice()">OK</button>
-      </div>
-
-      <!-- Auto-Link Notification -->
-      <div id="wizard-auto-link-notice" style="display:none">
-        <span id="wizard-auto-link-text"></span>
-        <button class="wizard-btn wizard-btn--small" onclick="wizardShowAutoLinkDetails()">Details</button>
-        <button class="wizard-btn wizard-btn--small" onclick="wizardBreakAutoLink()">Verknüpfung aufheben</button>
-      </div>
-
-      <!-- Scrollable Content -->
-      <div id="wizard-scrollable-content">
-        <!-- Source Text Preview -->
-        <div id="wizard-source-box">
-          <div class="wizard-section-title">&#x1F4D6; Original Text</div>
-          <div id="wizard-source-text"></div>
-        </div>
-
-        <!-- Parsed Data Editor -->
-        <div id="wizard-editor">
-          <div class="wizard-section-title">&#x270F; Geparste Daten (frei editierbar)</div>
-          <div id="wizard-fields">
-            <div class="wizard-field-row">
-              <label>Name:</label>
-              <input type="text" id="wizard-field-name" placeholder="Vorname Nachname">
-            </div>
-            <div class="wizard-field-row">
-              <label>Geschlecht:</label>
-              <select id="wizard-field-sex">
-                <option value="">Unbekannt</option>
-                <option value="M">Männlich</option>
-                <option value="F">Weiblich</option>
-              </select>
-            </div>
-            <div class="wizard-field-row">
-              <label>Geburtsdatum:</label>
-              <input type="text" id="wizard-field-birth-date" placeholder="z.B. 15 Jun 1840">
-            </div>
-            <div class="wizard-field-row">
-              <label>Geburtsort:</label>
-              <input type="text" id="wizard-field-birth-place" placeholder="z.B. Luterbach, Solothurn">
-            </div>
-            <div class="wizard-field-row">
-              <label>Sterbedatum:</label>
-              <input type="text" id="wizard-field-death-date" placeholder="z.B. 21 Feb 1921">
-            </div>
-            <div class="wizard-field-row">
-              <label>Sterbeort:</label>
-              <input type="text" id="wizard-field-death-place" placeholder="z.B. Luterbach, Solothurn">
-            </div>
-            <div class="wizard-field-row">
-              <label>Vater:</label>
-              <input type="text" id="wizard-field-father" placeholder="Name des Vaters">
-            </div>
-            <div class="wizard-field-row">
-              <label>Mutter:</label>
-              <input type="text" id="wizard-field-mother" placeholder="Name der Mutter">
-            </div>
-            <div class="wizard-field-row wizard-field-row--wide">
-              <label>Ehen:</label>
-              <div id="wizard-marriages-list"></div>
-              <button class="wizard-btn wizard-btn--small" onclick="wizardAddMarriage()">+ Ehe hinzufügen</button>
-            </div>
-            <div class="wizard-field-row wizard-field-row--wide">
-              <label>Notizen:</label>
-              <textarea id="wizard-field-notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
-            </div>
-          </div>
-        </div>
-
-        <!-- Proposed Changes -->
-        <div id="wizard-changes-box">
-          <div class="wizard-section-title">&#x1F504; Vorgeschlagene Änderungen</div>
-          <div id="wizard-changes-list"></div>
-        </div>
-
-        <!-- Match Suggestions -->
-        <div id="wizard-matches-box">
-          <div class="wizard-section-title">&#x1F50D; Passende Personen gefunden</div>
-          <div id="wizard-matches-list"></div>
-        </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="wizard-footer wizard-footer--review">
-        <button class="wizard-btn wizard-btn--secondary" onclick="wizardPrevEntry()">&#x2190; Zurück</button>
-        <button class="wizard-btn wizard-btn--success" onclick="wizardApproveEntry()">&#x2713; Als NEU speichern</button>
-        <button class="wizard-btn wizard-btn--primary" onclick="wizardLinkToExisting()">&#x1F517; Mit bestehendem verknüpfen</button>
-        <button class="wizard-btn wizard-btn--warning" onclick="wizardUpdateExisting()">&#x270F; Bestehende aktualisieren</button>
-        <button class="wizard-btn wizard-btn--danger" onclick="wizardSkipEntry()">&#x2715; Überspringen</button>
-        <button class="wizard-btn wizard-btn--secondary" onclick="wizardNextEntry()">Weiter &#x2192;</button>
-      </div>
-    </div>
-
-    <!-- Step 3: Summary -->
-    <div id="wizard-step-summary" style="display:none">
-      <div id="wizard-progress-bar">
-        <div id="wizard-progress-fill" style="width:100%"></div>
-        <div id="wizard-progress-text">Schritt 3/3: Zusammenfassung</div>
-      </div>
-      <div id="wizard-summary-content">
-        <h3>Import Zusammenfassung</h3>
-        <div id="wizard-stats"></div>
-        <div id="wizard-pending-list"></div>
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn wizard-btn--primary" onclick="wizardApplyAll()">&#x2713; Alle genehmigten anwenden</button>
-        <button class="wizard-btn" onclick="wizardBackToReview()">Zurück zur Prüfung</button>
-      </div>
-    </div>
-  </div>
-</div>
-
+<script src="config.local.js" onerror=""></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.137.5/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.137.5/examples/js/controls/OrbitControls.js"></script>

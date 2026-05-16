@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 // ═══════════════════════════════════════════════════════════════
 // GLOBAL STATE
@@ -1868,10 +1868,10 @@ document.addEventListener('click', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 13. FILE LOADER — entry point (.ged / .json / .yaml / .yml)
+// 13. FILE LOADER — replaces the current dataset with .ged / .json / .yaml
+// Called from the unified Import modal "Ersetzen" button.
 // ═══════════════════════════════════════════════════════════════
-document.getElementById('file-input').addEventListener('change', function (e) {
-  const file = e.target.files[0];
+function _loadDatasetFile(file) {
   if (!file) return;
 
   document.getElementById('status').textContent = 'Lade Datei…';
@@ -1940,10 +1940,8 @@ document.getElementById('file-input').addEventListener('change', function (e) {
     document.getElementById('status').textContent = 'Datei konnte nicht gelesen werden.';
   };
   reader.readAsText(file, 'UTF-8');
-
-  // Reset file input so same file can be reloaded
-  this.value = '';
-});
+}
+window._loadDatasetFile = _loadDatasetFile;
 
 // ═══════════════════════════════════════════════════════════════
 // UTILITIES
@@ -4832,13 +4830,15 @@ function _tiGenerateActions(persons) {
     return null;
   }
 
-  for (const person of persons) {
+  for (let pi = 0; pi < persons.length; pi++) {
+    const person = persons[pi];
     const existing = lookup(person);
     if (existing === null) {
       actions.push({
         id:     Math.random().toString(36).slice(2),
         kind:   'person',
         status: 'pending',
+        _sourceIdx: pi * 2,
         fields: {
           'Name':         person.fullName,
           'Sex':          person.sex || '',
@@ -4871,6 +4871,7 @@ function _tiGenerateActions(persons) {
             id:       Math.random().toString(36).slice(2),
             kind:     'update',
             status:   'pending',
+            _sourceIdx: pi * 2,
             existingId: existing,
             fields:   Object.assign({ 'Name': person.fullName }, missing),
             source:   person.sourceNote,
@@ -4879,9 +4880,7 @@ function _tiGenerateActions(persons) {
         }
       }
     }
-  }
 
-  for (const person of persons) {
     for (const marriage of person.marriages) {
       let husbName, wifeName;
       if (person.sex === 'F') { husbName = marriage.spouseName; wifeName = person.fullName; }
@@ -4896,6 +4895,7 @@ function _tiGenerateActions(persons) {
         id:       Math.random().toString(36).slice(2),
         kind:     'marriage',
         status:   'pending',
+        _sourceIdx: pi * 2 + 1,
         fields: {
           'Husband':        husbName,
           'Wife':           wifeName,
@@ -4963,16 +4963,28 @@ function _tiApplyActions(actions) {
   // Pass 2: create FAM records for approved marriages
   for (const action of actions) {
     if (action.status !== 'approved' || action.kind !== 'marriage') continue;
+    const links = action.fieldLinks || {};
+
+    // Resolve a person field: explicit link (exact id) beats name-based lookup
+    const resolveField = (fieldKey, name) => {
+      const lnk = links[fieldKey];
+      if (lnk?.type === 'existing') return lnk.id;
+      if (lnk?.type === 'pending')  return actionXref.get(lnk.id) || nameToId.get(_tiNormName(name)) || null;
+      return nameToId.get(_tiNormName(name)) || null;
+    };
+
     const husbName = (action.fields['Husband']||'').trim();
     const wifeName = (action.fields['Wife']||'').trim();
-    const husbId = nameToId.get(_tiNormName(husbName)) || null;
-    const wifeId = nameToId.get(_tiNormName(wifeName)) || null;
+    const husbId = resolveField('Husband', husbName);
+    const wifeId = resolveField('Wife', wifeName);
     const famXref = `@F${++maxFam}@`;
 
     const childIds = [];
-    const childrenStr = action.fields['Children'] || '';
-    for (const cname of childrenStr.split(';').map(s=>s.trim()).filter(Boolean)) {
-      const cid = nameToId.get(_tiNormName(cname));
+    const childArr = action._childrenArr ||
+      (action.fields['Children']||'').split(';').map(s=>s.trim()).filter(Boolean);
+    for (let ci = 0; ci < childArr.length; ci++) {
+      const cname = childArr[ci];
+      const cid = resolveField(`Children:${ci}`, cname);
       if (cid) { childIds.push(cid); if (!famcOf.has(cid)) famcOf.set(cid, famXref); }
     }
 
@@ -5263,16 +5275,24 @@ function _tiParseGedcomForMerge(raw) {
 // ═══════════════════════════════════════════════════════════════
 
 let _importActions = [];
-let _importJsonPersons = null;  // set when a .json file is loaded
+let _importJsonPersons = null;  // set when a .json/.ged/.yaml file is loaded
+let _importLoadedFile  = null;  // raw File handle, for "replace dataset" path
+let _importImageData   = null;  // { base64, mediaType } for AI fallback
+const _IMAGE_MIME = /^image\/(jpeg|png|gif|webp)$/;
 
-function openTextImport() {
+function openImport() {
   document.getElementById('import-modal').style.display = 'flex';
   _resetImportUI();
+  document.addEventListener('paste', _importPasteHandler);
 }
+const openTextImport = openImport; // backwards alias
 
 function closeTextImport() {
+  document.removeEventListener('paste', _importPasteHandler);
   document.getElementById('import-modal').style.display = 'none';
   _importActions = [];
+  _importLoadedFile = null;
+  _importImageData = null;
 }
 
 function _resetImportUI() {
@@ -5281,18 +5301,91 @@ function _resetImportUI() {
   document.getElementById('import-text-area').value = '';
   const fi = document.getElementById('import-file-input');
   if (fi) { fi.value = ''; }
-  document.getElementById('import-file-name').textContent = 'Keine Datei gewählt';
+  document.getElementById('import-drop-label').style.display = '';
+  document.getElementById('import-drop-filename').style.display = 'none';
+  document.getElementById('import-image-preview').style.display = 'none';
+  document.getElementById('import-image-options').style.display = 'none';
+  document.getElementById('import-ai-key-row').style.display = 'none';
+  document.getElementById('import-error-msg').style.display = 'none';
+  document.getElementById('import-replace-btn').style.display = 'none';
+  document.getElementById('import-ocr-status').textContent = '';
   _importActions = [];
   _importJsonPersons = null;
+  _importLoadedFile = null;
+  _importImageData = null;
+}
+
+function _imShowError(msg) {
+  const el = document.getElementById('import-error-msg');
+  el.textContent = msg; el.style.display = '';
+}
+
+function _imDragOver(e) { e.preventDefault(); document.getElementById('import-drop-zone').classList.add('drag-over'); }
+function _imDragLeave(e) { document.getElementById('import-drop-zone').classList.remove('drag-over'); }
+function _imDrop(e) {
+  e.preventDefault();
+  document.getElementById('import-drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files?.[0];
+  if (file) _imLoadFile(file);
+}
+function _importPasteHandler(e) {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  const file = item.getAsFile();
+  if (file) _imLoadFile(file);
 }
 
 function handleImportFileSelect(e) {
   const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById('import-file-name').textContent = file.name;
+  if (file) _imLoadFile(file);
+}
+
+function _imLoadFile(file) {
   _importJsonPersons = null;
-  const isGed  = /\.ged$/i.test(file.name);
-  const isJson = /\.json$/i.test(file.name);
+  _importLoadedFile = file;
+  _importImageData = null;
+  document.getElementById('import-error-msg').style.display = 'none';
+  document.getElementById('import-drop-label').style.display = 'none';
+  const fn = document.getElementById('import-drop-filename');
+  fn.textContent = '📄 ' + file.name;
+  fn.style.display = '';
+  document.getElementById('import-image-preview').style.display = 'none';
+  document.getElementById('import-image-options').style.display = 'none';
+  document.getElementById('import-replace-btn').style.display = 'none';
+  document.getElementById('import-text-area').value = '';
+
+  const name = file.name.toLowerCase();
+  const isGed   = /\.ged$/.test(name);
+  const isJson  = /\.json$/.test(name);
+  const isYaml  = /\.ya?ml$/.test(name);
+  const isImage = _IMAGE_MIME.test(file.type) || /\.(png|jpe?g|gif|webp)$/.test(name);
+
+  // First import on empty dataset: load directly, skip the review wizard.
+  if ((isGed || isJson || isYaml) && individuals.size === 0) {
+    closeTextImport();
+    _loadDatasetFile(file);
+    return;
+  }
+
+  if (isImage) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      _importImageData = { base64: dataUrl.split(',')[1], mediaType: file.type || 'image/png' };
+      const prev = document.getElementById('import-image-preview');
+      prev.src = dataUrl;
+      prev.style.display = 'block';
+      document.getElementById('import-image-options').style.display = 'flex';
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  if (isGed || isJson || isYaml) {
+    document.getElementById('import-replace-btn').style.display = '';
+  }
+
   const reader = new FileReader();
   if (isGed) {
     reader.onload = ev => {
@@ -5300,12 +5393,12 @@ function handleImportFileSelect(e) {
       if (persons?.length) {
         _importJsonPersons = persons;
         document.getElementById('import-text-area').value =
-          `[GEDCOM geladen: ${persons.length} Person${persons.length !== 1 ? 'en' : ''} erkannt. Klicke «Analysieren» um fortzufahren.]`;
+          `[GEDCOM geladen: ${persons.length} Person${persons.length !== 1 ? 'en' : ''} erkannt. «Analysieren» zum Zusammenführen, «Ersetzen» um den aktuellen Datensatz zu überschreiben.]`;
       } else {
-        document.getElementById('import-text-area').value = '';
-        alert('GEDCOM-Datei konnte nicht geparst werden oder enthält keine Personen.');
+        _imShowError('GEDCOM-Datei konnte nicht geparst werden oder enthält keine Personen.');
       }
     };
+    reader.readAsText(file, 'utf-8');
   } else if (isJson) {
     reader.onload = ev => {
       try {
@@ -5314,20 +5407,122 @@ function handleImportFileSelect(e) {
         if (persons && persons.length) {
           _importJsonPersons = persons;
           document.getElementById('import-text-area').value =
-            `[Strukturierte JSON-Datei geladen: ${persons.length} Person${persons.length!==1?'en':''} erkannt. Klicke «Analysieren» um fortzufahren.]`;
+            `[Strukturierte JSON-Datei geladen: ${persons.length} Person${persons.length!==1?'en':''} erkannt.]`;
         } else {
-          document.getElementById('import-text-area').value = '';
-          alert('JSON-Datei konnte nicht geparst werden oder enthält keine Personen.');
+          document.getElementById('import-text-area').value =
+            '[JSON geladen — kein bekanntes Personen-Schema. «Ersetzen» wird die Datei direkt als Datensatz laden.]';
         }
       } catch(err) {
-        document.getElementById('import-text-area').value = '';
-        alert('Ungültige JSON-Datei: ' + err.message);
+        _imShowError('Ungültige JSON-Datei: ' + err.message);
       }
     };
+    reader.readAsText(file, 'utf-8');
+  } else if (isYaml) {
+    reader.onload = ev => {
+      document.getElementById('import-text-area').value =
+        `[YAML geladen — «Ersetzen» klicken, um den Datensatz zu überschreiben.]`;
+    };
+    reader.readAsText(file, 'utf-8');
   } else {
     reader.onload = ev => { document.getElementById('import-text-area').value = ev.target.result || ''; };
+    reader.readAsText(file, 'utf-8');
   }
-  reader.readAsText(file, 'utf-8');
+}
+
+function importReplaceDataset() {
+  if (!_importLoadedFile) { _imShowError('Keine Datei geladen.'); return; }
+  if (individuals.size && !confirm('Aktuellen Datensatz vollständig ersetzen?')) return;
+  const file = _importLoadedFile;
+  closeTextImport();
+  _loadDatasetFile(file);
+}
+
+// ── Tesseract OCR (lazy-loaded) ──────────────────────────────────────────
+let _tesseractLoading = null;
+function _loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (_tesseractLoading) return _tesseractLoading;
+  _tesseractLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    s.onload = () => resolve(window.Tesseract);
+    s.onerror = () => reject(new Error('Tesseract konnte nicht geladen werden.'));
+    document.head.appendChild(s);
+  });
+  return _tesseractLoading;
+}
+
+async function runImportOcr() {
+  if (!_importImageData) { _imShowError('Kein Bild geladen.'); return; }
+  const statusEl = document.getElementById('import-ocr-status');
+  const btn = document.getElementById('import-ocr-btn');
+  btn.disabled = true;
+  statusEl.textContent = 'Lade OCR…';
+  try {
+    const Tesseract = await _loadTesseract();
+    const dataUrl = 'data:' + _importImageData.mediaType + ';base64,' + _importImageData.base64;
+    statusEl.textContent = 'OCR läuft 0%…';
+    const { data } = await Tesseract.recognize(dataUrl, 'deu+eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          statusEl.textContent = `OCR ${Math.round(m.progress*100)}%`;
+        }
+      }
+    });
+    const text = (data?.text || '').trim();
+    if (!text) { _imShowError('OCR lieferte keinen Text.'); statusEl.textContent = ''; return; }
+    document.getElementById('import-text-area').value = text;
+    statusEl.textContent = `OCR fertig (${text.length} Zeichen)`;
+  } catch (err) {
+    _imShowError('OCR-Fehler: ' + (err.message || String(err)));
+    statusEl.textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runImportAi(mode) {
+  // mode: 'image' (default if image loaded) | 'text'
+  const useText = mode === 'text' || (!_importImageData && mode !== 'image');
+  const textVal = (document.getElementById('import-text-area').value || '').trim();
+  if (useText) {
+    if (!textVal || textVal.startsWith('[')) { _imShowError('Kein Text zum Analysieren.'); return; }
+  } else if (!_importImageData) {
+    _imShowError('Kein Bild geladen.'); return;
+  }
+
+  document.getElementById('import-ai-key-row').style.display = 'flex';
+  const keyInput = document.getElementById('ai-api-key-input');
+  if (!keyInput.value) {
+    if (window.ANTHROPIC_API_KEY) keyInput.value = window.ANTHROPIC_API_KEY;
+    else {
+      const saved = localStorage.getItem('ai_api_key');
+      if (saved) keyInput.value = saved;
+    }
+  }
+  const apiKey = _aiGetKey();
+  if (!apiKey) { _imShowError('Bitte API Key eingeben.'); keyInput.focus(); return; }
+  const model = document.getElementById('ai-model-select').value;
+  const imgBtn  = document.getElementById('import-ai-btn');
+  const textBtn = document.getElementById('import-ai-text-btn');
+  if (imgBtn)  imgBtn.disabled  = true;
+  if (textBtn) textBtn.disabled = true;
+  const statusEl = document.getElementById('import-ocr-status');
+  statusEl.textContent = 'KI analysiert…';
+  try {
+    const persons = await _aiParseContent(apiKey, model, useText ? textVal : null, useText ? null : _importImageData);
+    if (!persons || !persons.length) { _imShowError('KI hat keine Personen erkannt.'); statusEl.textContent = ''; return; }
+    _importJsonPersons = persons;
+    document.getElementById('import-text-area').value =
+      `[KI-Analyse: ${persons.length} Person${persons.length!==1?'en':''} erkannt.]`;
+    statusEl.textContent = 'KI fertig';
+  } catch (err) {
+    _imShowError('KI-Fehler: ' + (err.message || String(err)));
+    statusEl.textContent = '';
+  } finally {
+    if (imgBtn)  imgBtn.disabled  = false;
+    if (textBtn) textBtn.disabled = false;
+  }
 }
 
 function parseImportText() {
@@ -5385,8 +5580,172 @@ function _renderImportSummary() {
 
 function _renderImportReview() {
   _renderImportSummary();
+  const sorted = [..._importActions].sort((a, b) => (a._sourceIdx ?? 0) - (b._sourceIdx ?? 0));
   document.getElementById('import-actions-list').innerHTML =
-    _importActions.map((action, idx) => _renderImportCard(action, idx)).join('');
+    sorted.map((action, idx) => _renderImportCard(action, idx)).join('');
+}
+
+// Person-reference fields that get autocomplete + link/unlink in import cards
+const _IM_PERSON_FIELDS = new Set(['Name','Father','Mother','Husband','Wife']);
+
+function _imDropId(actionId, fieldKey) {
+  return 'nacd-' + actionId + '-' + fieldKey.replace(/[\s:]/g, '_');
+}
+
+function _imLinkedDisplay(link) {
+  if (!link) return null;
+  if (link.type === 'existing') {
+    const indi = individuals.get(link.id);
+    if (!indi) return null;
+    return {
+      name:      indi.name || '',
+      maiden:    indi.maidenName || '',
+      year:      indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '',
+      deathYear: indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '',
+      tag:       '',
+    };
+  }
+  const pa = _importActions.find(a => a.id === link.id);
+  if (!pa) return null;
+  return {
+    name:      pa.fields['Name'] || '',
+    maiden:    '',
+    year:      (pa.fields['Birth Date']||'').match(/\b(\d{4})\b/)?.[1] || '',
+    deathYear: (pa.fields['Death Date']||'').match(/\b(\d{4})\b/)?.[1] || '',
+    tag:       'Import',
+  };
+}
+
+// Rich tooltip HTML for a linked person — shows everything needed to differentiate.
+function _imLinkedTooltipHtml(link) {
+  if (!link) return '';
+  if (link.type === 'existing') {
+    const indi = individuals.get(link.id);
+    if (!indi) return '';
+    const rows = [];
+    rows.push(`<div class="import-tt-name">${escHtml(indi.name || '(ohne Name)')}</div>`);
+    const sub = [];
+    if (indi.maidenName) sub.push(`geb. ${escHtml(indi.maidenName)}`);
+    if (indi.sex) sub.push(indi.sex);
+    if (sub.length) rows.push(`<div class="import-tt-sub">${sub.join(' · ')}</div>`);
+    if (indi.birth?.date || indi.birth?.plac)
+      rows.push(`<div class="import-tt-line"><b>* </b>${escHtml(indi.birth?.date || '?')}${indi.birth?.plac ? ' in ' + escHtml(indi.birth.plac) : ''}</div>`);
+    if (indi.death?.date || indi.death?.plac)
+      rows.push(`<div class="import-tt-line"><b>† </b>${escHtml(indi.death?.date || '?')}${indi.death?.plac ? ' in ' + escHtml(indi.death.plac) : ''}</div>`);
+    // Parents
+    const famc = (indi.famc || [])[0];
+    if (famc) {
+      const fam = families.get(famc);
+      if (fam) {
+        const fa = fam.husb ? individuals.get(fam.husb)?.name : '';
+        const mo = fam.wife ? individuals.get(fam.wife)?.name : '';
+        if (fa || mo) rows.push(`<div class="import-tt-line">Eltern: ${escHtml([fa, mo].filter(Boolean).join(' & '))}</div>`);
+      }
+    }
+    // Spouses
+    const spouseNames = (indi.fams || []).map(fId => {
+      const f = families.get(fId); if (!f) return null;
+      const sId = f.husb === link.id ? f.wife : f.husb;
+      return sId ? individuals.get(sId)?.name : null;
+    }).filter(Boolean);
+    if (spouseNames.length) rows.push(`<div class="import-tt-line">Ehe: ${escHtml(spouseNames.join(', '))}</div>`);
+    // Children
+    const children = [];
+    for (const fId of (indi.fams || [])) {
+      const f = families.get(fId); if (!f) continue;
+      for (const cId of (f.chil || [])) {
+        const c = individuals.get(cId);
+        if (c) children.push(c.name);
+      }
+    }
+    if (children.length) rows.push(`<div class="import-tt-line">Kinder: ${escHtml(children.join(', '))}</div>`);
+    if (indi.note) rows.push(`<div class="import-tt-note">${escHtml(indi.note.slice(0, 220))}${indi.note.length > 220 ? '…' : ''}</div>`);
+    rows.push(`<div class="import-tt-id">ID: ${escHtml(link.id)}</div>`);
+    return rows.join('');
+  }
+  // Pending (another import action)
+  const pa = _importActions.find(a => a.id === link.id);
+  if (!pa) return '';
+  const rows = [];
+  rows.push(`<div class="import-tt-name">${escHtml(pa.fields['Name'] || '(ohne Name)')}</div>`);
+  rows.push(`<div class="import-tt-sub">aus Import</div>`);
+  for (const [k, v] of Object.entries(pa.fields)) {
+    if (k === 'Name' || !v) continue;
+    rows.push(`<div class="import-tt-line"><b>${escHtml(k)}:</b> ${escHtml(String(v).slice(0, 200))}</div>`);
+  }
+  return rows.join('');
+}
+
+function _imLinkedBadge(actionId, fieldKey, link, label) {
+  const d = _imLinkedDisplay(link);
+  if (!d) return '';
+  const maiden    = d.maiden    ? ` <span class="import-sdrop-maiden">geb. ${escHtml(d.maiden)}</span>` : '';
+  const year      = d.year      ? ` <span class="import-linked-year">*${d.year}</span>` : '';
+  const deathYear = d.deathYear ? ` <span class="import-linked-year">&#x2020;${d.deathYear}</span>` : '';
+  const tag       = d.tag       ? ` <span class="import-linked-tag">${escHtml(d.tag)}</span>` : '';
+  const tipHtml   = _imLinkedTooltipHtml(link);
+  return `<div class="import-field-row">
+    <label class="import-field-label">${escHtml(label)}</label>
+    <div class="import-field-linked" tabindex="0">
+      <span class="import-field-linked-name">${escHtml(d.name)}</span>${maiden}${year}${deathYear}${tag}
+      <button class="import-field-change-btn" onclick="_imChangeFieldLink('${actionId}','${fieldKey}')" title="Verknüpfung ändern">&#x21BB;</button>
+      <button class="import-field-unlink-btn" onclick="_imFieldUnlink('${actionId}','${fieldKey}')" title="Trennen">&#x2715;</button>
+      <div class="import-linked-tip">${tipHtml}</div>
+    </div>
+  </div>`;
+}
+
+function _imPersonInputRow(action, label, fieldKey, val) {
+  const fid = 'if-' + action.id + '-' + fieldKey.replace(/[\s:]/g,'_');
+  const dropId = _imDropId(action.id, fieldKey);
+  return `<div class="import-field-row">
+    <label class="import-field-label" for="${fid}">${escHtml(label)}</label>
+    <div class="import-name-ac-wrap">
+      <input class="import-field-input" id="${fid}" type="text"
+             value="${escHtml(val||'')}"
+             data-action="${action.id}" data-field="${fieldKey}"
+             data-ac-person="true"
+             placeholder="(leer)" autocomplete="off">
+      <div class="import-name-drop" id="${dropId}"></div>
+    </div>
+  </div>`;
+}
+
+function _imChildrenRows(action) {
+  // Sync _childrenArr from fields on first render
+  if (!action._childrenArr) {
+    const raw = action.fields['Children'] || '';
+    action._childrenArr = raw ? raw.split(';').map(s => s.trim()).filter(Boolean) : [];
+  }
+  action.fieldLinks = action.fieldLinks || {};
+
+  const rows = action._childrenArr.map((name, idx) => {
+    const key  = `Children:${idx}`;
+    const link = action.fieldLinks[key];
+    if (link) return _imLinkedBadge(action.id, key, link, idx === 0 ? 'Children' : '');
+    const dropId = _imDropId(action.id, key);
+    const fid    = 'if-' + action.id + '-Children_' + idx;
+    const lbl    = idx === 0 ? 'Children' : '';
+    return `<div class="import-field-row import-child-row">
+      <label class="import-field-label">${escHtml(lbl)}</label>
+      <div class="import-name-ac-wrap" style="flex:1">
+        <input class="import-field-input" id="${fid}" type="text"
+               value="${escHtml(name)}"
+               data-action="${action.id}" data-field="${key}"
+               data-ac-person="true"
+               placeholder="Kind" autocomplete="off">
+        <div class="import-name-drop" id="${dropId}"></div>
+      </div>
+      <button class="import-child-rm-btn" onclick="_imRemoveChild('${action.id}',${idx})">&#x2715;</button>
+    </div>`;
+  }).join('');
+
+  const addBtn = `<div class="import-field-row import-child-row">
+    <label class="import-field-label"></label>
+    <button class="import-child-add-btn" onclick="_imAddChild('${action.id}')">+ Kind</button>
+  </div>`;
+
+  return rows + addBtn;
 }
 
 function _renderImportCard(action) {
@@ -5395,8 +5754,44 @@ function _renderImportCard(action) {
   const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
   const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
 
+  action.fieldLinks = action.fieldLinks || {};
+  const isPersonAction = action.kind === 'person' || action.kind === 'update';
+
   const fieldsHtml = Object.entries(action.fields).map(([label, val]) => {
-    const wideClass = label === 'Children' ? ' import-field-row--wide' : '';
+    const isPersonField = _IM_PERSON_FIELDS.has(label);
+    const link = action.fieldLinks[label];
+
+    // Children: special multi-row list
+    if (label === 'Children') return _imChildrenRows(action);
+
+    // Person field that is linked → show badge
+    if (isPersonField && link) return _imLinkedBadge(action.id, label, link, label);
+
+    // Name field when whole action is linked to existing person → show badge with unlink
+    if (label === 'Name' && isPersonAction && action.existingId) {
+      const linkObj = { type: 'existing', id: action.existingId };
+      const d = _imLinkedDisplay(linkObj);
+      const name   = d ? d.name   : val;
+      const maiden    = d?.maiden    ? ` <span class="import-sdrop-maiden">geb. ${escHtml(d.maiden)}</span>` : '';
+      const year      = d?.year      ? ` <span class="import-linked-year">*${d.year}</span>` : '';
+      const deathYear = d?.deathYear ? ` <span class="import-linked-year">&#x2020;${d.deathYear}</span>` : '';
+      const tipHtml = _imLinkedTooltipHtml(linkObj);
+      return `<div class="import-field-row">
+        <label class="import-field-label">Name</label>
+        <div class="import-field-linked" tabindex="0">
+          <span class="import-field-linked-name">${escHtml(name)}</span>${maiden}${year}${deathYear}
+          <button class="import-btn-change" onclick="_imChangeMainLink('${action.id}')" title="Andere Person wählen">&#x21BB; Ändern</button>
+          <button class="import-btn-unlink" onclick="_imUnlink('${action.id}')" title="Trennen">&#x2715; Trennen</button>
+          <div class="import-linked-tip">${tipHtml}</div>
+        </div>
+      </div>`;
+    }
+
+    // Person field with autocomplete input
+    if (isPersonField) return _imPersonInputRow(action, label, label, val);
+
+    // Regular non-person field
+    const wideClass = ''; // children handled above
     const fid = `if-${action.id}-${label.replace(/\s+/g,'_')}`;
     return `<div class="import-field-row${wideClass}">
       <label class="import-field-label" for="${fid}">${escHtml(label)}</label>
@@ -5407,13 +5802,6 @@ function _renderImportCard(action) {
     </div>`;
   }).join('');
 
-  // Add match selection button for person actions
-  const matchBtn = (action.kind === 'person' || action.kind === 'update') ? `
-    <button class="import-btn import-btn--match" onclick="openMatchDialog('${action.id}')">
-      &#x1F50D; Person auswählen
-    </button>
-  ` : '';
-
   const srcHtml = action.source ? `
     <details class="import-source-details">
       <summary>Quelltext</summary>
@@ -5423,6 +5811,12 @@ function _renderImportCard(action) {
   const appActive = action.status === 'approved' ? ' import-btn--active' : '';
   const skpActive = action.status === 'skipped'  ? ' import-btn--active' : '';
 
+  // Manual-link button for new-person cards not yet linked to anyone
+  const showLinkBtn = isPersonAction && !action.existingId;
+  const linkBtnHtml = showLinkBtn
+    ? `<button class="import-btn import-btn--link" onclick="openMatchDialog('${action.id}')" title="Mit bestehender Person verknüpfen">&#x1F517; Verknüpfen</button>`
+    : '';
+
   return `<div class="import-action-card import-action-card--${action.status}" data-action-id="${action.id}">
     <div class="import-card-header">
       <span class="import-badge ${kindClass}">${kindLabel}</span>
@@ -5431,11 +5825,44 @@ function _renderImportCard(action) {
     <div class="import-fields">${fieldsHtml}</div>
     ${srcHtml}
     <div class="import-card-actions">
+      ${linkBtnHtml}
       <button class="import-btn import-btn--approve${appActive}" data-action="${action.id}" data-status="approved">&#x2713; Genehmigen</button>
       <button class="import-btn import-btn--skip${skpActive}"    data-action="${action.id}" data-status="skipped">&#x2715; \xdcberspringen</button>
-      ${matchBtn}
     </div>
   </div>`;
+}
+
+// Replace a linked field with an editable input pre-populated by the linked name, then focus + open suggestions.
+function _imChangeFieldLink(actionId, fieldKey) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  action.fieldLinks = action.fieldLinks || {};
+  const link = action.fieldLinks[fieldKey];
+  const prevName = _imLinkedDisplay(link)?.name || '';
+  delete action.fieldLinks[fieldKey];
+  if (fieldKey.startsWith('Children:')) {
+    const idx = parseInt(fieldKey.split(':')[1]);
+    if (action._childrenArr) action._childrenArr[idx] = prevName;
+    action.fields['Children'] = (action._childrenArr || []).join('; ');
+  } else if (_IM_PERSON_FIELDS.has(fieldKey)) {
+    action.fields[fieldKey] = prevName;
+  }
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+  // Focus the new input so autocomplete drop opens
+  setTimeout(() => {
+    const safe = fieldKey.replace(/[\s:]/g,'_').replace('Children:', 'Children_');
+    const inp = document.getElementById('if-' + actionId + '-' + safe);
+    if (inp) { inp.focus(); inp.select(); }
+  }, 0);
+}
+
+// "Ändern" on a fully-linked main-person card: detach + open match dialog for re-selection.
+function _imChangeMainLink(actionId) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  _imUnlink(actionId);
+  openMatchDialog(actionId);
 }
 
 // Single delegated listener on the list container (set up once)
@@ -5475,7 +5902,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const inp = e.target.closest('[data-action][data-field]');
     if (!inp) return;
     const action = _importActions.find(a => a.id === inp.dataset.action);
-    if (action) action.fields[inp.dataset.field] = inp.value;
+    if (!action) return;
+    const field = inp.dataset.field;
+    if (field.startsWith('Children:')) {
+      // Update individual child in array and rebuild field string
+      action._childrenArr = action._childrenArr || [];
+      const idx = parseInt(field.split(':')[1]);
+      action._childrenArr[idx] = inp.value;
+      action.fields['Children'] = action._childrenArr.join('; ');
+    } else {
+      action.fields[field] = inp.value;
+    }
+    if (inp.dataset.acPerson) _imPersonSearch(inp, action.id, field);
+  });
+
+  // Person-field autocomplete: show on focus, hide on blur
+  list.addEventListener('focusin', e => {
+    const inp = e.target.closest('[data-ac-person]');
+    if (inp) _imPersonSearch(inp, inp.dataset.action, inp.dataset.field);
+  });
+  list.addEventListener('focusout', e => {
+    const inp = e.target.closest('[data-ac-person]');
+    if (inp) setTimeout(() => { const d = document.getElementById(_imDropId(inp.dataset.action, inp.dataset.field)); if (d) { d.innerHTML = ''; d.style.display = 'none'; } }, 180);
   });
 });
 
@@ -5540,6 +5988,7 @@ function applyImport() {
   setTimeout(tick, 0);
 }
 
+window.openImport        = openImport;
 window.openTextImport    = openTextImport;
 window.closeTextImport   = closeTextImport;
 window.handleImportFileSelect = handleImportFileSelect;
@@ -5549,6 +5998,12 @@ window.applyImport       = applyImport;
 window._importApproveAll = _importApproveAll;
 window._importSkipAll    = _importSkipAll;
 window._importResetAll   = _importResetAll;
+window._imDragOver       = _imDragOver;
+window._imDragLeave      = _imDragLeave;
+window._imDrop           = _imDrop;
+window.runImportOcr      = runImportOcr;
+window.runImportAi       = runImportAi;
+window.importReplaceDataset = importReplaceDataset;
 
 // ═══════════════════════════════════════════════════════════════
 // INTERACTIVE MATCH SELECTION FOR IMPORT
@@ -5707,11 +6162,39 @@ function searchMatchCandidates() {
     renderMatchCandidates(_currentMatchCandidates);
     return;
   }
-  
-  const filtered = _currentMatchCandidates.filter(c => 
-    c.name.toLowerCase().includes(query)
-  );
-  renderMatchCandidates(filtered);
+
+  // Search the whole dataset + all pending import actions, not just the pre-scored shortlist.
+  const results = [];
+  for (const [id, indi] of individuals) {
+    if (!(indi.name || '').toLowerCase().includes(query)) continue;
+    results.push({
+      type: 'existing',
+      id,
+      name: indi.name || '',
+      birth: indi.birth?.date || '',
+      death: indi.death?.date || '',
+      sex: indi.sex || 'U',
+      score: 0,
+      data: indi
+    });
+  }
+  const currentActionId = _currentMatchActionId;
+  for (const a of _importActions) {
+    if (a.id === currentActionId || a.status === 'skipped') continue;
+    const name = a.fields?.['Name'] || '';
+    if (!name.toLowerCase().includes(query)) continue;
+    results.push({
+      type: 'pending',
+      actionId: a.id,
+      name,
+      birth: a.fields['Birth Date'] || '',
+      death: a.fields['Death Date'] || '',
+      sex: a.fields['Sex'] || 'U',
+      score: 0,
+      data: a
+    });
+  }
+  renderMatchCandidates(results);
 }
 
 function selectMatchCandidate(type, targetId) {
@@ -5775,1025 +6258,221 @@ window.closeMatchDialog     = closeMatchDialog;
 window.searchMatchCandidates = searchMatchCandidates;
 window.selectMatchCandidate = selectMatchCandidate;
 
-// ═══════════════════════════════════════════════════════════════
-// STEP-BY-STEP WIZARD FUNCTIONS
-// ═══════════════════════════════════════════════════════════════
+// ── Import card: inline person-field search & linking ──────────────────────
 
-let _wizardEntries = [];        // Parsed person entries
-let _wizardCurrentIdx = 0;      // Current entry being reviewed
-let _wizardDecisions = new Map(); // entry idx -> decision
-let _wizardAutoSkippedCount = 0;  // Count of auto-skipped entries
+function _imPersonSearch(inp, actionId, fieldKey) {
+  const dropId = _imDropId(actionId, fieldKey);
+  const drop   = document.getElementById(dropId);
+  if (!drop) return;
 
-function openWizard() {
-  document.getElementById('wizard-modal').style.display = 'flex';
-  _resetWizard();
-}
+  const raw    = inp.value.trim();
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
 
-function closeWizard() {
-  document.getElementById('wizard-modal').style.display = 'none';
-  _wizardEntries = [];
-  _wizardDecisions.clear();
-  _wizardCurrentIdx = 0;
-}
+  const yearM   = raw.match(/\b(\d{4})\b/);
+  const qYear   = yearM ? yearM[1] : '';
+  let   qRest   = raw.replace(/\b\d{4}\b/, '').trim();
+  const maidenM = qRest.match(/\((?:geb\.?\s*|née\s*)?([^)]+)\)/i) ||
+                  qRest.match(/\bgeb\.?\s+([A-Za-zÀ-ž]+)/i) ||
+                  qRest.match(/\bnée\s+([A-Za-zÀ-ž]+)/i);
+  const qMaiden = maidenM ? maidenM[1].toLowerCase().trim() : '';
+  if (maidenM) qRest = qRest.replace(maidenM[0], '').trim();
+  const qName = qRest.toLowerCase();
 
-function _resetWizard() {
-  // Show load step
-  document.getElementById('wizard-step-load').style.display = '';
-  document.getElementById('wizard-step-review').style.display = 'none';
-  document.getElementById('wizard-step-summary').style.display = 'none';
-  document.getElementById('wizard-progress-fill').style.width = '33%';
-  document.getElementById('wizard-progress-text').textContent = 'Schritt 1/3: Text laden';
-
-  // Clear inputs
-  document.getElementById('wizard-text-area').value = '';
-  document.getElementById('wizard-file-input').value = '';
-  document.getElementById('wizard-file-name').textContent = 'Keine Datei gewählt';
-
-  _wizardEntries = [];
-  _wizardDecisions.clear();
-  _wizardCurrentIdx = 0;
-  _wizardAutoSkippedCount = 0;
-
-  // Hide notifications
-  document.getElementById('wizard-auto-skip-notice').style.display = 'none';
-}
-
-function handleWizardFileSelect(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById('wizard-file-name').textContent = file.name;
-
-  const reader = new FileReader();
-  reader.onload = ev => {
-    document.getElementById('wizard-text-area').value = ev.target.result || '';
-  };
-  reader.readAsText(file, 'utf-8');
-}
-
-function wizardParseText() {
-  const raw = (document.getElementById('wizard-text-area').value || '').trim();
-  if (!raw) {
-    alert('Bitte Text eingeben oder Datei laden.');
-    return;
-  }
-
-  // Parse using existing text import logic
-  const clean = _tiCleanText(raw);
-  const persons = _tiParseText(clean);
-
-  if (!persons.length) {
-    alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
-    return;
-  }
-
-  _wizardEntries = persons.map((p, idx) => ({
-    ...p,
-    entryId: `entry_${idx}`,
-    status: 'pending'
-  }));
-
-  // Switch to review step
-  document.getElementById('wizard-step-load').style.display = 'none';
-  document.getElementById('wizard-step-review').style.display = '';
-  document.getElementById('wizard-progress-fill').style.width = '66%';
-  document.getElementById('wizard-progress-text').textContent = 'Schritt 2/3: Einträge prüfen';
-
-  // Show first entry
-  _wizardCurrentIdx = 0;
-  wizardShowEntry(0);
-}
-
-function wizardShowEntry(idx) {
-  if (idx < 0 || idx >= _wizardEntries.length) return;
-
-  // Check if this entry should be auto-skipped (already processed)
-  const existingDecision = _wizardDecisions.get(idx);
-  if (existingDecision) {
-    // Already has a decision, show it normally
-    _wizardRenderEntry(idx);
-    return;
-  }
-
-  // Check if entry needs attention (has changes or is new)
-  const needsAttention = _wizardEntryNeedsAttention(idx);
-
-  if (!needsAttention) {
-    // Auto-skip: mark and move to next
-    _wizardDecisions.set(idx, { action: 'skip', reason: 'no_changes_needed' });
-    _wizardAutoSkippedCount++;
-
-    if (idx < _wizardEntries.length - 1) {
-      wizardShowEntry(idx + 1);
-    } else {
-      wizardShowSummary();
-    }
-    return;
-  }
-
-  // Check for high-confidence match for auto-linking
-  const autoLinkMatch = _wizardFindBestMatchForAutoLink(idx);
-  if (autoLinkMatch && autoLinkMatch.score >= 150) {
-    // Auto-link to existing person with high confidence
-    _wizardDecisions.set(idx, {
-      action: 'link',
-      targetId: autoLinkMatch.id,
-      entry: entry,
-      autoLinked: true
-    });
-    _wizardAutoSkippedCount++;
-
-    if (idx < _wizardEntries.length - 1) {
-      wizardShowEntry(idx + 1);
-    } else {
-      wizardShowSummary();
-    }
-    return;
-  }
-
-  // Show notification if we auto-skipped some entries to get here
-  if (_wizardAutoSkippedCount > 0) {
-    const noticeEl = document.getElementById('wizard-auto-skip-notice');
-    const textEl = document.getElementById('wizard-auto-skip-text');
-    const skipped = _wizardAutoSkippedCount;
-    textEl.textContent = `${skipped} Eintrag(e) übersprungen (keine Änderungen oder auto-verknüpft)`;
-    noticeEl.style.display = 'flex';
-    _wizardAutoSkippedCount = 0;
-  } else {
-    document.getElementById('wizard-auto-skip-notice').style.display = 'none';
-  }
-
-  _wizardRenderEntry(idx);
-}
-
-function _wizardEntryNeedsAttention(idx) {
-  const entry = _wizardEntries[idx];
-
-  // Find existing match
-  const existingId = _wizardFindExistingMatch(entry);
-  const existing = existingId ? individuals.get(existingId) : null;
-
-  if (!existing) {
-    // New person - needs attention if has any data
-    return !!(entry.fullName || entry.birthDate || entry.deathDate);
-  }
-
-  // Check if there are any actual changes to make
-  const hasChanges =
-    (entry.birthDate && !existing.birth?.date) ||
-    (entry.birthPlace && !existing.birth?.plac) ||
-    (entry.deathDate && !existing.death?.date) ||
-    (entry.deathPlace && !existing.death?.plac) ||
-    (entry.sex && entry.sex !== 'U' && (!existing.sex || existing.sex === 'U')) ||
-    (entry.notes && !existing.note?.includes(entry.notes));
-
-  return hasChanges;
-}
-
-function _wizardFindBestMatchForAutoLink(idx) {
-  const entry = _wizardEntries[idx];
-  const searchName = (entry.fullName || '').toLowerCase();
-  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-  let bestMatch = null;
-  let bestScore = 0;
-
-  for (const [id, indi] of individuals) {
-    const indiName = (indi.name || '').toLowerCase();
-    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
-
+  function scoreStr(iName, iMaiden, iYear) {
     let score = 0;
-
-    // Exact name match
-    if (indiName === searchName) {
-      score = 100;
-    } else if (indiName.includes(searchName) || searchName.includes(indiName)) {
-      score = 60;
-    }
-
-    // Birth year match
-    if (score > 0 && indiBirth && searchBirth) {
-      if (indiBirth === searchBirth) {
-        score += 50;
-      } else if (Math.abs(parseInt(indiBirth) - parseInt(searchBirth)) <= 1) {
-        score += 30;
-      }
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = { id, name: indi.name, score };
-    }
-  }
-
-  return bestMatch;
-}
-
-function _wizardRenderEntry(idx) {
-  if (idx < 0 || idx >= _wizardEntries.length) return;
-
-  _wizardCurrentIdx = idx;
-  const entry = _wizardEntries[idx];
-
-  // Update counter
-  document.getElementById('wizard-current-idx').textContent = idx + 1;
-  document.getElementById('wizard-total-count').textContent = _wizardEntries.length;
-
-  // Show source text
-  document.getElementById('wizard-source-text').textContent = entry.sourceNote || '(Kein Quelltext verfügbar)';
-
-  // Populate fields
-  document.getElementById('wizard-field-name').value = entry.fullName || '';
-  document.getElementById('wizard-field-sex').value = entry.sex || '';
-  document.getElementById('wizard-field-birth-date').value = entry.birthDate || '';
-  document.getElementById('wizard-field-birth-place').value = entry.birthPlace || '';
-  document.getElementById('wizard-field-death-date').value = entry.deathDate || '';
-  document.getElementById('wizard-field-death-place').value = entry.deathPlace || '';
-  document.getElementById('wizard-field-father').value = entry.fatherName || '';
-  document.getElementById('wizard-field-mother').value = entry.motherName || '';
-  document.getElementById('wizard-field-notes').value = entry.notes || '';
-
-  // Check if already decided
-  const currentDecision = _wizardDecisions.get(idx);
-
-  // Populate marriages with enhanced spouse search
-  const marriagesHtml = (entry.marriages || []).map((m, i) => {
-    const spouseId = m._linkedSpouseId || '';
-    return `
-    <div class="wizard-marriage-row" data-idx="${i}">
-      <div class="wizard-marriage-spouse-section">
-        <input type="text" placeholder="Ehepartner suchen..." value="${escHtml(m.spouseName || '')}" class="wiz-marr-spouse"
-               oninput="wizardSearchSpouseForMarriage(${i}, this.value)"
-               onfocus="wizardShowSpouseSearch(${i})">
-        <div id="wiz-marr-search-${i}" class="wizard-marriage-spouse-search" style="display:none"></div>
-        ${spouseId ? `<span class="wizard-marriage-spouse-linked">&#x1F517; Verknüpft</span>` : ''}
-        <input type="hidden" class="wiz-marr-spouse-id" value="${spouseId}">
-      </div>
-      <div class="wizard-marriage-dates">
-        <input type="text" placeholder="Hochzeitsdatum" value="${escHtml(m.date || '')}" class="wiz-marr-date">
-        <input type="text" placeholder="Hochzeitsort" value="${escHtml(m.place || '')}" class="wiz-marr-place">
-      </div>
-      <button onclick="wizardRemoveMarriage(${i})" title="Ehe entfernen">&#x2715;</button>
-    </div>
-  `}).join('');
-  document.getElementById('wizard-marriages-list').innerHTML = marriagesHtml || '<div style="color:#567;font-size:12px;">Keine Ehen erkannt</div>';
-
-  // Calculate and show proposed changes (with auto-link info)
-  wizardCalculateChanges(entry, currentDecision);
-
-  // Find and show matches
-  wizardFindMatches(entry);
-
-  // Show auto-link status if applicable
-  if (currentDecision?.autoLinked) {
-    const noticeEl = document.getElementById('wizard-auto-link-notice');
-    const textEl = document.getElementById('wizard-auto-link-text');
-    const indi = individuals.get(currentDecision.targetId);
-    textEl.textContent = `Auto-verknüpft mit: ${indi?.name || currentDecision.targetId} (Score: 150+)`;
-    noticeEl.style.display = 'flex';
-  } else {
-    document.getElementById('wizard-auto-link-notice').style.display = 'none';
-  }
-
-  // Update button states based on decision
-  _wizardUpdateButtonStates(currentDecision);
-}
-
-function wizardCalculateChanges(entry, currentDecision) {
-  const changes = [];
-
-  // Show auto-link status
-  if (currentDecision?.autoLinked && currentDecision?.targetId) {
-    const indi = individuals.get(currentDecision.targetId);
-    changes.push({ field: 'Status', old: '(neu)', new: `Auto-verknüpft mit ${indi?.name || currentDecision.targetId}` });
-    return; // No other changes needed for auto-linked entries
-  }
-
-  // Find existing match
-  const existingId = _wizardFindExistingMatch(entry);
-  const existing = existingId ? individuals.get(existingId) : null;
-
-  if (existing) {
-    // Compare fields
-    if (entry.birthDate && entry.birthDate !== (existing.birth?.date || '')) {
-      changes.push({ field: 'Geburtsdatum', old: existing.birth?.date || '(leer)', new: entry.birthDate });
-    }
-    if (entry.birthPlace && entry.birthPlace !== (existing.birth?.plac || '')) {
-      changes.push({ field: 'Geburtsort', old: existing.birth?.plac || '(leer)', new: entry.birthPlace });
-    }
-    if (entry.deathDate && entry.deathDate !== (existing.death?.date || '')) {
-      changes.push({ field: 'Sterbedatum', old: existing.death?.date || '(leer)', new: entry.deathDate });
-    }
-    if (entry.deathPlace && entry.deathPlace !== (existing.death?.plac || '')) {
-      changes.push({ field: 'Sterbeort', old: existing.death?.plac || '(leer)', new: entry.deathPlace });
-    }
-    if (entry.sex && entry.sex !== 'U' && entry.sex !== (existing.sex || 'U')) {
-      changes.push({ field: 'Geschlecht', old: existing.sex || '(leer)', new: entry.sex });
-    }
-  } else {
-    // New person - show what will be added
-    if (entry.fullName) changes.push({ field: 'Name', old: '(neu)', new: entry.fullName });
-    if (entry.birthDate) changes.push({ field: 'Geburtsdatum', old: '(neu)', new: entry.birthDate });
-    if (entry.birthPlace) changes.push({ field: 'Geburtsort', old: '(neu)', new: entry.birthPlace });
-  }
-
-  const changesHtml = changes.length ? changes.map(c => `
-    <div class="wizard-change-item">
-      <span class="wizard-change-field">${escHtml(c.field)}:</span>
-      <span class="wizard-change-old">${escHtml(c.old)}</span>
-      <span class="wizard-change-arrow">&#x2192;</span>
-      <span class="wizard-change-new">${escHtml(c.new)}</span>
-    </div>
-  `).join('') : '<div style="color:#567;font-size:12px;">Keine Änderungen vorgeschlagen</div>';
-
-  document.getElementById('wizard-changes-list').innerHTML = changesHtml;
-}
-
-function wizardFindMatches(entry) {
-  const candidates = [];
-  const searchName = (entry.fullName || '').toLowerCase();
-  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-  // Search in existing individuals
-  for (const [id, indi] of individuals) {
-    const indiName = (indi.name || '').toLowerCase();
-    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-    let score = 0;
-    if (indiName === searchName) {
-      score = 100;
-    } else if (indiName.includes(searchName) || searchName.includes(indiName)) {
-      score = 50;
-    } else if (indiName.split(' ').pop() === searchName.split(' ').pop()) {
-      score = 30;
-    }
-
-    if (score > 0 && indiBirth && searchBirth) {
-      if (indiBirth === searchBirth) score += 50;
-      else if (Math.abs(parseInt(indiBirth) - parseInt(searchBirth)) <= 2) score += 20;
-    }
-
-    if (score > 0) {
-      candidates.push({ type: 'existing', id, name: indi.name, birth: indi.birth?.date || '', death: indi.death?.date || '', sex: indi.sex || 'U', score });
-    }
-  }
-
-  // Search in other entries
-  _wizardEntries.forEach((other, idx) => {
-    if (idx === _wizardCurrentIdx) return;
-    const otherName = (other.fullName || '').toLowerCase();
-    const otherBirth = (other.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-    let score = 0;
-    if (otherName === searchName) score = 90;
-    else if (otherName.includes(searchName) || searchName.includes(otherName)) score = 40;
-
-    if (score > 0 && otherBirth && searchBirth && otherBirth === searchBirth) score += 40;
-
-    if (score > 0) {
-      candidates.push({ type: 'new', idx, name: other.fullName, birth: other.birthDate || '', death: other.deathDate || '', sex: other.sex || 'U', score });
-    }
-  });
-
-  candidates.sort((a, b) => b.score - a.score);
-
-  const matchesHtml = candidates.slice(0, 5).map(c => `
-    <div class="wizard-match-item" onclick="wizardSelectMatch('${c.type}', '${c.type === 'existing' ? c.id : c.idx}')">
-      <span class="wizard-match-type ${c.type}">${c.type === 'existing' ? 'GEDCOM' : 'NEU'}</span>
-      <div class="wizard-match-info">
-        <div class="wizard-match-name">${escHtml(c.name)}</div>
-        <div class="wizard-match-details">${c.birth ? `geb. ${escHtml(c.birth)}` : ''} ${c.death ? `- gest. ${escHtml(c.death)}` : ''} [${c.sex}]</div>
-      </div>
-      <span class="wizard-match-score">${c.score}</span>
-    </div>
-  `).join('');
-
-  document.getElementById('wizard-matches-list').innerHTML = matchesHtml || '<div style="color:#567;font-size:12px;">Keine Treffer gefunden</div>';
-}
-
-function _wizardFindExistingMatch(entry) {
-  const searchName = _tiNormName(entry.fullName || '');
-  const searchBirth = (entry.birthDate || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-  for (const [id, indi] of individuals) {
-    const indiName = _tiNormName(indi.name || '');
-    const indiBirth = (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || '';
-
-    if (indiName === searchName) {
-      if (!searchBirth || !indiBirth || indiBirth === searchBirth) {
-        return id;
-      }
-    }
-  }
-  return null;
-}
-
-function wizardSelectMatch(type, targetId) {
-  const entry = _wizardEntries[_wizardCurrentIdx];
-
-  if (type === 'existing') {
-    // Mark for linking to existing
-    _wizardDecisions.set(_wizardCurrentIdx, {
-      action: 'link',
-      targetId: targetId,
-      entry: _wizardCollectFieldData()
-    });
-  } else {
-    // Mark for linking to another new entry
-    _wizardDecisions.set(_wizardCurrentIdx, {
-      action: 'merge',
-      targetIdx: parseInt(targetId),
-      entry: _wizardCollectFieldData()
-    });
-  }
-
-  _wizardUpdateButtonStates(_wizardDecisions.get(_wizardCurrentIdx));
-  wizardNextEntry();
-}
-
-function wizardCollectFieldData() {
-  const marriages = [];
-  document.querySelectorAll('.wizard-marriage-row').forEach(row => {
-    marriages.push({
-      spouseName: row.querySelector('.wiz-marr-spouse')?.value || '',
-      spouseId: row.querySelector('.wiz-marr-spouse-id')?.value || '',
-      date: row.querySelector('.wiz-marr-date')?.value || '',
-      place: row.querySelector('.wiz-marr-place')?.value || ''
-    });
-  });
-
-  return {
-    fullName: document.getElementById('wizard-field-name').value,
-    sex: document.getElementById('wizard-field-sex').value,
-    birthDate: document.getElementById('wizard-field-birth-date').value,
-    birthPlace: document.getElementById('wizard-field-birth-place').value,
-    deathDate: document.getElementById('wizard-field-death-date').value,
-    deathPlace: document.getElementById('wizard-field-death-place').value,
-    fatherName: document.getElementById('wizard-field-father').value,
-    motherName: document.getElementById('wizard-field-mother').value,
-    notes: document.getElementById('wizard-field-notes').value,
-    marriages: marriages
-  };
-}
-
-function wizardApproveEntry() {
-  _wizardDecisions.set(_wizardCurrentIdx, {
-    action: 'add',
-    entry: wizardCollectFieldData()
-  });
-  wizardNextEntry();
-}
-
-function wizardLinkToExisting() {
-  // Show matches box if hidden
-  const matchesBox = document.getElementById('wizard-matches-box');
-  matchesBox.scrollIntoView({ behavior: 'smooth' });
-}
-
-function wizardUpdateExisting() {
-  const existingId = _wizardFindExistingMatch(_wizardEntries[_wizardCurrentIdx]);
-  if (!existingId) {
-    alert('Keine passende bestehende Person gefunden.');
-    return;
-  }
-
-  _wizardDecisions.set(_wizardCurrentIdx, {
-    action: 'update',
-    targetId: existingId,
-    entry: wizardCollectFieldData()
-  });
-  wizardNextEntry();
-}
-
-function wizardSkipEntry() {
-  _wizardDecisions.set(_wizardCurrentIdx, { action: 'skip' });
-  wizardNextEntry();
-}
-
-function wizardPrevEntry() {
-  if (_wizardCurrentIdx > 0) {
-    wizardShowEntry(_wizardCurrentIdx - 1);
-  }
-}
-
-function wizardNextEntry() {
-  if (_wizardCurrentIdx < _wizardEntries.length - 1) {
-    wizardShowEntry(_wizardCurrentIdx + 1);
-  } else {
-    // Show summary
-    wizardShowSummary();
-  }
-}
-
-function wizardShowSummary() {
-  document.getElementById('wizard-step-review').style.display = 'none';
-  document.getElementById('wizard-step-summary').style.display = '';
-  document.getElementById('wizard-progress-fill').style.width = '100%';
-  document.getElementById('wizard-progress-text').textContent = 'Schritt 3/3: Zusammenfassung';
-
-  // Calculate stats
-  let addCount = 0, linkCount = 0, updateCount = 0, skipCount = 0, pendingCount = 0;
-  const pendingItems = [];
-
-  _wizardEntries.forEach((entry, idx) => {
-    const decision = _wizardDecisions.get(idx);
-    if (!decision) {
-      pendingCount++;
-      pendingItems.push({ status: 'pending', name: entry.fullName });
-    } else if (decision.action === 'add') addCount++;
-    else if (decision.action === 'link') linkCount++;
-    else if (decision.action === 'update') updateCount++;
-    else if (decision.action === 'skip') skipCount++;
-    else if (decision.action === 'merge') linkCount++;
-
-    if (decision && decision.action !== 'pending') {
-      pendingItems.push({
-        status: decision.action,
-        name: decision.entry?.fullName || entry.fullName
-      });
-    }
-  });
-
-  // Render stats
-  const statsHtml = `
-    <div class="wizard-stat-card">
-      <div class="wizard-stat-number" style="color:#7de0a0">${addCount}</div>
-      <div class="wizard-stat-label">Neu hinzufügen</div>
-    </div>
-    <div class="wizard-stat-card">
-      <div class="wizard-stat-number" style="color:#a0d0f0">${linkCount}</div>
-      <div class="wizard-stat-label">Verknüpfen</div>
-    </div>
-    <div class="wizard-stat-card">
-      <div class="wizard-stat-number" style="color:#e0e080">${updateCount}</div>
-      <div class="wizard-stat-label">Aktualisieren</div>
-    </div>
-    <div class="wizard-stat-card">
-      <div class="wizard-stat-number" style="color:#e0a0a0">${skipCount}</div>
-      <div class="wizard-stat-label">Übersprungen</div>
-    </div>
-    <div class="wizard-stat-card">
-      <div class="wizard-stat-number" style="color:#789">${pendingCount}</div>
-      <div class="wizard-stat-label">Ausstehend</div>
-    </div>
-  `;
-  document.getElementById('wizard-stats').innerHTML = statsHtml;
-
-  // Render pending list
-  const pendingHtml = pendingItems.map(item => `
-    <div class="wizard-pending-item">
-      <span class="wizard-pending-status ${item.status}">${item.status}</span>
-      <span class="wizard-pending-name">${escHtml(item.name || 'Unnamed')}</span>
-    </div>
-  `).join('');
-  document.getElementById('wizard-pending-list').innerHTML = pendingHtml || '<div style="color:#567;font-size:12px;padding:8px;">Keine Einträge</div>';
-}
-
-function wizardBackToReview() {
-  document.getElementById('wizard-step-summary').style.display = 'none';
-  document.getElementById('wizard-step-review').style.display = '';
-  document.getElementById('wizard-progress-fill').style.width = '66%';
-  document.getElementById('wizard-progress-text').textContent = 'Schritt 2/3: Einträge prüfen';
-}
-
-function wizardApplyAll() {
-  const toApply = [];
-
-  // Convert wizard decisions to import actions
-  for (const [idx, decision] of _wizardDecisions) {
-    if (decision.action === 'skip') continue;
-
-    const entry = decision.entry || _wizardEntries[idx];
-
-    if (decision.action === 'add') {
-      toApply.push({
-        kind: 'person',
-        status: 'approved',
-        fields: {
-          'Name': entry.fullName,
-          'Sex': entry.sex,
-          'Birth Date': entry.birthDate,
-          'Birth Place': entry.birthPlace,
-          'Death Date': entry.deathDate,
-          'Death Place': entry.deathPlace,
-          'Father': entry.fatherName,
-          'Mother': entry.motherName,
-          'Notes': entry.notes
-        },
-        _person: entry
-      });
-    } else if (decision.action === 'update') {
-      toApply.push({
-        kind: 'update',
-        status: 'approved',
-        existingId: decision.targetId,
-        fields: {
-          'Name': entry.fullName,
-          'Birth Date': entry.birthDate,
-          'Birth Place': entry.birthPlace,
-          'Death Date': entry.deathDate,
-          'Death Place': entry.deathPlace,
-          'Sex': entry.sex,
-          'Notes': entry.notes
+    if (qName) {
+      if (iName === qName)                          score += 1.0;
+      else if (iName.startsWith(qName))             score += 0.8;
+      else if (iName.includes(qName))               score += 0.6;
+      else if (iMaiden && iMaiden.includes(qName))  score += 0.55;
+      else {
+        const words = qName.split(/\s+/).filter(w => w.length > 1);
+        if (words.length) {
+          const hits = words.filter(w => iName.includes(w) || iMaiden.includes(w));
+          if (hits.length) score += 0.35 * hits.length / words.length;
         }
-      });
+      }
+    } else { score += 0.15; }
+    if (score <= 0 && !qYear && !qMaiden) return 0;
+    if (qMaiden) {
+      if (iMaiden && iMaiden.includes(qMaiden)) score += 0.5;
+      else if (iName.includes(qMaiden))          score += 0.3;
+      else                                        score -= 0.3;
     }
-  }
-
-  if (toApply.length === 0) {
-    alert('Keine Änderungen zum Anwenden.');
-    return;
-  }
-
-  // Apply using existing import logic
-  const report = _tiApplyWizardActions(toApply);
-  _fullRebuildGraph();
-  closeWizard();
-
-  const nAdd = report.filter(r => r.type === 'add').length;
-  const nUpd = report.filter(r => r.type === 'update').length;
-  const nFam = report.filter(r => r.type === 'fam').length;
-  alert(`Import abgeschlossen:\n• ${nAdd} Person(en) hinzugefügt\n• ${nUpd} Person(en) aktualisiert\n• ${nFam} Familie(n) erstellt`);
-}
-
-function _tiApplyWizardActions(actions) {
-  // Similar to _tiApplyActions but for wizard
-  let maxIndi = 0, maxFam = 0;
-  for (const [id] of individuals) { const m = id.match(/\d+/); if (m) maxIndi = Math.max(maxIndi,+m[0]); }
-  for (const [id] of families)    { const m = id.match(/\d+/); if (m) maxFam  = Math.max(maxFam, +m[0]); }
-
-  const nameToId = new Map();
-  for (const [id, indi] of individuals) nameToId.set(_tiNormName(indi.name||''), id);
-
-  const report = [];
-
-  // Apply updates
-  for (const action of actions) {
-    if (action.kind !== 'update') continue;
-    const indi = individuals.get(action.existingId);
-    if (!indi) continue;
-
-    if (action.fields['Birth Date']) indi.birth.date = action.fields['Birth Date'];
-    if (action.fields['Birth Place']) indi.birth.plac = action.fields['Birth Place'];
-    if (action.fields['Death Date']) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
-    if (action.fields['Death Place']) indi.death.plac = action.fields['Death Place'];
-    if (action.fields['Sex'] && (!indi.sex || indi.sex === 'U')) indi.sex = action.fields['Sex'];
-    if (action.fields['Notes']) indi.note = indi.note ? indi.note + '; ' + action.fields['Notes'] : action.fields['Notes'];
-
-    report.push({ type: 'update', msg: `${indi.name} updated` });
-  }
-
-  // Add new persons
-  for (const action of actions) {
-    if (action.kind !== 'person') continue;
-
-    const name = action.fields['Name'];
-    const nn = _tiNormName(name);
-
-    if (nameToId.has(nn)) {
-      report.push({ type: 'skip', msg: `${name} already exists` });
-      continue;
+    if (qYear && iYear) {
+      const d = Math.abs(+qYear - +iYear);
+      if (d === 0) score += 0.5; else if (d <= 2) score += 0.15; else score -= 0.35;
     }
-
-    const xref = `@I${++maxIndi}@`;
-    nameToId.set(nn, xref);
-
-    individuals.set(xref, {
-      id: xref,
-      name: name,
-      sex: action.fields['Sex'] || 'U',
-      birth: { date: action.fields['Birth Date'] || '', plac: action.fields['Birth Place'] || '' },
-      death: { date: action.fields['Death Date'] || '', plac: action.fields['Death Place'] || '', caus: '' },
-      deceased: !!action.fields['Death Date'],
-      occu: '',
-      note: action.fields['Notes'] || '',
-      fams: [],
-      famc: ''
-    });
-
-    report.push({ type: 'add', msg: `${name} → ${xref}` });
-  }
-
-  return report;
-}
-
-function wizardAddMarriage() {
-  const container = document.getElementById('wizard-marriages-list');
-  const idx = container.children.length;
-
-  const row = document.createElement('div');
-  row.className = 'wizard-marriage-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="wizard-marriage-spouse-section">
-      <input type="text" placeholder="Ehepartner suchen..." class="wiz-marr-spouse"
-             oninput="wizardSearchSpouseForMarriage(${idx}, this.value)"
-             onfocus="wizardShowSpouseSearch(${idx})">
-      <div id="wiz-marr-search-${idx}" class="wizard-marriage-spouse-search" style="display:none"></div>
-      <input type="hidden" class="wiz-marr-spouse-id" value="">
-    </div>
-    <div class="wizard-marriage-dates">
-      <input type="text" placeholder="Hochzeitsdatum" class="wiz-marr-date">
-      <input type="text" placeholder="Hochzeitsort" class="wiz-marr-place">
-    </div>
-    <button onclick="wizardRemoveMarriage(${idx})" title="Ehe entfernen">&#x2715;</button>
-  `;
-
-  if (container.children[0]?.textContent?.includes('Keine Ehen')) {
-    container.innerHTML = '';
-  }
-  container.appendChild(row);
-
-  // Show spouse search immediately
-  wizardShowSpouseSearch(idx);
-}
-
-function wizardRemoveMarriage(idx) {
-  const row = document.querySelector(`.wizard-marriage-row[data-idx="${idx}"]`);
-  if (row) row.remove();
-}
-
-function _wizardUpdateButtonStates(decision) {
-  // Visual feedback for button states could be added here
-  // For now, the decision is stored and applied on next/prev
-}
-
-function wizardHideAutoSkipNotice() {
-  document.getElementById('wizard-auto-skip-notice').style.display = 'none';
-}
-
-function wizardShowAutoLinkDetails() {
-  const decision = _wizardDecisions.get(_wizardCurrentIdx);
-  if (!decision?.autoLinked || !decision?.targetId) return;
-
-  const indi = individuals.get(decision.targetId);
-  if (indi) {
-    alert(`Auto-Verknüpfungsdetails:\n\nName: ${indi.name}\nID: ${decision.targetId}\nGeburt: ${indi.birth?.date || 'unbekannt'} ${indi.birth?.plac || ''}\nGeschlecht: ${indi.sex || 'U'}\n\nDiese Person wurde basierend auf hoher Übereinstimmung automatisch verknüpft.`);
-  }
-}
-
-function wizardBreakAutoLink() {
-  const decision = _wizardDecisions.get(_wizardCurrentIdx);
-  if (!decision?.autoLinked) return;
-
-  // Remove the auto-link and show entry for manual review
-  _wizardDecisions.delete(_wizardCurrentIdx);
-  document.getElementById('wizard-auto-link-notice').style.display = 'none';
-
-  // Re-render to show as new entry
-  _wizardRenderEntry(_wizardCurrentIdx);
-
-  alert('Auto-Verknüpfung aufgehoben. Sie können nun manuell entscheiden.');
-}
-
-// Spouse search for marriages
-let _wizardActiveSpouseSearchIdx = null;
-
-function wizardShowSpouseSearch(idx) {
-  _wizardActiveSpouseSearchIdx = idx;
-  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
-  if (searchEl) {
-    searchEl.style.display = 'block';
-    // Populate with top matches initially
-    wizardSearchSpouseForMarriage(idx, '');
-  }
-}
-
-function wizardHideSpouseSearch(idx) {
-  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
-  if (searchEl) {
-    searchEl.style.display = 'none';
-  }
-  if (_wizardActiveSpouseSearchIdx === idx) {
-    _wizardActiveSpouseSearchIdx = null;
-  }
-}
-
-function wizardSearchSpouseForMarriage(idx, query) {
-  const searchEl = document.getElementById(`wiz-marr-search-${idx}`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-
-  // Search in existing individuals and import entries
-  const candidates = [];
-
-  // Search GEDCOM
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    const birth = (indi.birth?.date || '').toLowerCase();
-    if (!query || name.includes(query) || birth.includes(query)) {
-      let score = 0;
-      if (query && name.includes(query)) score += 50;
-      if (query && birth.includes(query)) score += 30;
-      candidates.push({
-        type: 'gedcom',
-        id: id,
-        name: indi.name,
-        birth: indi.birth?.date || '',
-        sex: indi.sex || 'U',
-        score: score || 10
-      });
-    }
-  }
-
-  // Search import entries
-  _wizardEntries.forEach((entry, eIdx) => {
-    if (eIdx === _wizardCurrentIdx) return; // Skip self
-    const name = (entry.fullName || '').toLowerCase();
-    const birth = (entry.birthDate || '').toLowerCase();
-    if (!query || name.includes(query) || birth.includes(query)) {
-      let score = 0;
-      if (query && name.includes(query)) score += 40;
-      if (query && birth.includes(query)) score += 30;
-      candidates.push({
-        type: 'import',
-        idx: eIdx,
-        name: entry.fullName,
-        birth: entry.birthDate || '',
-        sex: entry.sex || 'U',
-        score: score || 5
-      });
-    }
-  });
-
-  // Sort by score and take top 5
-  candidates.sort((a, b) => b.score - a.score);
-  const topCandidates = candidates.slice(0, 5);
-
-  if (topCandidates.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = topCandidates.map(c => `
-      <div class="wizard-spouse-search-item" onclick="wizardSelectSpouseForMarriage(${idx}, '${c.type}', '${c.type === 'gedcom' ? c.id : c.idx}', '${escHtml(c.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(c.name)}</span>
-        <span class="details">${c.birth ? escHtml(c.birth) : ''} [${c.sex}]</span>
-        <span class="score">${c.type === 'gedcom' ? 'GEDCOM' : 'IMPORT'}</span>
-      </div>
-    `).join('');
-  }
-
-  searchEl.style.display = 'block';
-}
-
-function wizardSelectSpouseForMarriage(marriageIdx, type, targetId, name) {
-  const row = document.querySelector(`.wizard-marriage-row[data-idx="${marriageIdx}"]`);
-  if (!row) return;
-
-  // Update the spouse input
-  const spouseInput = row.querySelector('.wiz-marr-spouse');
-  const spouseIdInput = row.querySelector('.wiz-marr-spouse-id');
-  if (spouseInput) spouseInput.value = name;
-  if (spouseIdInput) spouseIdInput.value = type === 'gedcom' ? targetId : '';
-
-  // Mark as linked
-  const spouseSection = row.querySelector('.wizard-marriage-spouse-section');
-  let linkedBadge = spouseSection.querySelector('.wizard-marriage-spouse-linked');
-  if (!linkedBadge) {
-    linkedBadge = document.createElement('span');
-    linkedBadge.className = 'wizard-marriage-spouse-linked';
-    linkedBadge.innerHTML = '&#x1F517; Verknüpft';
-    spouseSection.appendChild(linkedBadge);
-  }
-
-  // Hide search
-  wizardHideSpouseSearch(marriageIdx);
-}
-
-function wizardSearchPersons() {
-  const query = document.getElementById('wizard-search-input').value.toLowerCase().trim();
-  if (!query) {
-    wizardCloseSearch();
-    return;
+    return score;
   }
 
   const results = [];
-
-  // Search in existing GEDCOM individuals
   for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    const birth = (indi.birth?.date || '').toLowerCase();
-    const place = (indi.birth?.plac || '').toLowerCase();
-
-    if (name.includes(query) || birth.includes(query) || place.includes(query)) {
-      results.push({
-        type: 'gedcom',
-        id: id,
-        name: indi.name,
-        birth: indi.birth?.date || '',
-        death: indi.death?.date || '',
-        sex: indi.sex || 'U'
-      });
-    }
+    const score = scoreStr(
+      (indi.name || '').toLowerCase(),
+      (indi.maidenName || '').toLowerCase(),
+      (indi.birth?.date || '').match(/\b(\d{4})\b/)?.[1] || ''
+    );
+    if (score > 0.05) results.push({ score, type: 'existing', id, indi });
+  }
+  for (const pa of _importActions) {
+    if (pa.id === actionId || pa.status === 'skipped') continue;
+    const score = scoreStr(
+      (pa.fields['Name'] || '').toLowerCase(), '',
+      (pa.fields['Birth Date']||'').match(/\b(\d{4})\b/)?.[1] || ''
+    );
+    if (score > 0.05) results.push({ score, type: 'pending', id: pa.id, pa });
   }
 
-  // Search in wizard import entries
-  _wizardEntries.forEach((entry, idx) => {
-    const name = (entry.fullName || '').toLowerCase();
-    const birth = (entry.birthDate || '').toLowerCase();
-    const place = (entry.birthPlace || '').toLowerCase();
+  results.sort((a, b) => b.score - a.score);
+  const top = results.slice(0, 12);
+  if (!top.length) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
 
-    if (name.includes(query) || birth.includes(query) || place.includes(query)) {
-      results.push({
-        type: 'import',
-        idx: idx,
-        name: entry.fullName,
-        birth: entry.birthDate || '',
-        death: entry.deathDate || '',
-        sex: entry.sex || 'U',
-        current: idx === _wizardCurrentIdx
-      });
+  drop.innerHTML = top.map(r => {
+    if (r.type === 'existing') {
+      const { id, indi } = r;
+      const bYear  = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const dYear  = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const maiden = indi.maidenName ? ` <span class="import-sdrop-maiden">geb. ${escHtml(indi.maidenName)}</span>` : '';
+      const bPlace = indi.birth?.plac || '';
+      const parts  = [];
+      if (bYear || bPlace) parts.push((bYear ? '*' + bYear : '') + (bPlace ? (bYear ? ' ' : '') + bPlace : ''));
+      if (dYear) parts.push('\u2020' + dYear);
+      const detail = parts.join(' \u00b7 ');
+      return `<div class="import-sdrop-item" onmousedown="event.preventDefault();_imPersonSelect('${actionId}','${fieldKey}','existing','${id}')">
+        <span class="import-sdrop-name">${escHtml(indi.name)}${maiden}</span>
+        ${detail ? `<span class="import-sdrop-detail">${detail}</span>` : ''}
+      </div>`;
+    } else {
+      const { id, pa } = r;
+      const bYear = (pa.fields['Birth Date']||'').match(/\b(\d{4})\b/)?.[1] || '';
+      const dYear = (pa.fields['Death Date']||'').match(/\b(\d{4})\b/)?.[1] || '';
+      const parts = [];
+      if (bYear) parts.push('*' + bYear);
+      if (dYear) parts.push('\u2020' + dYear);
+      const detail = parts.join(' \u00b7 ');
+      return `<div class="import-sdrop-item import-sdrop-item--pending" onmousedown="event.preventDefault();_imPersonSelect('${actionId}','${fieldKey}','pending','${id}')">
+        <span class="import-sdrop-name">${escHtml(pa.fields['Name']||'')}</span>
+        ${detail ? `<span class="import-sdrop-detail">${detail}</span>` : ''}
+      </div>`;
     }
-  });
+  }).join('');
+  drop.style.display = '';
+}
 
-  // Render results
-  const resultsEl = document.getElementById('wizard-search-results');
-  const contentEl = document.getElementById('wizard-search-results-content');
+function _imPersonSelect(actionId, fieldKey, type, targetId) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  action.fieldLinks = action.fieldLinks || {};
 
-  if (results.length === 0) {
-    contentEl.innerHTML = '<div style="color:#567;font-size:13px;text-align:center;padding:20px;">Keine Treffer gefunden</div>';
+  const resolveName = (t, id) => t === 'existing'
+    ? (individuals.get(id)?.name || '')
+    : (_importActions.find(a => a.id === id)?.fields['Name'] || '');
+
+  if (fieldKey === 'Name') {
+    if (type !== 'existing') return;
+    const indi = individuals.get(targetId);
+    if (!indi) return;
+    action.kind       = 'update';
+    action.existingId = targetId;
+    action.status     = 'approved';
+    const missing = {};
+    if (!indi.birth?.date  && action.fields['Birth Date'])  missing['Birth Date']  = action.fields['Birth Date'];
+    if (!indi.birth?.plac  && action.fields['Birth Place']) missing['Birth Place'] = action.fields['Birth Place'];
+    if (!indi.death?.date  && action.fields['Death Date'])  missing['Death Date']  = action.fields['Death Date'];
+    if (!indi.death?.plac  && action.fields['Death Place']) missing['Death Place'] = action.fields['Death Place'];
+    if ((!indi.sex||indi.sex==='U') && action.fields['Sex']) missing['Sex'] = action.fields['Sex'];
+    if (action.fields['Notes'] && !(indi.note||'').includes(action.fields['Notes'])) missing['Notes'] = action.fields['Notes'];
+    action.fields = Object.assign({ 'Name': indi.name }, missing);
+  } else if (fieldKey.startsWith('Children:')) {
+    action.fieldLinks[fieldKey] = { type, id: targetId };
+    const idx = parseInt(fieldKey.split(':')[1]);
+    const name = resolveName(type, targetId);
+    if (action._childrenArr) action._childrenArr[idx] = name;
+    action.fields['Children'] = (action._childrenArr || []).join('; ');
   } else {
-    contentEl.innerHTML = results.slice(0, 10).map(r => `
-      <div class="wizard-search-result-item" onclick="wizardGotoSearchResult('${r.type}', '${r.type === 'gedcom' ? r.id : r.idx}')">
-        <span class="wizard-search-result-type ${r.type}">${r.type === 'gedcom' ? 'GEDCOM' : 'IMPORT'}</span>
-        <div class="wizard-search-result-info">
-          <div class="wizard-search-result-name">${escHtml(r.name)} ${r.current ? '<span style="color:#4caf7d;">(aktuell)</span>' : ''}</div>
-          <div class="wizard-search-result-details">${r.birth ? `geb. ${escHtml(r.birth)}` : ''} ${r.death ? `- gest. ${escHtml(r.death)}` : ''} [${r.sex}]</div>
-        </div>
-        <div class="wizard-search-result-actions">
-          <button class="btn-goto" onclick="event.stopPropagation();wizardGotoSearchResult('${r.type}', '${r.type === 'gedcom' ? r.id : r.idx}')">Gehe zu</button>
-          ${r.type === 'gedcom' ? `<button class="btn-link" onclick="event.stopPropagation();wizardLinkToSearchResult('${r.id}')">Verknüpfen</button>` : ''}
-        </div>
-      </div>
-    `).join('');
+    action.fieldLinks[fieldKey] = { type, id: targetId };
+    action.fields[fieldKey] = resolveName(type, targetId);
   }
 
-  resultsEl.style.display = 'block';
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+  _renderImportSummary();
 }
 
-function wizardCloseSearch() {
-  document.getElementById('wizard-search-results').style.display = 'none';
-  document.getElementById('wizard-search-input').value = '';
+function _imFieldUnlink(actionId, fieldKey) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  action.fieldLinks = action.fieldLinks || {};
+  delete action.fieldLinks[fieldKey];
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+  _renderImportSummary();
 }
 
-function wizardGotoSearchResult(type, target) {
-  if (type === 'import') {
-    const idx = parseInt(target);
-    wizardCloseSearch();
-    wizardShowEntry(idx);
-  } else {
-    // For GEDCOM entries, we could highlight them in the main view
-    // For now, just show a message
-    const indi = individuals.get(target);
-    if (indi) {
-      alert(`GEDCOM Person: ${indi.name}\nGeburt: ${indi.birth?.date || 'unbekannt'}\nID: ${target}`);
-    }
+function _imUnlink(actionId) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  const p = action._person;
+  action.kind       = 'person';
+  action.existingId = undefined;
+  action.status     = 'pending';
+  if (p) {
+    action.fields = {
+      'Name':         p.fullName,
+      'Sex':          p.sex || '',
+      'Birth Date':   p.birthDate  || '',
+      'Birth Place':  p.birthPlace || '',
+      'Death Date':   p.deathDate  || '',
+      'Death Place':  p.deathPlace || '',
+      'Father':       p.fatherName || '',
+      'Mother':       p.motherName || '',
+      'Notes':        p.notes      || '',
+    };
   }
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+  _renderImportSummary();
 }
 
-function wizardLinkToSearchResult(existingId) {
-  const indi = individuals.get(existingId);
-  if (!indi) return;
-
-  // Mark current entry as linked to this existing person
-  _wizardDecisions.set(_wizardCurrentIdx, {
-    action: 'link',
-    targetId: existingId,
-    entry: wizardCollectFieldData()
-  });
-
-  wizardCloseSearch();
-  wizardNextEntry();
+function _imAddChild(actionId) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action) return;
+  action._childrenArr = action._childrenArr || [];
+  action._childrenArr.push('');
+  action.fields['Children'] = action._childrenArr.join('; ');
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
 }
 
-window.openWizard              = openWizard;
-window.closeWizard             = closeWizard;
-window.handleWizardFileSelect  = handleWizardFileSelect;
-window.wizardParseText         = wizardParseText;
-window.wizardShowEntry         = wizardShowEntry;
-window._wizardRenderEntry      = _wizardRenderEntry;
-window.wizardPrevEntry         = wizardPrevEntry;
-window.wizardNextEntry         = wizardNextEntry;
-window.wizardApproveEntry      = wizardApproveEntry;
-window.wizardLinkToExisting    = wizardLinkToExisting;
-window.wizardUpdateExisting    = wizardUpdateExisting;
-window.wizardSkipEntry         = wizardSkipEntry;
-window.wizardSelectMatch       = wizardSelectMatch;
-window.wizardAddMarriage       = wizardAddMarriage;
-window.wizardRemoveMarriage    = wizardRemoveMarriage;
-window.wizardShowSummary       = wizardShowSummary;
-window.wizardBackToReview      = wizardBackToReview;
-window.wizardApplyAll          = wizardApplyAll;
-window.wizardHideAutoSkipNotice = wizardHideAutoSkipNotice;
-window.wizardShowAutoLinkDetails = wizardShowAutoLinkDetails;
-window.wizardBreakAutoLink     = wizardBreakAutoLink;
-window.wizardSearchPersons     = wizardSearchPersons;
-window.wizardCloseSearch       = wizardCloseSearch;
-window.wizardGotoSearchResult  = wizardGotoSearchResult;
-window.wizardLinkToSearchResult = wizardLinkToSearchResult;
-window.wizardShowSpouseSearch  = wizardShowSpouseSearch;
-window.wizardHideSpouseSearch  = wizardHideSpouseSearch;
-window.wizardSearchSpouseForMarriage = wizardSearchSpouseForMarriage;
-window.wizardSelectSpouseForMarriage = wizardSelectSpouseForMarriage;
+function _imRemoveChild(actionId, idx) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action || !action._childrenArr) return;
+  action._childrenArr.splice(idx, 1);
+  action.fieldLinks = action.fieldLinks || {};
+  const newLinks = {};
+  for (const [k, v] of Object.entries(action.fieldLinks)) {
+    if (!k.startsWith('Children:')) { newLinks[k] = v; continue; }
+    const i = parseInt(k.split(':')[1]);
+    if (i === idx) continue;
+    newLinks['Children:' + (i > idx ? i - 1 : i)] = v;
+  }
+  action.fieldLinks = newLinks;
+  action.fields['Children'] = action._childrenArr.join('; ');
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+}
+
+window._imUnlink       = _imUnlink;
+window._imFieldUnlink  = _imFieldUnlink;
+window._imChangeFieldLink = _imChangeFieldLink;
+window._imChangeMainLink  = _imChangeMainLink;
+window._imPersonSearch = _imPersonSearch;
+window._imPersonSelect = _imPersonSelect;
+window._imAddChild     = _imAddChild;
+window._imRemoveChild  = _imRemoveChild;
+
 
 // ═══════════════════════════════════════════════════════════════
 // QUICK ENTRY FUNCTIONS - Fast Manual Data Entry
@@ -6998,19 +6677,25 @@ function quickSearchSpouse(idx, query) {
   for (const [id, indi] of individuals) {
     const name = (indi.name || '').toLowerCase();
     if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+      const bYear = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const dYear = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const parts = [];
+      if (bYear) parts.push('*' + bYear);
+      if (dYear) parts.push('\u2020' + dYear);
+      results.push({ id, name: indi.name, maiden: indi.maidenName || '', detail: parts.join(' · ') });
     }
   }
 
   if (results.length === 0) {
     searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer - Klicken um neu zu erstellen</div>';
   } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectSpouse(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
+    searchEl.innerHTML = results.slice(0, 8).map(r => {
+      const maiden = r.maiden ? ` <span style="color:#9b87c0;font-size:11px;">geb. ${escHtml(r.maiden)}</span>` : '';
+      return `<div class="quick-search-item" onclick="quickSelectSpouse(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}${maiden}</span>
+        ${r.detail ? `<span class="details">${r.detail}</span>` : ''}
+      </div>`;
+    }).join('');
   }
   searchEl.style.display = 'block';
 }
@@ -7110,19 +6795,25 @@ function quickSearchChild(idx, query) {
   for (const [id, indi] of individuals) {
     const name = (indi.name || '').toLowerCase();
     if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
+      const bYear = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const dYear = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
+      const parts = [];
+      if (bYear) parts.push('*' + bYear);
+      if (dYear) parts.push('\u2020' + dYear);
+      results.push({ id, name: indi.name, maiden: indi.maidenName || '', detail: parts.join(' · ') });
     }
   }
 
   if (results.length === 0) {
     searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
   } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectChild(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
+    searchEl.innerHTML = results.slice(0, 8).map(r => {
+      const maiden = r.maiden ? ` <span style="color:#9b87c0;font-size:11px;">geb. ${escHtml(r.maiden)}</span>` : '';
+      return `<div class="quick-search-item" onclick="quickSelectChild(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
+        <span class="name">${escHtml(r.name)}${maiden}</span>
+        ${r.detail ? `<span class="details">${r.detail}</span>` : ''}
+      </div>`;
+    }).join('');
   }
   searchEl.style.display = 'block';
 }
@@ -7218,13 +6909,18 @@ function quickCreateNewChild() {
           <option value="M">M</option>
           <option value="F">F</option>
         </select>
-        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'child')">&#x2713;</button>
-        <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
       </div>
       <div class="quick-field-row">
         <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
         <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
+      </div>
+      <div class="quick-field-row">
         <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
+        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
+      </div>
+      <div class="quick-field-row">
+        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'child')">&#x2713; Speichern</button>
+        <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715; Abbrechen</button>
       </div>
     </div>
   `;
@@ -7233,7 +6929,6 @@ function quickCreateNewChild() {
   // Focus name field
   row.querySelector('.qe-new-name').focus();
 }
-
 // Save functions
 function quickSavePerson() {
   const person = _qeCollectFormData();
@@ -8406,3 +8101,157 @@ function _acAttachQuickEntry() {
 }
 
 document.addEventListener('DOMContentLoaded', _acAttachQuickEntry);
+
+// ═══════════════════════════════════════════════════════════════
+// AI IMPORT — Claude /v1/messages tool-use → persons[]
+// ═══════════════════════════════════════════════════════════════
+
+function _aiGetKey() {
+  const el = document.getElementById('ai-api-key-input');
+  const inp = el ? (el.value || '').trim() : '';
+  return inp || window.ANTHROPIC_API_KEY || localStorage.getItem('ai_api_key') || '';
+}
+
+function _aiSaveKey() {
+  const k = _aiGetKey();
+  if (!k) return;
+  localStorage.setItem('ai_api_key', k);
+  const s = document.getElementById('ai-key-status');
+  if (s) { s.textContent = 'gespeichert'; setTimeout(() => s.textContent = '', 1500); }
+}
+
+function _aiToggleKeyVisibility() {
+  const el = document.getElementById('ai-api-key-input');
+  if (el) el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function _aiParseContent(apiKey, model, text, imageData) {
+  const SYSTEM = `You are a genealogy data extraction assistant. Extract EVERY person named in the source via the record_persons tool.
+
+COMPLETENESS — critical:
+- Include subjects, every spouse (even later marriages), all parents, all children, twin/sibling, and anyone named only inside notes (e.g. mother of a spouse, stepfather, grandfather).
+- Children listed as "i.", "ii.", "iii." etc. are SEPARATE persons — record each one. Do not stop after the first item in such a list.
+- If the source mentions N distinct people, the persons array MUST contain N entries. Skipping anyone is a failure.
+
+Reproduce names, places and notes VERBATIM as they appear in the source. Do NOT translate, normalise, modernise or anglicise. Keep German notes in German.
+Dates: "DD MON YYYY" preferred (e.g. "15 JUN 1840"); partial like "JUN 1840" or "1840" is acceptable. Month abbreviations must be English 3-letter (JAN, FEB, MAR, APR, MAY, JUN, JUL, AUG, SEP, OCT, NOV, DEC).
+Empty string "" for any unknown field — never null.
+List children only under the marriage they belong to. Each marriage is a separate entry in the marriages array.`;
+
+  const tool = {
+    name: 'record_persons',
+    description: 'Records all persons and family relationships from the source.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        persons: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              fullName:   { type: 'string' },
+              sex:        { type: 'string', description: 'M, F oder ""' },
+              birthDate:  { type: 'string' },
+              birthPlace: { type: 'string' },
+              deathDate:  { type: 'string' },
+              deathPlace: { type: 'string' },
+              fatherName: { type: 'string' },
+              motherName: { type: 'string' },
+              notes:      { type: 'string' },
+              marriages: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    spouseName: { type: 'string' },
+                    date:       { type: 'string' },
+                    place:      { type: 'string' },
+                    children: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { fullName: { type: 'string' } },
+                        required: ['fullName']
+                      }
+                    }
+                  },
+                  required: ['spouseName']
+                }
+              }
+            },
+            required: ['fullName']
+          }
+        }
+      },
+      required: ['persons']
+    }
+  };
+
+  const userContent = [];
+  if (imageData) {
+    userContent.push({ type: 'image', source: { type: 'base64', media_type: imageData.mediaType, data: imageData.base64 } });
+    userContent.push({ type: 'text', text: 'Extract every person from this image via the record_persons tool. Copy names, places and notes verbatim.' });
+  } else {
+    userContent.push({ type: 'text', text: `Extract every person mentioned in the source below via the record_persons tool — including people named only inside notes (parents of spouses, stepfathers, earlier marriages, twin siblings, etc.). Copy names, places and notes verbatim.\n\n---\n${text}` });
+  }
+
+  const endpoint = window.AI_PROXY_URL
+    ? window.AI_PROXY_URL.replace(/\/$/, '') + '/v1/messages'
+    : 'https://api.anthropic.com/v1/messages';
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 16384,
+      system: SYSTEM,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'record_persons' },
+      messages: [{ role: 'user', content: userContent }]
+    })
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  console.log('[KI Import] response:', data);
+
+  const toolBlock = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'record_persons');
+  if (!toolBlock) throw new Error(`Antwort ohne Tool-Aufruf. stop_reason=${data.stop_reason || '?'}`);
+
+  let persons = toolBlock.input?.persons;
+  if (typeof persons === 'string') {
+    // Sonnet sometimes writes ASCII `"` as the closing typographic quote inside German
+    // emphasis like „Meieli" — that quote is unescaped and breaks JSON.parse. Repair.
+    persons = JSON.parse(persons.replace(/„([^"„]*)"/g, '„$1”'));
+  }
+  if (!Array.isArray(persons)) throw new Error(`persons ist kein Array. shape=${JSON.stringify(toolBlock.input).slice(0,200)}`);
+  return _aiMapToPersons(persons);
+}
+
+function _aiMapToPersons(arr) {
+  return arr.map(p => ({
+    fullName:   (p.fullName   || '').trim(),
+    sex:        (p.sex        || '').toUpperCase().replace(/[^MF]/g, ''),
+    birthDate:  _tiNormDate(p.birthDate  || ''),
+    birthPlace: (p.birthPlace || '').trim(),
+    deathDate:  _tiNormDate(p.deathDate  || ''),
+    deathPlace: (p.deathPlace || '').trim(),
+    fatherName: (p.fatherName || '').trim(),
+    motherName: (p.motherName || '').trim(),
+    notes:      (p.notes      || '').trim(),
+    sourceNote: 'KI Import',
+    marriages:  (p.marriages  || []).map(m => ({
+      spouseName: (m.spouseName || '').trim(),
+      date:       _tiNormDate(m.date || ''),
+      place:      (m.place || '').trim(),
+      children:   (m.children || []).map(c => ({ fullName: (c.fullName || '').trim() })).filter(c => c.fullName)
+    })).filter(m => m.spouseName)
+  })).filter(p => p.fullName);
+}
+
+window._aiToggleKeyVisibility = _aiToggleKeyVisibility;
+window._aiSaveKey              = _aiSaveKey;
