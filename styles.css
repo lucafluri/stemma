@@ -2853,3 +2853,29 @@ body.relation-picking * { cursor: crosshair !important; }
   flex-shrink: 0;
 }
 
+/* ── Autocomplete dropdown ───────────────────────────────────── */
+#ac-dropdown {
+  position: fixed;
+  background: #0d1a2a;
+  border: 1px solid #2a6090;
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 99999;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+  display: none;
+}
+.ac-item {
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #c8e4ff;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ac-item:hover,
+.ac-item.ac-active {
+  background: #1a3a5a;
+  color: #fff;
+}

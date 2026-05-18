@@ -5298,6 +5298,10 @@ function closeTextImport() {
 function _resetImportUI() {
   document.getElementById('import-step-input').style.display = '';
   document.getElementById('import-step-review').style.display = 'none';
+  const overlay = document.getElementById('import-progress-overlay');
+  if (overlay) overlay.style.display = 'none';
+  const label = document.getElementById('import-progress-label');
+  if (label) label.textContent = '';
   document.getElementById('import-text-area').value = '';
   const fi = document.getElementById('import-file-input');
   if (fi) { fi.value = ''; }
