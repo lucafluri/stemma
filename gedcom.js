@@ -60,26 +60,40 @@
 
     const individuals = new Map();
     const families    = new Map();
+    const otherLines  = [];  // raw lines from unrecognized level-0 records (SOUR, OBJE, SUBM, …)
     const lines = raw.split(/\r?\n/);
 
     let cur     = null;
     let curType = null;  // 'INDI' | 'FAM' | null
     let subCtx  = null;  // tag context string or null
+    let capturingOther = false;  // inside an unrecognized level-0 record
 
     for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line) continue;
+      if (!rawLine.trim()) continue;
 
-      const m = line.match(/^(\d+)\s+(\S+)\s*(.*)/);
+      // Single delimiter space between tag and value per GEDCOM spec — anything
+      // beyond that first space is verbatim value content (matters for CONT/CONC
+      // lines, where leading spaces are meaningful and must not be trimmed away).
+      const m = rawLine.match(/^\s*(\d+)\s+(\S+)(?:\s(.*))?$/);
       if (!m) continue;
 
-      const level = +m[1];
-      const tag   = m[2];
-      const val   = m[3].trim();
+      const level  = +m[1];
+      const tag    = m[2];
+      const rawVal = m[3] || '';
+      const val    = rawVal.trim();
 
       // ── Level 0: new top-level record ──────────────────────────────────────
       if (level === 0) {
         subCtx = null;
+        capturingOther = false;  // re-decided below for this record
+
+        // Reject malformed/hostile xref ids (e.g. containing quotes) — these get
+        // interpolated into onclick handlers in the UI, so only allow the safe
+        // charset GEDCOM actually uses for pointers.
+        if (tag.startsWith('@') && !/^@[A-Za-z0-9_.+-]+@$/.test(tag)) {
+          cur = null; curType = null;
+          continue;
+        }
         if (tag.startsWith('@') && val === 'INDI') {
           cur = _makeIndi(tag);
           cur._names      = [];  // accumulate NAME records before committing
@@ -90,12 +104,20 @@
           cur = _makeFam(tag);
           families.set(tag, cur);
           curType = 'FAM';
-        } else {
+        } else if (tag === 'HEAD' || tag === 'TRLR') {
+          // Own HEAD/TRLR is regenerated on serialize — not preserved.
           cur = null; curType = null;
+        } else {
+          // Unrecognized level-0 record (SOUR, OBJE, SUBM, custom @X@ TAG, …) —
+          // preserve verbatim so it round-trips instead of being silently dropped.
+          cur = null; curType = null;
+          capturingOther = true;
+          otherLines.push(rawLine);
         }
         continue;
       }
 
+      if (capturingOther) { otherLines.push(rawLine); continue; }
       if (!cur) continue;
 
       // ── INDI record ─────────────────────────────────────────────────────────
@@ -117,7 +139,14 @@
             case 'FAMS':  if (val) cur.fams.push(val); break;
             case 'OCCU':  cur.occu = val; break;
             case 'NOTE':  cur.note = val; subCtx = 'NOTE'; break;
+            default:
+              // Unrecognized level-1 tag (SOUR, CHR, BURI, OBJE, custom _TAG, …) —
+              // preserve its whole subtree verbatim instead of dropping it.
+              (cur._unknown = cur._unknown || []).push(rawLine);
+              subCtx = '_UNK';
           }
+        } else if (subCtx === '_UNK') {
+          cur._unknown.push(rawLine);
         } else if (level === 2) {
           if (subCtx && subCtx.startsWith('NAME_')) {
             const nr = cur._names[parseInt(subCtx.slice(5), 10)];
@@ -139,14 +168,18 @@
             else if (tag === 'PLAC') cur.death.plac = val;
             else if (tag === 'CAUS') cur.death.caus = val;
           } else if (subCtx === 'NOTE') {
-            if (tag === 'CONT') cur.note += '\n' + val;
+            if      (tag === 'CONT') cur.note += '\n' + rawVal;
+            else if (tag === 'CONC') cur.note += rawVal;
           } else {
             if      (tag === 'GIVN' && !cur.givn) cur.givn = val;
             else if (tag === 'SURN' && !cur.surn) cur.surn = val;
-            else if (tag === 'CONT') cur.note += '\n' + val;
+            else if (tag === 'CONT') cur.note += '\n' + rawVal;
+            else if (tag === 'CONC') cur.note += rawVal;
           }
         } else if (level === 3 && tag === 'CONT') {
-          cur.note += '\n' + val;
+          cur.note += '\n' + rawVal;
+        } else if (level === 3 && tag === 'CONC') {
+          cur.note += rawVal;
         }
 
       // ── FAM record ─────────────────────────────────────────────────────────
@@ -162,7 +195,14 @@
               subCtx = 'MARR';
               break;
             case 'DIV': cur.div = true; subCtx = 'DIV'; break;
+            default:
+              // Unrecognized level-1 tag (NOTE, SOUR, custom _TAG, …) — preserve
+              // its whole subtree verbatim; this is also how FAM NOTE survives.
+              (cur._unknown = cur._unknown || []).push(rawLine);
+              subCtx = '_UNK';
           }
+        } else if (subCtx === '_UNK') {
+          cur._unknown.push(rawLine);
         } else if (level === 2) {
           if (subCtx === 'MARR') {
             const mm = cur.marriages[cur.marriages.length - 1];
@@ -253,7 +293,7 @@
       }
     }
 
-    return { individuals, families };
+    return { individuals, families, otherLines };
   }
 
   // ─── GEDCOM serializer ───────────────────────────────────────────────────────
@@ -263,9 +303,10 @@
    * Maiden names are written as a second NAME record with TYPE birth + TYPE married.
    * @param {Map} individuals
    * @param {Map} families
+   * @param {string[]} [otherLines]  Raw lines from unrecognized level-0 records, re-emitted verbatim before TRLR
    * @returns {string}
    */
-  function serializeGEDCOM(individuals, families) {
+  function serializeGEDCOM(individuals, families, otherLines) {
     const lines = [];
 
     lines.push('0 HEAD');
@@ -331,7 +372,10 @@
         const noteLines = i.note.split('\n');
         lines.push(`1 NOTE ${noteLines[0]}`);
         for (let k = 1; k < noteLines.length; k++) lines.push(`2 CONT ${noteLines[k]}`);
+        // ponytail: CONC not emitted (no line-length limit enforced); add 255-char splitting if a strict consumer requires it
       }
+
+      for (const l of (i._unknown || [])) lines.push(l);
     }
 
     for (const [id, f] of families) {
@@ -350,7 +394,11 @@
         lines.push('1 DIV Y');
         if (f.divDate) lines.push(`2 DATE ${f.divDate}`);
       }
+
+      for (const l of (f._unknown || [])) lines.push(l);
     }
+
+    for (const l of (otherLines || [])) lines.push(l);
 
     lines.push('0 TRLR');
     return lines.join('\r\n');

@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 let individuals = new Map();   // id -> indi object
 let families    = new Map();   // id -> fam object
+let otherLines  = [];          // raw lines from unrecognized level-0 GEDCOM records (SOUR, OBJE, …), re-emitted verbatim on save
 let allNodes = [];   // complete dataset (all INDI + FAM nodes)
 let allLinks = [];   // complete dataset (links with _src/_tgt string IDs, never mutated by D3)
 
@@ -127,10 +128,40 @@ function _setDirty(v) {
   _gedcomDirty = v;
   const btn = document.getElementById('dl-btn');
   if (btn) btn.classList.toggle('has-unsaved', v);
+  if (v) _autosave(); else localStorage.removeItem('gedcomAutosave');
 }
 window.addEventListener('beforeunload', e => {
   if (_gedcomDirty) { e.preventDefault(); e.returnValue = ''; }
 });
+
+// ── Autosave (crash/close protection; not a substitute for downloading) ──────
+let _autosaveTimer = null;
+function _autosave() {
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem('gedcomAutosave', JSON.stringify({
+        filename: window._gedcomFilename || '',
+        ts: Date.now(),
+        ged: serializeGEDCOM()
+      }));
+    } catch (e) { /* quota exceeded — silently skip autosave */ }
+  }, 2000);
+}
+function _tryRestoreAutosave() {
+  const raw = localStorage.getItem('gedcomAutosave');
+  if (!raw) return;
+  let data;
+  try { data = JSON.parse(raw); } catch (e) { localStorage.removeItem('gedcomAutosave'); return; }
+  const when = new Date(data.ts).toLocaleString('de-CH');
+  const label = data.filename || 'ohne Namen';
+  if (confirm(`Nicht gespeicherte Sitzung gefunden (${label}, ${when}).\nWiederherstellen?`)) {
+    _loadDatasetFile(new File([data.ged], data.filename || 'wiederhergestellt.ged'));
+    _autosave(); // loading marks the session clean, but this data is still unsaved to disk
+  } else {
+    localStorage.removeItem('gedcomAutosave');
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PHYSICS PARAMETERS  (single source of truth)
@@ -298,6 +329,7 @@ function parseGEDCOM(raw) {
   families.clear();
   for (const [k, v] of result.individuals) individuals.set(k, v);
   for (const [k, v] of result.families)    families.set(k, v);
+  otherLines = result.otherLines || [];
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -376,9 +408,9 @@ function buildSurnameColorMap() {
   const counts = new Map();
   let noSurnCount = 0;
   for (const [, indi] of individuals) {
-    const s = indi.surn;
-    if (s) counts.set(s, (counts.get(s) || 0) + 1);
-    else noSurnCount++;
+    const names = new Set([indi.surn, indi.maidenName].filter(Boolean));
+    if (!names.size) noSurnCount++;
+    for (const name of names) counts.set(name, (counts.get(name) || 0) + 1);
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
 
@@ -503,11 +535,20 @@ function labelColor(n) {
 }
 
 // ── Visibility helpers (surname filter) ──
+function hasEnabledFamilyName(indi) {
+  const names = new Set([indi.surn, indi.maidenName].filter(Boolean));
+  if (!names.size) return surnameEnabled.get(null) !== false;
+  return [...names].some(name => surnameEnabled.get(name) !== false);
+}
+
 function isIndiVisible(id) {
   const indi = individuals.get(id);
-  if (!indi) return true;
-  const key = indi.surn || null;  // null = no surname
-  return surnameEnabled.get(key) !== false;
+  if (!indi || hasEnabledFamilyName(indi)) return true;
+  for (const [, fam] of families) {
+    const spouseId = fam.husb === id ? fam.wife : fam.wife === id ? fam.husb : null;
+    if (spouseId && hasEnabledFamilyName(individuals.get(spouseId) || {})) return true;
+  }
+  return false;
 }
 function isFamVisible(id) {
   const fam = families.get(id);
@@ -1403,10 +1444,10 @@ function showIndiDetail(id) {
       const ps = [fam.husb, fam.wife].filter(Boolean).map(pid => {
         const p = individuals.get(pid);
         return p
-          ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escAttr(pid)}')">${escHtml(p.name)}</span>`
+          ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(pid)}')">${escHtml(p.name)}</span>`
           : escHtml(pid);
       }).join(' &amp; ');
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">${ps || '<em>unbekannt</em>'}</div>`;
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="Familie öffnen">${ps || '<em>unbekannt</em>'}</div>`;
     }
     html += `</div>`;
   }
@@ -1420,13 +1461,13 @@ function showIndiDetail(id) {
       const spId = fam.husb === id ? fam.wife : fam.husb;
       const sp = spId ? individuals.get(spId) : null;
       const spName = sp
-        ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escAttr(spId)}')">${escHtml(sp.name)}</span>`
+        ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(spId)}')">${escHtml(sp.name)}</span>`
         : (spId ? escHtml(spId) : '<em>unbekannt</em>');
       const m0 = fam.marriages?.[0];
       const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
       const dInfo = fam.div ? ` <span style="color:#e74c3c">[Geschieden${fam.divDate ? ' ' + escHtml(fam.divDate) : ''}]</span>` : '';
       const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? 'Kind' : 'Kinder'}</span>` : '';
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escAttr(famId)}')" title="Familie öffnen">${spName}${mInfo}${dInfo}${kids}</div>`;
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="Familie öffnen">${spName}${mInfo}${dInfo}${kids}</div>`;
     }
     html += `</div>`;
   }
@@ -1436,6 +1477,18 @@ function showIndiDetail(id) {
     html += row('Notiz', `<span style="font-size:11px;color:#999">${escHtml(indi.note).replace(/\n/g, '<br>')}</span>`);
   }
 
+  // Quick-add relative — one click from the read-only view, no need to enter edit mode
+  html += `<div class="detail-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+    <div class="ef-rel-add-row">
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; Elternteil</button>
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; Ehepartner</button>
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('child')">&#xff0b; Kind</button>
+    </div>
+    ${_quickAddFormHtml('parent', id)}
+    ${_quickAddFormHtml('spouse', id)}
+    ${_quickAddFormHtml('child', id)}
+  </div>`;
+
   document.getElementById('detail-content').innerHTML = html;
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
@@ -1444,6 +1497,87 @@ function showIndiDetail(id) {
   updateHLButtons();
   flashNode(id);
   if (currentView === '3d') _setOrbitTarget3D(id);
+}
+
+const _QUICK_ADD_LABELS = { parent: 'Elternteil', spouse: 'Ehepartner', child: 'Kind' };
+
+function _quickAddFormHtml(type, personId) {
+  return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
+    <div class="edit-label" style="margin-bottom:6px">Neu: ${_QUICK_ADD_LABELS[type]}</div>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <input class="edit-input" id="qa-${type}-givn" placeholder="Vorname" style="flex:1">
+      <input class="edit-input" id="qa-${type}-surn" placeholder="Familienname" style="flex:1">
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <select class="edit-select" id="qa-${type}-sex">
+        <option value="U">Geschlecht…</option>
+        <option value="M">männlich</option>
+        <option value="F">weiblich</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; Hinzufügen</button>
+      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('${type}')">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function toggleQuickAdd(type) {
+  for (const t of ['parent', 'spouse', 'child']) {
+    const sf = document.getElementById(`qa-${t}-form`);
+    if (!sf) continue;
+    if (t === type) {
+      const visible = sf.style.display !== 'none';
+      sf.style.display = visible ? 'none' : 'block';
+      if (!visible) document.getElementById(`qa-${t}-givn`)?.focus();
+    } else {
+      sf.style.display = 'none';
+    }
+  }
+}
+
+function confirmQuickAddRelative(personId, type) {
+  const givn = document.getElementById(`qa-${type}-givn`)?.value.trim() || '';
+  const surn = document.getElementById(`qa-${type}-surn`)?.value.trim() || '';
+  const sex  = document.getElementById(`qa-${type}-sex`)?.value || 'U';
+
+  const fullName = (givn + ' ' + surn).trim();
+  if (!fullName) {
+    const el = document.getElementById(`qa-${type}-givn`);
+    if (el) { el.style.borderColor = '#e74c3c'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    return;
+  }
+
+  const newId = getNextIndiId();
+  const displayName = fullName.length > 24
+    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : fullName.slice(0, 22) + '…')
+    : fullName;
+
+  individuals.set(newId, {
+    id: newId, name: fullName, givn, surn, maidenName: '', sex,
+    birth: { date: '', plac: '' },
+    death: { date: '', plac: '', caus: '' },
+    deceased: false, birthYear: null,
+    famc: [], fams: [], occu: '', note: '', displayName,
+  });
+
+  // The UI is phrased from the viewed person's perspective ("add a parent/spouse/child
+  // to this person"), but _applyRelation's `type` describes personId's relation TO the
+  // target — so "add a parent" means personId is the CHILD of the new person, and
+  // "add a child" means personId is the PARENT of the new person. Spouse is symmetric.
+  const relType = type === 'parent' ? 'child' : type === 'child' ? 'parent' : 'spouse';
+  _applyRelation(personId, { targetId: newId, type: relType });
+
+  _fullRebuildGraph();
+  selectedIndiId = newId;
+  _editingId    = newId;
+  _editingType  = 'INDI';
+  // Deliberately NOT _isNewRecord = true: the relation was already committed above
+  // (not staged), so cancelling the new person's own edit form must not delete them
+  // and leave the family record pointing at a dangling id.
+  _isNewRecord = false;
+  document.getElementById('detail-name').textContent = fullName;
+  showIndiEditForm(newId);
 }
 
 function showFamDetail(id) {
@@ -1473,7 +1607,7 @@ function showFamDetail(id) {
   if (spouses.length) {
     const sl = spouses.map(pid => {
       const p = individuals.get(pid);
-      return p ? `<span class="clickable-name" onclick="showIndiDetail('${escAttr(pid)}')">${escHtml(p.name)}</span>` : escHtml(pid);
+      return p ? `<span class="clickable-name" onclick="showIndiDetail('${escJs(pid)}')">${escHtml(p.name)}</span>` : escHtml(pid);
     }).join(' &amp; ');
     html += row('Eheleute', sl);
   }
@@ -1482,7 +1616,7 @@ function showFamDetail(id) {
     html += `<div class="detail-section"><div class="detail-label">Kinder (${fam.chil.length})</div>`;
     for (const cid of fam.chil) {
       const c = individuals.get(cid);
-      if (c) html += `<div class="detail-value"><span class="clickable-name" onclick="showIndiDetail('${escAttr(cid)}')">${escHtml(c.name)}</span></div>`;
+      if (c) html += `<div class="detail-value"><span class="clickable-name" onclick="showIndiDetail('${escJs(cid)}')">${escHtml(c.name)}</span></div>`;
     }
     html += `</div>`;
   }
@@ -1886,11 +2020,13 @@ function _loadDatasetFile(file) {
         individuals.clear(); families.clear();
         result.individuals.forEach((v, k) => individuals.set(k, v));
         result.families.forEach((v, k) => families.set(k, v));
+        otherLines = [];
       } else if (ext.endsWith('.yaml') || ext.endsWith('.yml')) {
         const result = GEDCOMModule.importYAML(evt.target.result);
         individuals.clear(); families.clear();
         result.individuals.forEach((v, k) => individuals.set(k, v));
         result.families.forEach((v, k) => families.set(k, v));
+        otherLines = [];
       } else {
         parseGEDCOM(evt.target.result);
       }
@@ -2042,18 +2178,25 @@ function escHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 function escAttr(s) {
+  return escHtml(s);
+}
+// For interpolating into a JS string literal inside an inline onclick="" attribute:
+// backslash-escape first (so the JS engine sees \\ and \'), then entity-escape
+// (so the HTML parser decodes back to the right characters before JS runs).
+function escJs(s) {
   if (!s) return '';
-  return String(s).replace(/'/g, "\\'");
+  return escHtml(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
 }
 
 // ═══════════════════════════════════════════════════════════════
 // GEDCOM SERIALIZER + DOWNLOAD  (delegates to GEDCOMModule)
 // ═══════════════════════════════════════════════════════════════
 function serializeGEDCOM() {
-  return GEDCOMModule.serializeGEDCOM(individuals, families);
+  return GEDCOMModule.serializeGEDCOM(individuals, families, otherLines);
 }
 
 function _downloadBlob(content, filename, mime) {
@@ -2482,50 +2625,7 @@ function commitIndiEdit() {
 
   // ── Process pending relationships ──
   const needsRebuild = _pendingRelations.length > 0 || hadRemovals;
-  for (const rel of _pendingRelations) {
-    const target = individuals.get(rel.targetId);
-    if (!target) continue;
-
-    if (rel.type === 'child') {
-      // New person is a CHILD OF target → target is parent
-      // Find an existing family where target is husb or wife that we can add the child to
-      let fam = _findOrCreateFamAsParent(rel.targetId);
-      if (!fam.chil.includes(_editingId)) fam.chil.push(_editingId);
-      if (!i.famc.includes(fam.id)) i.famc.push(fam.id);
-
-    } else if (rel.type === 'parent') {
-      // New person is a PARENT OF target → target is child
-      let fam = _findOrCreateFamAsParent(_editingId);
-      if (!fam.chil.includes(rel.targetId)) fam.chil.push(rel.targetId);
-      if (!target.famc.includes(fam.id)) target.famc.push(fam.id);
-
-    } else if (rel.type === 'spouse') {
-      // Create a new family with both as spouses
-      let existingFam = null;
-      // Check if they already share a family as spouses
-      for (const fid of i.fams) {
-        const f = families.get(fid);
-        if (!f) continue;
-        if (f.husb === rel.targetId || f.wife === rel.targetId) { existingFam = f; break; }
-      }
-      if (!existingFam) {
-        const famId = getNextFamId();
-        const newFam = {
-          id: famId, husb: null, wife: null, chil: [],
-          marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: ''
-        };
-        // Assign husb/wife based on sex
-        if (i.sex === 'M') { newFam.husb = _editingId; newFam.wife = rel.targetId; }
-        else if (i.sex === 'F') { newFam.wife = _editingId; newFam.husb = rel.targetId; }
-        else if (target.sex === 'M') { newFam.husb = rel.targetId; newFam.wife = _editingId; }
-        else if (target.sex === 'F') { newFam.wife = rel.targetId; newFam.husb = _editingId; }
-        else { newFam.husb = _editingId; newFam.wife = rel.targetId; }
-        families.set(famId, newFam);
-        if (!i.fams.includes(famId)) i.fams.push(famId);
-        if (!target.fams.includes(famId)) target.fams.push(famId);
-      }
-    }
-  }
+  for (const rel of _pendingRelations) _applyRelation(_editingId, rel);
   _pendingRelations = [];
 
   const id = _editingId;
@@ -2543,6 +2643,55 @@ function commitIndiEdit() {
   }
   _fullRebuildGraph();
   showIndiDetail(id);
+}
+
+// Applies one relation ({targetId, type}) between editingPersonId and the target,
+// wiring up famc/fams/husb/wife/chil directly on the model. Shared by commitIndiEdit's
+// staged _pendingRelations loop and the instant one-click "add relative" flow.
+function _applyRelation(editingPersonId, rel) {
+  const i = individuals.get(editingPersonId);
+  const target = individuals.get(rel.targetId);
+  if (!i || !target) return;
+
+  if (rel.type === 'child') {
+    // New person is a CHILD OF target → target is parent
+    // Find an existing family where target is husb or wife that we can add the child to
+    let fam = _findOrCreateFamAsParent(rel.targetId);
+    if (!fam.chil.includes(editingPersonId)) fam.chil.push(editingPersonId);
+    if (!i.famc.includes(fam.id)) i.famc.push(fam.id);
+
+  } else if (rel.type === 'parent') {
+    // New person is a PARENT OF target → target is child
+    let fam = _findOrCreateFamAsParent(editingPersonId);
+    if (!fam.chil.includes(rel.targetId)) fam.chil.push(rel.targetId);
+    if (!target.famc.includes(fam.id)) target.famc.push(fam.id);
+
+  } else if (rel.type === 'spouse') {
+    // Create a new family with both as spouses
+    let existingFam = null;
+    // Check if they already share a family as spouses
+    for (const fid of i.fams) {
+      const f = families.get(fid);
+      if (!f) continue;
+      if (f.husb === rel.targetId || f.wife === rel.targetId) { existingFam = f; break; }
+    }
+    if (!existingFam) {
+      const famId = getNextFamId();
+      const newFam = {
+        id: famId, husb: null, wife: null, chil: [],
+        marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: ''
+      };
+      // Assign husb/wife based on sex
+      if (i.sex === 'M') { newFam.husb = editingPersonId; newFam.wife = rel.targetId; }
+      else if (i.sex === 'F') { newFam.wife = editingPersonId; newFam.husb = rel.targetId; }
+      else if (target.sex === 'M') { newFam.husb = rel.targetId; newFam.wife = editingPersonId; }
+      else if (target.sex === 'F') { newFam.wife = rel.targetId; newFam.husb = editingPersonId; }
+      else { newFam.husb = editingPersonId; newFam.wife = rel.targetId; }
+      families.set(famId, newFam);
+      if (!i.fams.includes(famId)) i.fams.push(famId);
+      if (!target.fams.includes(famId)) target.fams.push(famId);
+    }
+  }
 }
 
 // Helper: find an existing family where personId is husb or wife, or create one
@@ -2713,7 +2862,7 @@ function _famEditRenderChildren(f) {
       const name = p ? escHtml(p.name || cid) : escHtml(cid);
       return `<div class="ef-rel-item">
         <span class="ef-rel-name">${name}</span>
-        <button class="ef-rel-remove" onclick="_famEditRemoveChild('${escAttr(cid)}')" title="Entfernen">&#x2715;</button>
+        <button class="ef-rel-remove" onclick="_famEditRemoveChild('${escJs(cid)}')" title="Entfernen">&#x2715;</button>
       </div>`;
     });
   const pending = _famEditPendingChil.map((c, i) => {
@@ -3038,7 +3187,7 @@ function renderPresetList() {
   for (const name of Object.keys(BUILTIN_PRESETS)) {
     const row = document.createElement('div');
     row.className = 'preset-row builtin';
-    row.innerHTML = `<span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escAttr(name)}',true)">${escHtml(name)}</span>`;
+    row.innerHTML = `<span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escJs(name)}',true)">${escHtml(name)}</span>`;
     container.appendChild(row);
   }
 
@@ -3049,8 +3198,8 @@ function renderPresetList() {
     const row = document.createElement('div');
     row.className = 'preset-row user';
     row.innerHTML = `
-      <span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escAttr(name)}',false)">${escHtml(name)}</span>
-      <button class="preset-del" onclick="deletePreset('${escAttr(name)}')" title="Löschen">&#x2715;</button>`;
+      <span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escJs(name)}',false)">${escHtml(name)}</span>
+      <button class="preset-del" onclick="deletePreset('${escJs(name)}')" title="Löschen">&#x2715;</button>`;
     container.appendChild(row);
   }
 
@@ -3891,6 +4040,7 @@ document.addEventListener('keydown', e => {
     case 'f': case 'F': zoomToFit();              break;
     case 'c': case 'C': centerView();             break;
     case 'p': case 'P': centerOnPerson();         break;
+    case 'e': case 'E': startEdit();              break;
     case 'r': case 'R': resetHighlight();         break;
     case 'Escape':      closeDetailPanel();       break;
     case '+': case '=': if (currentView === '2d' && simulation) reheatSimulation(); break;
@@ -3930,6 +4080,7 @@ function syncPhysicsUI() {
 // Attach listeners after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
   renderPresetList();
+  _tryRestoreAutosave();
 
   // Touch support
   _initPanelSwipe();
@@ -4169,7 +4320,7 @@ function relSearch(slot, query) {
   if (!matches.length) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
 
   drop.innerHTML = matches.map(m =>
-    `<div class="rel-drop-item" onmousedown="relSelectPerson('${slot}','${escAttr(m.id)}')">${escHtml(m.label)}</div>`
+    `<div class="rel-drop-item" onmousedown="relSelectPerson('${slot}','${escJs(m.id)}')">${escHtml(m.label)}</div>`
   ).join('');
   drop.style.display = 'block';
 }
@@ -4444,6 +4595,8 @@ window.removeRelation           = removeRelation;
 window.removeExistingRelation   = removeExistingRelation;
 window.toggleNewPersonSubform   = toggleNewPersonSubform;
 window.confirmNewPersonRelation = confirmNewPersonRelation;
+window.toggleQuickAdd           = toggleQuickAdd;
+window.confirmQuickAddRelative  = confirmQuickAddRelative;
 window.deleteCurrentRecord   = deleteCurrentRecord;
 window.confirmDeleteRecord   = confirmDeleteRecord;
 window.cancelDeleteRecord    = cancelDeleteRecord;
@@ -6477,1484 +6630,6 @@ window._imPersonSelect = _imPersonSelect;
 window._imAddChild     = _imAddChild;
 window._imRemoveChild  = _imRemoveChild;
 
-
-// ═══════════════════════════════════════════════════════════════
-// QUICK ENTRY FUNCTIONS - Fast Manual Data Entry
-// ═══════════════════════════════════════════════════════════════
-
-let _qeRecentPersons = []; // Recently edited persons
-let _qeCurrentTab = 'new';
-let _qeSpouseCount = 0;
-let _qeChildCount = 0;
-let _qeLinkMode = 'spouse'; // 'spouse' or 'parent'
-
-function openQuickEntry() {
-  document.getElementById('quick-entry-modal').style.display = 'flex';
-  _qeResetForm();
-  _qeUpdateRecentList();
-  document.getElementById('qe-name').focus();
-}
-
-function closeQuickEntry() {
-  document.getElementById('quick-entry-modal').style.display = 'none';
-  // Hide all dropdowns
-  document.querySelectorAll('.quick-dropdown').forEach(el => el.style.display = 'none');
-}
-
-function switchQuickTab(tab) {
-  _qeCurrentTab = tab;
-  // Update tab buttons
-  document.querySelectorAll('.quick-tab').forEach(btn => btn.classList.remove('active'));
-  document.querySelector(`.quick-tab[onclick="switchQuickTab('${tab}')"]`).classList.add('active');
-  // Show/hide content
-  document.querySelectorAll('.quick-tab-content').forEach(content => content.style.display = 'none');
-  document.getElementById(`quick-tab-${tab}`).style.display = 'flex';
-}
-
-function _qeResetForm() {
-  // Reset all fields
-  document.getElementById('qe-name').value = '';
-  document.getElementById('qe-sex').value = '';
-  document.getElementById('qe-birth-date').value = '';
-  document.getElementById('qe-birth-place').value = '';
-  document.getElementById('qe-death-date').value = '';
-  document.getElementById('qe-death-place').value = '';
-  document.getElementById('qe-father').value = '';
-  document.getElementById('qe-father-id').value = '';
-  document.getElementById('qe-mother').value = '';
-  document.getElementById('qe-mother-id').value = '';
-  document.getElementById('qe-notes').value = '';
-
-  // Reset lists
-  document.getElementById('qe-spouses-list').innerHTML = '';
-  document.getElementById('qe-children-list').innerHTML = '';
-  _qeSpouseCount = 0;
-  _qeChildCount = 0;
-
-  // Reset link tab
-  document.getElementById('qe-link-person1').value = '';
-  document.getElementById('qe-link-person1-id').value = '';
-  document.getElementById('qe-link-person2').value = '';
-  document.getElementById('qe-link-person2-id').value = '';
-
-  switchQuickTab('new');
-}
-
-function quickClearForm() {
-  _qeResetForm();
-  document.getElementById('qe-name').focus();
-}
-
-// Search for parents
-function quickSearchParent(type, query) {
-  const searchEl = document.getElementById(`qe-${type}-search`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    const birth = (indi.birth?.date || '').toLowerCase();
-    if (name.includes(query) || birth.includes(query)) {
-      // Filter by sex for parents
-      if (type === 'father' && indi.sex !== 'M') continue;
-      if (type === 'mother' && indi.sex !== 'F') continue;
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '', sex: indi.sex });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectParent('${type}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''} [${r.sex}]</span>
-      </div>
-    `).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowParentSearch(type) {
-  const searchEl = document.getElementById(`qe-${type}-search`);
-  if (searchEl) {
-    quickSearchParent(type, document.getElementById(`qe-${type}`).value);
-  }
-}
-
-function quickSelectParent(type, id, name) {
-  document.getElementById(`qe-${type}`).value = name;
-  document.getElementById(`qe-${type}-id`).value = id;
-  document.getElementById(`qe-${type}-search`).style.display = 'none';
-}
-
-function quickCreateParent(type) {
-  // Show inline form for creating parent
-  const container = document.getElementById(`qe-${type}-search`);
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="quick-new-person-inline" data-type="${type}">
-      <div class="quick-field-row" style="padding:8px;">
-        <input type="text" class="quick-input qe-parent-new-name" placeholder="Vorname Nachname *" style="flex:1">
-        <input type="text" class="quick-input qe-parent-new-birth" placeholder="Geburtsdatum" style="width:100px">
-        <input type="text" class="quick-input qe-parent-new-death" placeholder="Sterbedatum" style="width:100px">
-        <button class="quick-btn-small" onclick="quickSaveNewParent('${type}')">&#x2713;</button>
-        <button class="quick-btn-small" onclick="document.getElementById('qe-${type}-search').style.display='none'">&#x2715;</button>
-      </div>
-    </div>
-  `;
-  container.style.display = 'block';
-
-  // Focus name field
-  setTimeout(() => container.querySelector('.qe-parent-new-name')?.focus(), 10);
-}
-
-function quickSaveNewParent(type) {
-  const container = document.getElementById(`qe-${type}-search`);
-  const name = container.querySelector('.qe-parent-new-name')?.value?.trim();
-  if (!name) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const sex = type === 'father' ? 'M' : 'F';
-  const birthDate = container.querySelector('.qe-parent-new-birth')?.value || '';
-  const deathDate = container.querySelector('.qe-parent-new-death')?.value || '';
-
-  const newId = _qeCreateNewPerson({
-    fullName: name,
-    sex,
-    birthDate,
-    deathDate
-  });
-
-  // Link as parent
-  document.getElementById(`qe-${type}`).value = name;
-  document.getElementById(`qe-${type}-id`).value = newId;
-  container.style.display = 'none';
-
-  // Add to recent
-  _qeAddToRecent({ id: newId, name, birth: birthDate });
-}
-
-// Spouses
-function quickAddSpouse() {
-  const container = document.getElementById('qe-spouses-list');
-  const idx = _qeSpouseCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-spouse-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" placeholder="Ehepartner suchen..." class="quick-input"
-             oninput="quickSearchSpouse(${idx}, this.value)"
-             onfocus="quickShowSpouseSearch(${idx})">
-      <div id="qe-spouse-search-${idx}" class="quick-dropdown" style="display:none"></div>
-      <input type="hidden" class="qe-spouse-id">
-    </div>
-    <input type="text" placeholder="Hochzeitsdatum" class="quick-input" style="width:120px">
-    <input type="text" placeholder="Ort" class="quick-input" style="width:100px">
-    <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function quickSearchSpouse(idx, query) {
-  const searchEl = document.getElementById(`qe-spouse-search-${idx}`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      const bYear = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
-      const dYear = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
-      const parts = [];
-      if (bYear) parts.push('*' + bYear);
-      if (dYear) parts.push('\u2020' + dYear);
-      results.push({ id, name: indi.name, maiden: indi.maidenName || '', detail: parts.join(' · ') });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer - Klicken um neu zu erstellen</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 8).map(r => {
-      const maiden = r.maiden ? ` <span style="color:#9b87c0;font-size:11px;">geb. ${escHtml(r.maiden)}</span>` : '';
-      return `<div class="quick-search-item" onclick="quickSelectSpouse(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}${maiden}</span>
-        ${r.detail ? `<span class="details">${r.detail}</span>` : ''}
-      </div>`;
-    }).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowSpouseSearch(idx) {
-  const searchEl = document.getElementById(`qe-spouse-search-${idx}`);
-  if (searchEl) searchEl.style.display = 'block';
-}
-
-function quickSelectSpouse(idx, id, name) {
-  const row = document.querySelector(`.quick-spouse-row[data-idx="${idx}"]`);
-  if (row) {
-    row.querySelector('input[type="text"]').value = name;
-    row.querySelector('.qe-spouse-id').value = id;
-  }
-  document.getElementById(`qe-spouse-search-${idx}`).style.display = 'none';
-}
-
-function quickRemoveSpouse(idx) {
-  const row = document.querySelector(`.quick-spouse-row[data-idx="${idx}"]`);
-  if (row) row.remove();
-}
-
-function quickCreateNewSpouse() {
-  // Add to spouses list with inline edit form
-  const container = document.getElementById('qe-spouses-list');
-  const idx = _qeSpouseCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-spouse-row quick-new-person-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-new-person-form" data-type="spouse" data-idx="${idx}">
-      <div class="quick-new-person-header">Neuen Ehepartner erstellen:</div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
-        <select class="quick-select qe-new-sex" style="width:70px">
-          <option value="">Sex</option>
-          <option value="M">M</option>
-          <option value="F">F</option>
-        </select>
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
-        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
-        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input" placeholder="Hochzeitsdatum" style="width:120px">
-        <input type="text" class="quick-input" placeholder="Hochzeitsort" style="width:120px">
-        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'spouse')">&#x2713;</button>
-        <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
-      </div>
-    </div>
-  `;
-  container.appendChild(row);
-
-  // Focus name field
-  row.querySelector('.qe-new-name').focus();
-}
-
-// Children
-function quickAddChild() {
-  const container = document.getElementById('qe-children-list');
-  const idx = _qeChildCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-child-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" placeholder="Kind suchen..." class="quick-input"
-             oninput="quickSearchChild(${idx}, this.value)"
-             onfocus="quickShowChildSearch(${idx})">
-      <div id="qe-child-search-${idx}" class="quick-dropdown" style="display:none"></div>
-      <input type="hidden" class="qe-child-id">
-    </div>
-    <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function quickSearchChild(idx, query) {
-  const searchEl = document.getElementById(`qe-child-search-${idx}`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      const bYear = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
-      const dYear = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
-      const parts = [];
-      if (bYear) parts.push('*' + bYear);
-      if (dYear) parts.push('\u2020' + dYear);
-      results.push({ id, name: indi.name, maiden: indi.maidenName || '', detail: parts.join(' · ') });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 8).map(r => {
-      const maiden = r.maiden ? ` <span style="color:#9b87c0;font-size:11px;">geb. ${escHtml(r.maiden)}</span>` : '';
-      return `<div class="quick-search-item" onclick="quickSelectChild(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}${maiden}</span>
-        ${r.detail ? `<span class="details">${r.detail}</span>` : ''}
-      </div>`;
-    }).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowChildSearch(idx) {
-  const searchEl = document.getElementById(`qe-child-search-${idx}`);
-  if (searchEl) searchEl.style.display = 'block';
-}
-
-function quickSelectChild(idx, id, name) {
-  const row = document.querySelector(`.quick-child-row[data-idx="${idx}"]`);
-  if (row) {
-    row.querySelector('input[type="text"]').value = name;
-    row.querySelector('.qe-child-id').value = id;
-  }
-  document.getElementById(`qe-child-search-${idx}`).style.display = 'none';
-}
-
-function quickRemoveChild(idx) {
-  const row = document.querySelector(`.quick-child-row[data-idx="${idx}"]`);
-  if (row) row.remove();
-}
-
-function quickSaveNewPersonFromRow(idx, type) {
-  const row = document.querySelector(`.quick-new-person-row[data-idx="${idx}"]`);
-  if (!row) return;
-
-  const form = row.querySelector('.quick-new-person-form');
-  const name = form.querySelector('.qe-new-name')?.value?.trim();
-  if (!name) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const sex = form.querySelector('.qe-new-sex')?.value || 'U';
-  const birthDate = form.querySelector('.qe-new-birth-date')?.value || '';
-  const birthPlace = form.querySelector('.qe-new-birth-place')?.value || '';
-  const deathDate = form.querySelector('.qe-new-death-date')?.value || '';
-  const deathPlace = form.querySelector('.qe-new-death-place')?.value || '';
-
-  const newId = _qeCreateNewPerson({
-    fullName: name,
-    sex,
-    birthDate,
-    birthPlace,
-    deathDate,
-    deathPlace
-  });
-
-  // Convert form to display mode with ID stored
-  if (type === 'spouse') {
-    const marriageDate = form.querySelector('input[placeholder="Hochzeitsdatum"]')?.value || '';
-    const marriagePlace = form.querySelector('input[placeholder="Hochzeitsort"]')?.value || '';
-
-    row.innerHTML = `
-      <div class="quick-search-wrap">
-        <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-        <input type="hidden" class="qe-spouse-id" value="${newId}">
-      </div>
-      <input type="text" placeholder="Hochzeitsdatum" class="quick-input" value="${escHtml(marriageDate)}" style="width:120px">
-      <input type="text" placeholder="Hochzeitsort" class="quick-input" value="${escHtml(marriagePlace)}" style="width:100px">
-      <button class="quick-btn-small" onclick="quickRemoveSpouse(${idx})">&#x2715;</button>
-    `;
-  } else if (type === 'child') {
-    row.innerHTML = `
-      <div class="quick-search-wrap">
-        <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-        <input type="hidden" class="qe-child-id" value="${newId}">
-      </div>
-      <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715;</button>
-    `;
-  }
-
-  // Add to recent
-  _qeAddToRecent({ id: newId, name, birth: birthDate });
-}
-
-function quickCreateNewChild() {
-  // Add to children list with inline edit form
-  const container = document.getElementById('qe-children-list');
-  const idx = _qeChildCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-child-row quick-new-person-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-new-person-form" data-type="child" data-idx="${idx}">
-      <div class="quick-new-person-header">Neues Kind erstellen:</div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
-        <select class="quick-select qe-new-sex" style="width:70px">
-          <option value="">Sex</option>
-          <option value="M">M</option>
-          <option value="F">F</option>
-        </select>
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
-        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
-        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
-      </div>
-      <div class="quick-field-row">
-        <button class="quick-btn-small qe-btn-save" onclick="quickSaveNewPersonFromRow(${idx}, 'child')">&#x2713; Speichern</button>
-        <button class="quick-btn-small" onclick="quickRemoveChild(${idx})">&#x2715; Abbrechen</button>
-      </div>
-    </div>
-  `;
-  container.appendChild(row);
-
-  // Focus name field
-  row.querySelector('.qe-new-name').focus();
-}
-// Save functions
-function quickSavePerson() {
-  const person = _qeCollectFormData();
-  if (!person.fullName) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const newId = _qeCreateNewPerson(person);
-  _qeAddToRecent({ id: newId, name: person.fullName, birth: person.birthDate });
-
-  alert(`Gespeichert: ${person.fullName}`);
-  _qeResetForm();
-  document.getElementById('qe-name').focus();
-}
-
-function quickSaveAndNext() {
-  quickSavePerson();
-}
-
-function _qeCollectFormData() {
-  const spouses = [];
-  document.querySelectorAll('.quick-spouse-row').forEach(row => {
-    const inputs = row.querySelectorAll('input[type="text"]');
-    spouses.push({
-      spouseName: inputs[0]?.value || '',
-      spouseId: row.querySelector('.qe-spouse-id')?.value || '',
-      date: inputs[1]?.value || '',
-      place: inputs[2]?.value || ''
-    });
-  });
-
-  const children = [];
-  document.querySelectorAll('.quick-child-row').forEach(row => {
-    children.push({
-      childName: row.querySelector('input[type="text"]')?.value || '',
-      childId: row.querySelector('.qe-child-id')?.value || ''
-    });
-  });
-
-  return {
-    fullName: document.getElementById('qe-name').value,
-    sex: document.getElementById('qe-sex').value,
-    birthDate: document.getElementById('qe-birth-date').value,
-    birthPlace: document.getElementById('qe-birth-place').value,
-    deathDate: document.getElementById('qe-death-date').value,
-    deathPlace: document.getElementById('qe-death-place').value,
-    fatherName: document.getElementById('qe-father').value,
-    fatherId: document.getElementById('qe-father-id').value,
-    motherName: document.getElementById('qe-mother').value,
-    motherId: document.getElementById('qe-mother-id').value,
-    notes: document.getElementById('qe-notes').value,
-    spouses,
-    children,
-    deceased: document.getElementById('qe-deceased')?.checked || false,
-    divorced: document.getElementById('qe-divorced')?.checked || false,
-    adopted: document.getElementById('qe-adopted')?.checked || false
-  };
-}
-
-function _qeCreateNewPerson(person) {
-  // Get next ID
-  let maxIndi = 0;
-  for (const [id] of individuals) {
-    const m = id.match(/\d+/);
-    if (m) maxIndi = Math.max(maxIndi, +m[0]);
-  }
-  const xref = `@I${++maxIndi}@`;
-
-  // Create person
-  const note = person.notes || '';
-  const statusNote = [];
-  if (person.divorced) statusNote.push('Geschieden');
-  if (person.adopted) statusNote.push('Adoptiert');
-  const fullNote = note + (statusNote.length ? (note ? '; ' : '') + statusNote.join(', ') : '');
-
-  individuals.set(xref, {
-    id: xref,
-    name: person.fullName,
-    sex: person.sex || 'U',
-    birth: { date: person.birthDate || '', plac: person.birthPlace || '' },
-    death: { date: person.deathDate || '', plac: person.deathPlace || '', caus: '' },
-    deceased: !!person.deathDate || person.deceased,
-    occu: '',
-    note: fullNote,
-    fams: [],
-    famc: ''
-  });
-
-  // Handle family creation with spouse
-  if (person.spouses && person.spouses.length > 0) {
-    person.spouses.forEach(s => {
-      if (s.spouseId) {
-        _qeCreateFamily(xref, s.spouseId, s.date, s.place);
-      }
-    });
-  }
-
-  // Handle parent link
-  if (person.fatherId || person.motherId) {
-    _qeLinkToParents(xref, person.fatherId, person.motherId);
-  }
-
-  _fullRebuildGraph();
-  return xref;
-}
-
-function _qeCreateFamily(husbId, wifeId, date, place) {
-  let maxFam = 0;
-  for (const [id] of families) {
-    const m = id.match(/\d+/);
-    if (m) maxFam = Math.max(maxFam, +m[0]);
-  }
-  const famXref = `@F${++maxFam}@`;
-
-  families.set(famXref, {
-    id: famXref,
-    husb: husbId,
-    wife: wifeId,
-    marriages: [{ date: date || '', plac: place || '', types: [] }], div: false, divDate: '',
-    children: []
-  });
-
-  // Update individuals
-  const husb = individuals.get(husbId);
-  const wife = individuals.get(wifeId);
-  if (husb && !husb.fams.includes(famXref)) husb.fams.push(famXref);
-  if (wife && !wife.fams.includes(famXref)) wife.fams.push(famXref);
-
-  return famXref;
-}
-
-function _qeLinkToParents(childId, fatherId, motherId) {
-  // Find or create family
-  let fam = null;
-  for (const [id, f] of families) {
-    if ((fatherId && f.husb === fatherId) || (motherId && f.wife === motherId)) {
-      fam = id;
-      break;
-    }
-  }
-
-  if (!fam && (fatherId || motherId)) {
-    fam = _qeCreateFamily(fatherId || '', motherId || '', '', '');
-  }
-
-  if (fam) {
-    const family = families.get(fam);
-    if (!family.children.includes(childId)) {
-      family.children.push(childId);
-    }
-    const child = individuals.get(childId);
-    if (child) child.famc = fam;
-  }
-}
-
-// Recent persons
-function _qeAddToRecent(person) {
-  // Remove if already exists
-  _qeRecentPersons = _qeRecentPersons.filter(p => p.id !== person.id);
-  // Add to front
-  _qeRecentPersons.unshift(person);
-  // Keep only 10
-  if (_qeRecentPersons.length > 10) _qeRecentPersons.pop();
-  _qeUpdateRecentList();
-}
-
-function _qeUpdateRecentList() {
-  const listEl = document.getElementById('quick-recent-list');
-  if (!listEl) return;
-
-  if (_qeRecentPersons.length === 0) {
-    listEl.innerHTML = '<div style="color:#567;font-size:12px;padding:8px;">Noch keine Einträge</div>';
-  } else {
-    listEl.innerHTML = _qeRecentPersons.map(p => `
-      <div class="quick-recent-item" onclick="quickEditPerson('${p.id}')">
-        <span class="name">${escHtml(p.name)}</span>
-        <span class="details">${p.birth ? escHtml(p.birth) : ''}</span>
-      </div>
-    `).join('');
-  }
-}
-
-// Edit mode
-function quickSearchForEdit(query) {
-  const resultsEl = document.getElementById('qe-edit-results');
-  if (!resultsEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    resultsEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
-    }
-  }
-
-  if (results.length === 0) {
-    resultsEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    resultsEl.innerHTML = results.slice(0, 8).map(r => `
-      <div class="quick-search-item" onclick="quickLoadPersonForEdit('${r.id}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
-  }
-  resultsEl.style.display = 'block';
-}
-
-let _qeEditSpouseCount = 0;
-let _qeEditChildCount = 0;
-
-function quickLoadPersonForEdit(id) {
-  const indi = individuals.get(id);
-  if (!indi) return;
-
-  // Show edit form, hide search
-  document.getElementById('quick-edit-search').style.display = 'none';
-  document.getElementById('quick-edit-form').style.display = 'flex';
-  document.getElementById('qe-edit-id').value = id;
-
-  // Basic info
-  document.getElementById('qe-edit-name').value = indi.name || '';
-  document.getElementById('qe-edit-sex').value = indi.sex || '';
-  document.getElementById('qe-edit-birth-date').value = indi.birth?.date || '';
-  document.getElementById('qe-edit-birth-place').value = indi.birth?.plac || '';
-  document.getElementById('qe-edit-death-date').value = indi.death?.date || '';
-  document.getElementById('qe-edit-death-place').value = indi.death?.plac || '';
-  document.getElementById('qe-edit-notes').value = indi.note || '';
-
-  // Status checkboxes
-  document.getElementById('qe-edit-deceased').checked = indi.deceased || !!indi.death?.date;
-  document.getElementById('qe-edit-divorced').checked = (indi.note || '').includes('Geschieden');
-  document.getElementById('qe-edit-adopted').checked = (indi.note || '').includes('Adoptiert');
-
-  // Load parents
-  _qeLoadParentsForEdit(indi);
-
-  // Load spouses and children
-  _qeLoadSpousesAndChildrenForEdit(indi);
-
-  // Hide search results
-  document.getElementById('qe-edit-results').style.display = 'none';
-}
-
-function _qeLoadParentsForEdit(indi) {
-  // Clear parent fields
-  document.getElementById('qe-edit-father').value = '';
-  document.getElementById('qe-edit-father-id').value = '';
-  document.getElementById('qe-edit-mother').value = '';
-  document.getElementById('qe-edit-mother-id').value = '';
-
-  if (!indi.famc) return;
-
-  const fam = families.get(indi.famc);
-  if (!fam) return;
-
-  // Load father
-  if (fam.husb) {
-    const father = individuals.get(fam.husb);
-    if (father) {
-      document.getElementById('qe-edit-father').value = father.name;
-      document.getElementById('qe-edit-father-id').value = fam.husb;
-    }
-  }
-
-  // Load mother
-  if (fam.wife) {
-    const mother = individuals.get(fam.wife);
-    if (mother) {
-      document.getElementById('qe-edit-mother').value = mother.name;
-      document.getElementById('qe-edit-mother-id').value = fam.wife;
-    }
-  }
-}
-
-function _qeLoadSpousesAndChildrenForEdit(indi) {
-  // Reset counters and lists
-  _qeEditSpouseCount = 0;
-  _qeEditChildCount = 0;
-  document.getElementById('qe-edit-spouses-list').innerHTML = '';
-  document.getElementById('qe-edit-children-list').innerHTML = '';
-
-  // Load spouses from families
-  const processedChildren = new Set();
-
-  for (const famId of indi.fams || []) {
-    const fam = families.get(famId);
-    if (!fam) continue;
-
-    // Find spouse
-    const isHusb = fam.husb === indi.id;
-    const spouseId = isHusb ? fam.wife : fam.husb;
-
-    if (spouseId) {
-      const spouse = individuals.get(spouseId);
-      _qeAddSpouseToEditList(spouseId, spouse?.name || '', fam.marriages?.[0]?.date || '', fam.marriages?.[0]?.plac || '');
-    }
-
-    // Collect children from this family
-    for (const childId of fam.children || []) {
-      if (!processedChildren.has(childId)) {
-        processedChildren.add(childId);
-        const child = individuals.get(childId);
-        _qeAddChildToEditList(childId, child?.name || '');
-      }
-    }
-  }
-}
-
-function _qeAddSpouseToEditList(spouseId, name, marriageDate, marriagePlace) {
-  const container = document.getElementById('qe-edit-spouses-list');
-  const idx = _qeEditSpouseCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-spouse-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-      <input type="hidden" class="qe-edit-spouse-id" value="${spouseId}">
-    </div>
-    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" value="${escHtml(marriageDate)}" style="width:120px">
-    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" value="${escHtml(marriagePlace)}" style="width:100px">
-    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function _qeAddChildToEditList(childId, name) {
-  const container = document.getElementById('qe-edit-children-list');
-  const idx = _qeEditChildCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-child-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-      <input type="hidden" class="qe-edit-child-id" value="${childId}">
-    </div>
-    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function quickCancelEdit() {
-  document.getElementById('quick-edit-search').style.display = 'block';
-  document.getElementById('quick-edit-form').style.display = 'none';
-  document.getElementById('qe-edit-search-input').value = '';
-}
-
-function quickSaveEditPerson() {
-  const id = document.getElementById('qe-edit-id').value;
-  const indi = individuals.get(id);
-  if (!indi) return;
-
-  // Update basic info
-  indi.name = document.getElementById('qe-edit-name').value;
-  indi.sex = document.getElementById('qe-edit-sex').value;
-  indi.birth = {
-    date: document.getElementById('qe-edit-birth-date').value,
-    plac: document.getElementById('qe-edit-birth-place').value
-  };
-  indi.death = {
-    date: document.getElementById('qe-edit-death-date').value,
-    plac: document.getElementById('qe-edit-death-place').value,
-    caus: indi.death?.caus || ''
-  };
-  indi.deceased = document.getElementById('qe-edit-deceased').checked || !!indi.death.date;
-
-  // Update notes with status
-  let note = document.getElementById('qe-edit-notes').value || '';
-  const isDivorced = document.getElementById('qe-edit-divorced').checked;
-  const isAdopted = document.getElementById('qe-edit-adopted').checked;
-
-  const statusTags = [];
-  if (isDivorced) statusTags.push('Geschieden');
-  if (isAdopted) statusTags.push('Adoptiert');
-
-  if (statusTags.length > 0) {
-    note = note + (note ? '; ' : '') + statusTags.join(', ');
-  }
-  indi.note = note;
-
-  // Update parent links
-  _qeSaveParentLinks(id);
-
-  // Update marriage info
-  _qeSaveMarriageInfo(id);
-
-  // Refresh
-  _fullRebuildGraph();
-  _qeAddToRecent({ id, name: indi.name, birth: indi.birth?.date });
-
-  alert('Gespeichert: ' + indi.name);
-  quickCancelEdit();
-}
-
-function _qeSaveParentLinks(childId) {
-  const fatherId = document.getElementById('qe-edit-father-id').value;
-  const motherId = document.getElementById('qe-edit-mother-id').value;
-
-  if (!fatherId && !motherId) return;
-
-  // Find or create family with these parents
-  let famId = null;
-  for (const [id, fam] of families) {
-    if ((fatherId && fam.husb === fatherId) || (motherId && fam.wife === motherId)) {
-      famId = id;
-      break;
-    }
-  }
-
-  if (!famId) {
-    // Create new family
-    let maxFam = 0;
-    for (const [id] of families) {
-      const m = id.match(/\d+/);
-      if (m) maxFam = Math.max(maxFam, +m[0]);
-    }
-    famId = `@F${++maxFam}@`;
-    families.set(famId, {
-      id: famId,
-      husb: fatherId,
-      wife: motherId,
-      marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: '',
-      chil: []
-    });
-
-    // Update parents' fams arrays
-    if (fatherId) {
-      const father = individuals.get(fatherId);
-      if (father && !father.fams.includes(famId)) father.fams.push(famId);
-    }
-    if (motherId) {
-      const mother = individuals.get(motherId);
-      if (mother && !mother.fams.includes(famId)) mother.fams.push(famId);
-    }
-  }
-
-  // Add child to family if not already there
-  const fam = families.get(famId);
-  if (!fam.children.includes(childId)) {
-    fam.children.push(childId);
-  }
-
-  // Update child's famc
-  const child = individuals.get(childId);
-  if (child) child.famc = famId;
-}
-
-function _qeSaveMarriageInfo(indiId) {
-  // Update marriage dates/places from edit form
-  const rows = document.querySelectorAll('#qe-edit-spouses-list .quick-spouse-row');
-
-  rows.forEach(row => {
-    const spouseId = row.querySelector('.qe-edit-spouse-id')?.value;
-    const marriageDate = row.querySelector('.qe-edit-marr-date')?.value;
-    const marriagePlace = row.querySelector('.qe-edit-marr-place')?.value;
-
-    if (!spouseId) return;
-
-    // Find the family for this couple
-    for (const famId of individuals.get(indiId)?.fams || []) {
-      const fam = families.get(famId);
-      if (!fam) continue;
-
-      const isSpouse = fam.husb === spouseId || fam.wife === spouseId;
-      if (isSpouse) {
-        if (!fam.marriages) fam.marriages = [];
-        if (!fam.marriages[0]) fam.marriages[0] = { date: '', plac: '', types: [] };
-        fam.marriages[0].date = marriageDate || '';
-        fam.marriages[0].plac = marriagePlace || '';
-        break;
-      }
-    }
-  });
-}
-
-// Edit mode helpers
-function quickSearchParentEdit(type, query) {
-  const searchEl = document.getElementById(`qe-edit-${type}-search`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      if (type === 'father' && indi.sex !== 'M') continue;
-      if (type === 'mother' && indi.sex !== 'F') continue;
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '', sex: indi.sex });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectParentEdit('${type}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''} [${r.sex}]</span>
-      </div>
-    `).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowParentEditSearch(type) {
-  const searchEl = document.getElementById(`qe-edit-${type}-search`);
-  if (searchEl) {
-    quickSearchParentEdit(type, document.getElementById(`qe-edit-${type}`).value);
-  }
-}
-
-function quickSelectParentEdit(type, id, name) {
-  document.getElementById(`qe-edit-${type}`).value = name;
-  document.getElementById(`qe-edit-${type}-id`).value = id;
-  document.getElementById(`qe-edit-${type}-search`).style.display = 'none';
-}
-
-function quickCreateParentEdit(type) {
-  const container = document.getElementById(`qe-edit-${type}-search`);
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="quick-new-person-inline">
-      <div class="quick-field-row" style="padding:8px;">
-        <input type="text" class="quick-input qe-parent-new-name" placeholder="Vorname Nachname *" style="flex:1">
-        <input type="text" class="quick-input qe-parent-new-birth" placeholder="Geburtsdatum" style="width:100px">
-        <input type="text" class="quick-input qe-parent-new-death" placeholder="Sterbedatum" style="width:100px">
-        <button class="quick-btn-small" onclick="quickSaveNewParentEdit('${type}')">&#x2713;</button>
-        <button class="quick-btn-small" onclick="document.getElementById('qe-edit-${type}-search').style.display='none'">&#x2715;</button>
-      </div>
-    </div>
-  `;
-  container.style.display = 'block';
-  setTimeout(() => container.querySelector('.qe-parent-new-name')?.focus(), 10);
-}
-
-function quickSaveNewParentEdit(type) {
-  const container = document.getElementById(`qe-edit-${type}-search`);
-  const name = container.querySelector('.qe-parent-new-name')?.value?.trim();
-  if (!name) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const sex = type === 'father' ? 'M' : 'F';
-  const birthDate = container.querySelector('.qe-parent-new-birth')?.value || '';
-  const deathDate = container.querySelector('.qe-parent-new-death')?.value || '';
-
-  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, deathDate });
-
-  document.getElementById(`qe-edit-${type}`).value = name;
-  document.getElementById(`qe-edit-${type}-id`).value = newId;
-  container.style.display = 'none';
-
-  _qeAddToRecent({ id: newId, name, birth: birthDate });
-}
-
-function quickAddSpouseEdit() {
-  const container = document.getElementById('qe-edit-spouses-list');
-  const idx = _qeEditSpouseCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-spouse-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" placeholder="Ehepartner suchen..." class="quick-input"
-             oninput="quickSearchSpouseEdit(${idx}, this.value)"
-             onfocus="quickShowSpouseEditSearch(${idx})">
-      <div id="qe-edit-spouse-search-${idx}" class="quick-dropdown" style="display:none"></div>
-      <input type="hidden" class="qe-edit-spouse-id">
-    </div>
-    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" style="width:120px">
-    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" style="width:100px">
-    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function quickSearchSpouseEdit(idx, query) {
-  const searchEl = document.getElementById(`qe-edit-spouse-search-${idx}`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectSpouseEdit(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowSpouseEditSearch(idx) {
-  const searchEl = document.getElementById(`qe-edit-spouse-search-${idx}`);
-  if (searchEl) searchEl.style.display = 'block';
-}
-
-function quickSelectSpouseEdit(idx, id, name) {
-  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
-  if (row) {
-    row.querySelector('input[type="text"]').value = name;
-    row.querySelector('.qe-edit-spouse-id').value = id;
-  }
-  document.getElementById(`qe-edit-spouse-search-${idx}`).style.display = 'none';
-}
-
-function quickRemoveSpouseEdit(idx) {
-  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
-  if (row) row.remove();
-}
-
-function quickCreateNewSpouseEdit() {
-  const container = document.getElementById('qe-edit-spouses-list');
-  const idx = _qeEditSpouseCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-spouse-row quick-new-person-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-new-person-form" style="width:100%;">
-      <div class="quick-new-person-header">Neuen Ehepartner erstellen:</div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
-        <select class="quick-select qe-new-sex" style="width:70px">
-          <option value="">Sex</option>
-          <option value="M">M</option>
-          <option value="F">F</option>
-        </select>
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
-        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
-        <input type="text" class="quick-input qe-new-death-place" placeholder="Sterbeort">
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-marr-date" placeholder="Hochzeitsdatum" style="width:120px">
-        <input type="text" class="quick-input qe-marr-place" placeholder="Hochzeitsort" style="width:120px">
-        <button class="quick-btn-small" onclick="quickSaveNewSpouseFromEditRow(${idx})">&#x2713;</button>
-        <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
-      </div>
-    </div>
-  `;
-  container.appendChild(row);
-  row.querySelector('.qe-new-name').focus();
-}
-
-function quickSaveNewSpouseFromEditRow(idx) {
-  const row = document.querySelector(`#qe-edit-spouses-list .quick-spouse-row[data-idx="${idx}"]`);
-  if (!row) return;
-
-  const name = row.querySelector('.qe-new-name')?.value?.trim();
-  if (!name) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const sex = row.querySelector('.qe-new-sex')?.value || 'U';
-  const birthDate = row.querySelector('.qe-new-birth-date')?.value || '';
-  const birthPlace = row.querySelector('.qe-new-birth-place')?.value || '';
-  const deathDate = row.querySelector('.qe-new-death-date')?.value || '';
-  const deathPlace = row.querySelector('.qe-new-death-place')?.value || '';
-  const marrDate = row.querySelector('.qe-marr-date')?.value || '';
-  const marrPlace = row.querySelector('.qe-marr-place')?.value || '';
-
-  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, birthPlace, deathDate, deathPlace });
-
-  // Convert to display row
-  row.className = 'quick-spouse-row';
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-      <input type="hidden" class="qe-edit-spouse-id" value="${newId}">
-    </div>
-    <input type="text" placeholder="Hochzeitsdatum" class="quick-input qe-edit-marr-date" value="${escHtml(marrDate)}" style="width:120px">
-    <input type="text" placeholder="Hochzeitsort" class="quick-input qe-edit-marr-place" value="${escHtml(marrPlace)}" style="width:100px">
-    <button class="quick-btn-small" onclick="quickRemoveSpouseEdit(${idx})">&#x2715;</button>
-  `;
-
-  _qeAddToRecent({ id: newId, name, birth: birthDate });
-
-  // Link to current person being edited
-  const currentId = document.getElementById('qe-edit-id').value;
-  if (currentId) {
-    _qeCreateFamily(currentId, newId, marrDate, marrPlace);
-  }
-}
-
-function quickAddChildEdit() {
-  const container = document.getElementById('qe-edit-children-list');
-  const idx = _qeEditChildCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-child-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" placeholder="Kind suchen..." class="quick-input"
-             oninput="quickSearchChildEdit(${idx}, this.value)"
-             onfocus="quickShowChildEditSearch(${idx})">
-      <div id="qe-edit-child-search-${idx}" class="quick-dropdown" style="display:none"></div>
-      <input type="hidden" class="qe-edit-child-id">
-    </div>
-    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
-  `;
-  container.appendChild(row);
-}
-
-function quickSearchChildEdit(idx, query) {
-  const searchEl = document.getElementById(`qe-edit-child-search-${idx}`);
-  if (!searchEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    searchEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
-    }
-  }
-
-  if (results.length === 0) {
-    searchEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    searchEl.innerHTML = results.slice(0, 5).map(r => `
-      <div class="quick-search-item" onclick="quickSelectChildEdit(${idx}, '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
-  }
-  searchEl.style.display = 'block';
-}
-
-function quickShowChildEditSearch(idx) {
-  const searchEl = document.getElementById(`qe-edit-child-search-${idx}`);
-  if (searchEl) searchEl.style.display = 'block';
-}
-
-function quickSelectChildEdit(idx, id, name) {
-  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
-  if (row) {
-    row.querySelector('input[type="text"]').value = name;
-    row.querySelector('.qe-edit-child-id').value = id;
-  }
-  document.getElementById(`qe-edit-child-search-${idx}`).style.display = 'none';
-}
-
-function quickRemoveChildEdit(idx) {
-  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
-  if (row) row.remove();
-}
-
-function quickCreateNewChildEdit() {
-  const container = document.getElementById('qe-edit-children-list');
-  const idx = _qeEditChildCount++;
-
-  const row = document.createElement('div');
-  row.className = 'quick-child-row quick-new-person-row';
-  row.dataset.idx = idx;
-  row.innerHTML = `
-    <div class="quick-new-person-form" style="width:100%;">
-      <div class="quick-new-person-header">Neues Kind erstellen:</div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-name" placeholder="Vorname Nachname *" style="flex:2">
-        <select class="quick-select qe-new-sex" style="width:70px">
-          <option value="">Sex</option>
-          <option value="M">M</option>
-          <option value="F">F</option>
-        </select>
-        <button class="quick-btn-small" onclick="quickSaveNewChildFromEditRow(${idx})">&#x2713;</button>
-        <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
-      </div>
-      <div class="quick-field-row">
-        <input type="text" class="quick-input qe-new-birth-date" placeholder="Geburtsdatum">
-        <input type="text" class="quick-input qe-new-birth-place" placeholder="Geburtsort">
-        <input type="text" class="quick-input qe-new-death-date" placeholder="Sterbedatum">
-      </div>
-    </div>
-  `;
-  container.appendChild(row);
-  row.querySelector('.qe-new-name').focus();
-}
-
-function quickSaveNewChildFromEditRow(idx) {
-  const row = document.querySelector(`#qe-edit-children-list .quick-child-row[data-idx="${idx}"]`);
-  if (!row) return;
-
-  const name = row.querySelector('.qe-new-name')?.value?.trim();
-  if (!name) {
-    alert('Bitte einen Namen eingeben');
-    return;
-  }
-
-  const sex = row.querySelector('.qe-new-sex')?.value || 'U';
-  const birthDate = row.querySelector('.qe-new-birth-date')?.value || '';
-  const birthPlace = row.querySelector('.qe-new-birth-place')?.value || '';
-  const deathDate = row.querySelector('.qe-new-death-date')?.value || '';
-
-  const newId = _qeCreateNewPerson({ fullName: name, sex, birthDate, birthPlace, deathDate });
-
-  // Convert to display row
-  row.className = 'quick-child-row';
-  row.innerHTML = `
-    <div class="quick-search-wrap">
-      <input type="text" class="quick-input" value="${escHtml(name)}" readonly>
-      <input type="hidden" class="qe-edit-child-id" value="${newId}">
-    </div>
-    <button class="quick-btn-small" onclick="quickRemoveChildEdit(${idx})">&#x2715;</button>
-  `;
-
-  _qeAddToRecent({ id: newId, name, birth: birthDate });
-
-  // Link as child to current person's families
-  const currentId = document.getElementById('qe-edit-id').value;
-  if (currentId) {
-    // Find a family where current person is parent
-    for (const famId of individuals.get(currentId)?.fams || []) {
-      const fam = families.get(famId);
-      if (fam) {
-        if (!fam.children.includes(newId)) {
-          fam.children.push(newId);
-        }
-        const child = individuals.get(newId);
-        if (child) child.famc = famId;
-        break;
-      }
-    }
-  }
-}
-
-function quickEditPerson(id) {
-  quickLoadPersonForEdit(id);
-  openQuickEntry();
-}
-
-// Link mode
-function setQuickRel(mode) {
-  _qeLinkMode = mode;
-  document.querySelectorAll('.quick-rel-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelector(`.quick-rel-btn[onclick="setQuickRel('${mode}')"]`).classList.add('active');
-
-  // Show/hide marriage fields
-  document.getElementById('qe-link-spouse-fields').style.display = mode === 'spouse' ? 'block' : 'none';
-}
-
-function quickSearchForLink(personNum, query) {
-  const resultsEl = document.getElementById(`qe-link-${personNum}-results`);
-  if (!resultsEl) return;
-
-  query = query.toLowerCase().trim();
-  if (!query) {
-    resultsEl.style.display = 'none';
-    return;
-  }
-
-  const results = [];
-  for (const [id, indi] of individuals) {
-    const name = (indi.name || '').toLowerCase();
-    if (name.includes(query)) {
-      results.push({ id, name: indi.name, birth: indi.birth?.date || '' });
-    }
-  }
-
-  if (results.length === 0) {
-    resultsEl.innerHTML = '<div style="padding:8px;color:#789;font-size:12px;">Keine Treffer</div>';
-  } else {
-    resultsEl.innerHTML = results.slice(0, 6).map(r => `
-      <div class="quick-search-item" onclick="quickSelectLinkPerson('${personNum}', '${r.id}', '${escHtml(r.name).replace(/'/g, "\\'")}')">
-        <span class="name">${escHtml(r.name)}</span>
-        <span class="details">${r.birth ? escHtml(r.birth) : ''}</span>
-      </div>
-    `).join('');
-  }
-  resultsEl.style.display = 'block';
-}
-
-function quickSelectLinkPerson(personNum, id, name) {
-  document.getElementById(`qe-link-${personNum}`).value = name;
-  document.getElementById(`qe-link-${personNum}-id`).value = id;
-  document.getElementById(`qe-link-${personNum}-results`).style.display = 'none';
-}
-
-function quickCreateLink() {
-  const id1 = document.getElementById('qe-link-person1-id').value;
-  const id2 = document.getElementById('qe-link-person2-id').value;
-
-  if (!id1 || !id2) {
-    alert('Bitte beide Personen auswählen');
-    return;
-  }
-
-  if (_qeLinkMode === 'spouse') {
-    const date = document.getElementById('qe-link-marriage-date').value;
-    const place = document.getElementById('qe-link-marriage-place').value;
-    _qeCreateFamily(id1, id2, date, place);
-    alert('Ehe erstellt');
-  } else {
-    // Parent-child: id1 is parent, id2 is child
-    const parent = individuals.get(id1);
-    const isFather = parent?.sex === 'M';
-    _qeLinkToParents(id2, isFather ? id1 : '', isFather ? '' : id1);
-    alert('Eltern-Kind-Verknüpfung erstellt');
-  }
-
-  _fullRebuildGraph();
-
-  // Clear
-  document.getElementById('qe-link-person1').value = '';
-  document.getElementById('qe-link-person1-id').value = '';
-  document.getElementById('qe-link-person2').value = '';
-  document.getElementById('qe-link-person2-id').value = '';
-}
-
-// Keyboard shortcuts
-document.addEventListener('keydown', function(e) {
-  if (document.getElementById('quick-entry-modal').style.display === 'none') return;
-
-  if (e.ctrlKey && e.key === 's') {
-    e.preventDefault();
-    quickSavePerson();
-  } else if (e.ctrlKey && e.key === 'n') {
-    e.preventDefault();
-    quickSaveAndNext();
-  }
-});
-
-// Window exports
-window.openQuickEntry = openQuickEntry;
-window.closeQuickEntry = closeQuickEntry;
-window.switchQuickTab = switchQuickTab;
-window.quickClearForm = quickClearForm;
-window.quickSavePerson = quickSavePerson;
-window.quickSaveAndNext = quickSaveAndNext;
-window.quickSearchParent = quickSearchParent;
-window.quickShowParentSearch = quickShowParentSearch;
-window.quickSelectParent = quickSelectParent;
-window.quickCreateParent = quickCreateParent;
-window.quickSaveNewParent = quickSaveNewParent;
-window.quickSearchParentEdit = quickSearchParentEdit;
-window.quickShowParentEditSearch = quickShowParentEditSearch;
-window.quickSelectParentEdit = quickSelectParentEdit;
-window.quickCreateParentEdit = quickCreateParentEdit;
-window.quickSaveNewParentEdit = quickSaveNewParentEdit;
-window.quickAddSpouse = quickAddSpouse;
-window.quickAddSpouseEdit = quickAddSpouseEdit;
-window.quickSearchSpouseEdit = quickSearchSpouseEdit;
-window.quickShowSpouseEditSearch = quickShowSpouseEditSearch;
-window.quickSelectSpouseEdit = quickSelectSpouseEdit;
-window.quickRemoveSpouseEdit = quickRemoveSpouseEdit;
-window.quickCreateNewSpouseEdit = quickCreateNewSpouseEdit;
-window.quickSaveNewSpouseFromEditRow = quickSaveNewSpouseFromEditRow;
-window.quickAddChildEdit = quickAddChildEdit;
-window.quickSearchChildEdit = quickSearchChildEdit;
-window.quickShowChildEditSearch = quickShowChildEditSearch;
-window.quickSelectChildEdit = quickSelectChildEdit;
-window.quickRemoveChildEdit = quickRemoveChildEdit;
-window.quickCreateNewChildEdit = quickCreateNewChildEdit;
-window.quickSaveNewChildFromEditRow = quickSaveNewChildFromEditRow;
-window.quickSaveEditPerson = quickSaveEditPerson;
-window.quickCancelEdit = quickCancelEdit;
-window.quickSearchSpouse = quickSearchSpouse;
-window.quickShowSpouseSearch = quickShowSpouseSearch;
-window.quickSelectSpouse = quickSelectSpouse;
-window.quickRemoveSpouse = quickRemoveSpouse;
-window.quickCreateNewSpouse = quickCreateNewSpouse;
-window.quickSaveNewPersonFromRow = quickSaveNewPersonFromRow;
-window.quickAddChild = quickAddChild;
-window.quickSearchChild = quickSearchChild;
-window.quickShowChildSearch = quickShowChildSearch;
-window.quickSelectChild = quickSelectChild;
-window.quickRemoveChild = quickRemoveChild;
-window.quickCreateNewChild = quickCreateNewChild;
-window.quickSearchForEdit = quickSearchForEdit;
-window.quickLoadPersonForEdit = quickLoadPersonForEdit;
-window.quickEditPerson = quickEditPerson;
-window.setQuickRel = setQuickRel;
-window.quickSearchForLink = quickSearchForLink;
-window.quickSelectLinkPerson = quickSelectLinkPerson;
-window.quickCreateLink = quickCreateLink;
-
 // ═══════════════════════════════════════════════════════════════
 // AUTOCOMPLETE
 // ═══════════════════════════════════════════════════════════════
@@ -8094,17 +6769,6 @@ function _acAttachEditForm() {
   // new-person subform inside edit form
   _acAttach(document.getElementById('ef-np-surn'), _acSurnames);
 }
-
-// Attach to static quick-entry form fields (called once on DOMContentLoaded)
-function _acAttachQuickEntry() {
-  _acAttach(document.getElementById('qe-name'),              _acNames);
-  _acAttach(document.getElementById('qe-birth-place'),       _acPlaces);
-  _acAttach(document.getElementById('qe-death-place'),       _acPlaces);
-  _acAttach(document.getElementById('qe-edit-birth-place'),  _acPlaces);
-  _acAttach(document.getElementById('qe-edit-death-place'),  _acPlaces);
-}
-
-document.addEventListener('DOMContentLoaded', _acAttachQuickEntry);
 
 // ═══════════════════════════════════════════════════════════════
 // AI IMPORT — Claude /v1/messages tool-use → persons[]

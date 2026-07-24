@@ -520,6 +520,94 @@ test('re-parsing the new output gives same maidenName', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Lossless round-trip fixes
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\nLossless round-trip fixes');
+
+test('CONC concatenates note text without a line break', () => {
+  const ged = `0 @I1@ INDI
+1 NOTE abc
+2 CONC def
+0 TRLR`;
+  const { individuals } = parseGEDCOM(ged);
+  assert.strictEqual(individuals.get('@I1@').note, 'abcdef');
+});
+
+test('CONT preserves leading whitespace in note continuation', () => {
+  const ged = `0 @I1@ INDI
+1 NOTE abc
+2 CONT   indented
+0 TRLR`;
+  const { individuals } = parseGEDCOM(ged);
+  assert.strictEqual(individuals.get('@I1@').note, 'abc\n  indented');
+});
+
+test('unrecognized level-1 subtree round-trips inside INDI', () => {
+  const ged = `0 @I1@ INDI
+1 NAME John /Doe/
+1 CHR
+2 DATE 1 JAN 1900
+2 PLAC Zurich
+0 TRLR`;
+  const { individuals } = parseGEDCOM(ged);
+  const out = serializeGEDCOM(individuals, new Map());
+  assert.ok(out.includes('1 CHR'), 'CHR line preserved');
+  assert.ok(out.includes('2 DATE 1 JAN 1900'), 'nested DATE preserved');
+  assert.ok(out.includes('2 PLAC Zurich'), 'nested PLAC preserved');
+
+  const { individuals: i2 } = parseGEDCOM(out);
+  assert.ok((i2.get('@I1@')._unknown || []).some(l => l.includes('CHR')), 'still captured as unknown after re-parse');
+});
+
+test('unrecognized level-0 record round-trips via otherLines', () => {
+  const ged = `0 @I1@ INDI
+1 NAME John /Doe/
+0 @S1@ SOUR
+1 TITL Church book
+0 TRLR`;
+  const { individuals, families, otherLines } = parseGEDCOM(ged);
+  assert.ok(otherLines.some(l => l.includes('@S1@ SOUR')), 'SOUR record captured');
+  assert.ok(otherLines.some(l => l.includes('TITL Church book')), 'SOUR sub-line captured');
+
+  const out = serializeGEDCOM(individuals, families, otherLines);
+  assert.ok(out.includes('0 @S1@ SOUR'), 'SOUR record re-emitted');
+  assert.ok(out.includes('1 TITL Church book'), 'SOUR sub-line re-emitted');
+  assert.ok(out.indexOf('0 @S1@ SOUR') < out.indexOf('0 TRLR'), 'emitted before TRLR');
+});
+
+test('FAM NOTE round-trips (preserved as unknown level-1 subtree)', () => {
+  const ged = `0 @F1@ FAM
+1 HUSB @I1@
+1 NOTE Married in secret
+0 TRLR`;
+  const { families } = parseGEDCOM(ged);
+  const out = serializeGEDCOM(new Map(), families);
+  assert.ok(out.includes('1 NOTE Married in secret'), 'FAM NOTE preserved');
+});
+
+test('malicious xref with a quote is rejected', () => {
+  const ged = `0 @I'x@ INDI
+1 NAME Evil /Person/
+0 TRLR`;
+  const { individuals } = parseGEDCOM(ged);
+  assert.strictEqual(individuals.size, 0, 'malformed xref must not be parsed as a record');
+});
+
+test('JSON round-trip preserves unknown level-1 subtree', () => {
+  const ged = `0 @I1@ INDI
+1 NAME John /Doe/
+1 BURI
+2 PLAC Zurich
+0 TRLR`;
+  const { individuals, families } = parseGEDCOM(ged);
+  const json = exportJSON(individuals, families);
+  const { individuals: i2 } = importJSON(json);
+  const out = serializeGEDCOM(i2, new Map());
+  assert.ok(out.includes('1 BURI'), 'BURI preserved through JSON round-trip');
+  assert.ok(out.includes('2 PLAC Zurich'), 'nested PLAC preserved through JSON round-trip');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);
