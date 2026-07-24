@@ -156,7 +156,10 @@ function _tryRestoreAutosave() {
   const when = new Date(data.ts).toLocaleString('de-CH');
   const label = data.filename || 'ohne Namen';
   if (confirm(`Nicht gespeicherte Sitzung gefunden (${label}, ${when}).\nWiederherstellen?`)) {
-    _loadDatasetFile(new File([data.ged], data.filename || 'wiederhergestellt.ged'));
+    // Autosave content is always GEDCOM — force .ged so a .json/.yaml original
+    // filename doesn't route it into the JSON/YAML importer
+    const fname = (data.filename || 'wiederhergestellt').replace(/\.(ged|json|ya?ml)$/i, '') + '.ged';
+    _loadDatasetFile(new File([data.ged], fname));
     _autosave(); // loading marks the session clean, but this data is still unsaved to disk
   } else {
     localStorage.removeItem('gedcomAutosave');
