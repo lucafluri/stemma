@@ -3367,6 +3367,12 @@ function initGraph3D() {
       _onWheel3D(evt);
     }, { passive: false, capture: true });
 
+    // Before a rotate drag starts, pull the pivot back onto the tree
+    // (pan/zoom can leave the orbit target floating in empty space)
+    domEl.addEventListener('pointerdown', (evt) => {
+      if (evt.button === 0) _snapOrbitPivot3D();
+    });
+
     // Redirect the render-loop's update() call to our OrbitControls + orbit target tracking
     old.update = () => { _tickOrbitTarget(); _orbitControls3d.update(); };
 
@@ -3991,6 +3997,34 @@ function _tickOrbitTarget() {
   }
 }
 
+// Depth of the graph along a ray: distance (from origin) of the node closest
+// to the ray. Keeps the orbit pivot / zoom focus on actual tree geometry.
+// ponytail: O(n) scan per event; spatial index if trees ever get huge.
+function _depthAlongRay3D(origin, dir) {
+  if (!graph3d) return null;
+  let best = null, bestPerp = Infinity;
+  const v = new THREE.Vector3();
+  for (const n of graph3d.graphData().nodes) {
+    v.set(n.x || 0, n.y || 0, n.z || 0).sub(origin);
+    const t = v.dot(dir);
+    if (t <= 0) continue;
+    const perp = v.addScaledVector(dir, -t).length();
+    if (perp < bestPerp) { bestPerp = perp; best = t; }
+  }
+  return best;
+}
+
+// Move the orbit target along the current view ray to tree depth.
+// View direction is unchanged → no visual jump, but rotation now pivots on the tree.
+function _snapOrbitPivot3D() {
+  if (!graph3d || !_orbitControls3d || _orbitTrackNodeId || _orbitTargetAnim) return;
+  const cam = graph3d.camera();
+  const ctrl = _orbitControls3d;
+  const dir = ctrl.target.clone().sub(cam.position).normalize();
+  const d = _depthAlongRay3D(cam.position, dir);
+  if (d) ctrl.target.copy(cam.position).addScaledVector(dir, d);
+}
+
 // ── Zoom toward cursor position in 3D ──
 function _onWheel3D(evt) {
   evt.preventDefault();
@@ -4015,7 +4049,8 @@ function _onWheel3D(evt) {
 
   // Exponential factor: consistent feel at any distance, no hard cutoff
   const factor  = Math.pow(1.0015, delta);   // >1 = zoom out, <1 = zoom in
-  const dist    = cam.position.distanceTo(ctrl.target);
+  // Focus depth: actual tree geometry under the cursor, not the (drift-prone) cam↔target distance
+  const dist    = _depthAlongRay3D(cam.position, ray) || cam.position.distanceTo(ctrl.target);
   const newDist = Math.max(1, dist * factor);
 
   // Zoom-to-cursor: find scene point under cursor at cam-target depth,
@@ -4025,6 +4060,7 @@ function _onWheel3D(evt) {
   const shift      = newCamPos.clone().sub(cam.position);
   cam.position.copy(newCamPos);
   ctrl.target.add(shift);   // same shift — keeps cam↔target vector intact
+  _snapOrbitPivot3D();      // re-depth pivot onto the tree so later rotation feels anchored
   ctrl.update();
 }
 
