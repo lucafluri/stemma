@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Stammbaum Visualisierung</title>
+<title id="page-title" data-i18n="app.title">Stammbaum Visualisierung</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,55 +11,59 @@
 <div id="settle-bar"></div>
 
 <div id="topbar">
-  <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Menü öffnen">&#9776;</button>
-  <h1>&#127795; Stammbaum</h1>
-  <button id="import-btn" onclick="openImport()" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; Import</button>
-  <button id="new-person-btn" onclick="addNewPerson()" title="Neue Person ohne Kontext anlegen">&#xff0b; Neue Person</button>
-  <button id="view-toggle-btn" onclick="toggleView()" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; 3D</button>
+  <button id="sidebar-toggle-btn" onclick="toggleSidebar()" data-i18n-label="topbar.menu" aria-label="Menü öffnen">&#9776;</button>
+  <h1>&#127795; <span data-i18n="app.name">Stammbaum</span></h1>
+  <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren"><span data-i18n="topbar.import">&#x1F4E5; Import</span></button>
+  <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen"><span data-i18n="topbar.newPerson">&#xff0b; Neue Person</span></button>
+  <button id="view-toggle-btn" onclick="toggleView()" data-i18n-title="topbar.viewTitle" title="Zwischen 2D und 3D wechseln" disabled style="display:none">&#x25A6; <span data-i18n="topbar.view3d">3D</span></button>
   <div id="dl-wrap" style="display:none">
-    <button id="dl-btn" onclick="downloadGEDCOM()" title="Als GEDCOM speichern">&#x2B07; Speichern</button><button id="dl-format-btn" onclick="toggleExportMenu(event)" title="Exportformat wählen">&#x25BE;</button>
+    <button id="dl-btn" onclick="downloadGEDCOM()" data-i18n-title="topbar.saveTitle" title="Als GEDCOM speichern">&#x2B07; <span data-i18n="topbar.save">Speichern</span></button><button id="dl-format-btn" onclick="toggleExportMenu(event)" data-i18n-title="topbar.exportFormat" title="Exportformat wählen">&#x25BE;</button>
     <div id="export-dropdown">
-      <button onclick="downloadGEDCOM();closeExportMenu()">GEDCOM (.ged)</button>
-      <button onclick="downloadJSON();closeExportMenu()">JSON (.json)</button>
-      <button onclick="downloadYAML();closeExportMenu()">YAML (.yaml)</button>
+      <button onclick="downloadGEDCOM();closeExportMenu()" data-i18n="export.gedcom">GEDCOM (.ged)</button>
+      <button onclick="downloadJSON();closeExportMenu()" data-i18n="export.json">JSON (.json)</button>
+      <button onclick="downloadYAML();closeExportMenu()" data-i18n="export.yaml">YAML (.yaml)</button>
     </div>
   </div>
-  <button id="center-view-btn" onclick="centerView()" title="Alles zentrieren" disabled>&#x2316; Zentrieren</button>
-  <button id="center-person-btn" onclick="centerOnPerson()" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; Person</button>
-  <button id="relation-tool-btn" onclick="openRelationTool()" title="Verwandtschaft berechnen" disabled>&#x1F517; Verwandtschaft</button>
-  <div id="status">Keine Datei geladen &mdash; Datei importieren oder oben &bdquo;+ Neue Person&ldquo; klicken, um direkt loszulegen</div>
+  <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span data-i18n="topbar.center">Zentrieren</span></button>
+  <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span data-i18n="topbar.centerPerson">Person</span></button>
+  <button id="relation-tool-btn" onclick="openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen" disabled>&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
+  <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language" style="margin-left:auto;background:#0d1b3e;color:#e0e0e0;border:1px solid #1a2a5e;border-radius:4px;padding:2px 6px;font-size:12px">
+    <option value="de" data-i18n="language.de">Deutsch</option>
+    <option value="en" data-i18n="language.en">English</option>
+  </select>
+  <div id="status" data-i18n="topbar.noFile">Keine Datei geladen &mdash; Datei importieren oder oben &bdquo;+ Neue Person&ldquo; klicken, um direkt loszulegen</div>
 </div>
 
 <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
 
 <div id="main-layout">
   <div id="sidebar">
-    <input type="text" id="search-input" placeholder="Name suchen...">
+    <input type="text" id="search-input" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Name suchen...">
     <div id="search-results"></div>
     <div class="sidebar-label">
-      Familiennamen
-      <label class="surname-color-toggle" title="Beschriftung einfärben: aktiviert = Nachname, deaktiviert = Geschlecht">
+      <span data-i18n="sidebar.familyNames">Familiennamen</span>
+      <label class="surname-color-toggle" data-i18n-title="sidebar.colorToggle" title="Beschriftung einfärben: aktiviert = Nachname, deaktiviert = Geschlecht">
         <input type="checkbox" id="color-by-surname" checked>
-        <span id="color-mode-label">Nachname</span>
+        <span id="color-mode-label" data-i18n="sidebar.colorModeSurname">Nachname</span>
       </label>
     </div>
     <div id="surname-list"></div>
     <div id="sidebar-buttons">
       <label class="sidebar-toggle" style="display:none">
         <input type="checkbox" id="fam-nodes-toggle" checked>
-        <span>Familien-Knoten anzeigen</span>
+        <span data-i18n="sidebar.famNodes">Familien-Knoten anzeigen</span>
       </label>
       <label class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="sort-time-3d-toggle" checked>
-        <span>Nach Zeit sortieren (3D)</span>
+        <span data-i18n="sidebar.sortByTime3d">Nach Zeit sortieren (3D)</span>
       </label>
       <div id="time-spread-row" style="padding:4px 2px 2px 2px;border-top:none">
         <label class="sidebar-toggle" style="border-top:none;padding-top:0;margin-bottom:4px">
           <input type="checkbox" id="show-timeline-toggle" checked>
-          <span>Zeitachse anzeigen</span>
+          <span data-i18n="sidebar.showTimeline">Zeitachse anzeigen</span>
         </label>
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
-          <span>Zeitachsen-Spreizung</span>
+          <span data-i18n="sidebar.timeSpread">Zeitachsen-Spreizung</span>
           <span id="time-spread-val">500</span>
         </div>
         <input type="range" id="time-spread-slider" min="0" max="1200" step="10" value="500"
@@ -67,136 +71,136 @@
       </div>
       <label class="sidebar-toggle" id="show-names-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="show-names-3d-toggle" checked>
-        <span>Namen anzeigen (3D)</span>
+        <span data-i18n="sidebar.showNames3d">Namen anzeigen (3D)</span>
       </label>
-      <button class="sidebar-btn" id="node-drag-btn" onclick="toggleNodeDrag()" style="opacity:0.6">&#x1F512; Ziehen aus</button>
-      <button class="sidebar-btn" onclick="addNewPerson()">&#xff0b; Neue Person</button>
-      <button class="sidebar-btn" onclick="toggleAllSurnames(true)">Alle einblenden</button>
-      <button class="sidebar-btn" onclick="toggleAllSurnames(false)">Alle ausblenden</button>
-      <button class="sidebar-btn" onclick="resetHighlight()">Hervorhebung aufheben</button>
-      <button class="sidebar-btn" onclick="zoomToFit()">Alles anzeigen</button>
-      <button class="sidebar-btn" onclick="autoSettle()">&#x21ba; Graph neu laden</button>
+      <button class="sidebar-btn" id="node-drag-btn" onclick="toggleNodeDrag()" style="opacity:0.6">&#x1F512; <span data-i18n="sidebar.dragOff">Ziehen aus</span></button>
+      <button class="sidebar-btn" onclick="addNewPerson()">&#xff0b; <span data-i18n="sidebar.newPerson">Neue Person</span></button>
+      <button class="sidebar-btn" onclick="toggleAllSurnames(true)" data-i18n="sidebar.showAll">Alle einblenden</button>
+      <button class="sidebar-btn" onclick="toggleAllSurnames(false)" data-i18n="sidebar.hideAll">Alle ausblenden</button>
+      <button class="sidebar-btn" onclick="resetHighlight()" data-i18n="sidebar.clearHighlight">Hervorhebung aufheben</button>
+      <button class="sidebar-btn" onclick="zoomToFit()" data-i18n="sidebar.fitAll">Alles anzeigen</button>
+      <button class="sidebar-btn" onclick="autoSettle()">&#x21ba; <span data-i18n="sidebar.reloadGraph">Graph neu laden</span></button>
     </div>
 
     <details id="link-colors-panel">
-      <summary>Verbindungsfarben</summary>
+      <summary data-i18n="linkColors.title">Verbindungsfarben</summary>
       <div class="link-color-row">
         <input type="color" id="lc-spouse" value="#9b59b6">
-        <span>Ehepartner</span>
+        <span data-i18n="linkColors.spouse">Ehepartner</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="lc-father" value="#5b9bd5">
-        <span>Vater → Kind</span>
+        <span data-i18n="linkColors.father">Vater → Kind</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="lc-mother" value="#d5729b">
-        <span>Mutter → Kind</span>
+        <span data-i18n="linkColors.mother">Mutter → Kind</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="lc-parent" value="#3498db">
-        <span>Familie → Kind</span>
+        <span data-i18n="linkColors.family">Familie → Kind</span>
       </div>
-      <button id="link-colors-reset" onclick="resetLinkColors()">Zurücksetzen</button>
+      <button id="link-colors-reset" onclick="resetLinkColors()" data-i18n="linkColors.reset">Zurücksetzen</button>
     </details>
 
     <details id="node-colors-panel">
-      <summary>Knotenfarben</summary>
+      <summary data-i18n="nodeColors.title">Knotenfarben</summary>
       <div class="link-color-row">
         <input type="color" id="nc-male" value="#4a90d9">
-        <span>Männlich</span>
+        <span data-i18n="nodeColors.male">Männlich</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="nc-female" value="#e0608a">
-        <span>Weiblich</span>
+        <span data-i18n="nodeColors.female">Weiblich</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="nc-unknown" value="#7e8fa8">
-        <span>Unbekannt</span>
+        <span data-i18n="nodeColors.unknown">Unbekannt</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="nc-fam" value="#2ecc71">
-        <span>Familie</span>
+        <span data-i18n="nodeColors.family">Familie</span>
       </div>
       <div class="link-color-row">
         <input type="color" id="nc-fam-div" value="#e74c3c">
-        <span>Familie (geschieden)</span>
+        <span data-i18n="nodeColors.familyDivorced">Familie (geschieden)</span>
       </div>
       <div class="phys-row" style="margin-top:6px">
-        <span class="phys-label">Familien-Knoten Größe</span>
+        <span class="phys-label" data-i18n="nodeColors.famNodeSize">Familien-Knoten Größe</span>
         <span id="fam-node-size-val">7</span>
       </div>
       <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:#4a7abf;cursor:pointer;margin-bottom:4px">
-      <button id="node-colors-reset" onclick="resetNodeColors()">Zurücksetzen</button>
+      <button id="node-colors-reset" onclick="resetNodeColors()" data-i18n="nodeColors.reset">Zurücksetzen</button>
     </details>
 
 
     <details id="appearance-panel">
-      <summary>3D Darstellung</summary>
+      <summary data-i18n="appearance.title">3D Darstellung</summary>
       <div class="link-color-row">
         <input type="color" id="ap-bg-color" value="#04060f">
-        <span>Hintergrund</span>
+        <span data-i18n="appearance.background">Hintergrund</span>
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Knoten-Deckkraft</span>
+          <span class="phys-label" data-i18n="appearance.nodeOpacity">Knoten-Deckkraft</span>
           <span class="phys-value" id="ap-node-opacity-val">0.85</span>
         </div>
         <input type="range" class="phys-slider" id="ap-node-opacity" min="0.1" max="1" step="0.05" value="0.85">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Linien-Deckkraft</span>
+          <span class="phys-label" data-i18n="appearance.linkOpacity">Linien-Deckkraft</span>
           <span class="phys-value" id="ap-link-opacity-val">0.45</span>
         </div>
         <input type="range" class="phys-slider" id="ap-link-opacity" min="0.05" max="1" step="0.05" value="0.45">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Umgebungslicht</span>
+          <span class="phys-label" data-i18n="appearance.ambientLight">Umgebungslicht</span>
           <span class="phys-value" id="ap-ambient-val">0.4</span>
         </div>
         <input type="range" class="phys-slider" id="ap-ambient" min="0.1" max="3" step="0.1" value="0.4">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Punktlicht</span>
+          <span class="phys-label" data-i18n="appearance.pointLight">Punktlicht</span>
           <span class="phys-value" id="ap-point-val">0.8</span>
         </div>
         <input type="range" class="phys-slider" id="ap-point" min="0" max="3" step="0.1" value="0.8">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Linien-Breite</span>
+          <span class="phys-label" data-i18n="appearance.linkWidth">Linien-Breite</span>
           <span class="phys-value" id="ap-link-width-val">2.4</span>
         </div>
         <input type="range" class="phys-slider" id="ap-link-width" min="0.1" max="4" step="0.1" value="2.4">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Knotengrösse</span>
+          <span class="phys-label" data-i18n="appearance.nodeSize">Knotengrösse</span>
           <span class="phys-value" id="ap-node-size-val">2.0</span>
         </div>
         <input type="range" class="phys-slider" id="ap-node-size" min="1" max="12" step="0.5" value="2">
       </div>
       <div class="phys-row" style="padding:4px 0">
         <div class="phys-row-head">
-          <span class="phys-label">Beschriftungsgrösse</span>
+          <span class="phys-label" data-i18n="appearance.fontSize">Beschriftungsgrösse</span>
           <span class="phys-value" id="ap-font-size-val">18</span>
         </div>
         <input type="range" class="phys-slider" id="ap-font-size" min="8" max="32" step="1" value="18">
       </div>
-      <button class="sidebar-btn" onclick="export3DTopDown()" style="margin-top:6px">&#x1F4E5; Export Top-Down</button>
+      <button class="sidebar-btn" onclick="export3DTopDown()" style="margin-top:6px">&#x1F4E5; <span data-i18n="appearance.exportTopDown">Export Top-Down</span></button>
     </details>
 
     <details id="physics-panel">
-      <summary>Physik <i class="phys-arrow">&#9654;</i></summary>
+      <summary data-i18n="physics.title">Physik <i class="phys-arrow">&#9654;</i></summary>
       <div class="phys-group">
 
-        <div class="phys-section-label">Bindungsabstand</div>
+        <div class="phys-section-label" data-i18n="physics.bondDistance">Bindungsabstand</div>
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Ehepaar</span>
+            <span class="phys-label" data-i18n="physics.spouse">Ehepaar</span>
             <span class="phys-value" id="pv-spouse-dist">31</span>
           </div>
           <input class="phys-slider" type="range" id="ps-spouse-dist" min="10" max="200" step="1" value="31">
@@ -204,17 +208,17 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Eltern–Kind</span>
+            <span class="phys-label" data-i18n="physics.parentChild">Eltern–Kind</span>
             <span class="phys-value" id="pv-parent-dist">53</span>
           </div>
           <input class="phys-slider" type="range" id="ps-parent-dist" min="10" max="200" step="1" value="53">
         </div>
 
-        <div class="phys-section-label">Bindungsstärke</div>
+        <div class="phys-section-label" data-i18n="physics.bondStrength">Bindungsstärke</div>
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Ehepaar</span>
+            <span class="phys-label" data-i18n="physics.spouse">Ehepaar</span>
             <span class="phys-value" id="pv-spouse-str">1.00</span>
           </div>
           <input class="phys-slider" type="range" id="ps-spouse-str" min="0.01" max="1" step="0.01" value="1">
@@ -222,17 +226,17 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Eltern–Kind</span>
+            <span class="phys-label" data-i18n="physics.parentChild">Eltern–Kind</span>
             <span class="phys-value" id="pv-parent-str">0.78</span>
           </div>
           <input class="phys-slider" type="range" id="ps-parent-str" min="0.01" max="1" step="0.01" value="0.78">
         </div>
 
-        <div class="phys-section-label">Abstoßung</div>
+        <div class="phys-section-label" data-i18n="physics.repulsion">Abstoßung</div>
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Person</span>
+            <span class="phys-label" data-i18n="physics.person">Person</span>
             <span class="phys-value" id="pv-charge-indi">600</span>
           </div>
           <input class="phys-slider" type="range" id="ps-charge-indi" min="0" max="600" step="5" value="600">
@@ -240,7 +244,7 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Familie</span>
+            <span class="phys-label" data-i18n="physics.family">Familie</span>
             <span class="phys-value" id="pv-charge-fam">200</span>
           </div>
           <input class="phys-slider" type="range" id="ps-charge-fam" min="0" max="200" step="5" value="200">
@@ -248,17 +252,17 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Reichweite</span>
+            <span class="phys-label" data-i18n="physics.range">Reichweite</span>
             <span class="phys-value" id="pv-charge-dist">1000</span>
           </div>
           <input class="phys-slider" type="range" id="ps-charge-dist" min="50" max="1000" step="10" value="1000">
         </div>
 
-        <div class="phys-section-label">Weitere Kräfte</div>
+        <div class="phys-section-label" data-i18n="physics.moreForces">Weitere Kräfte</div>
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Kollisionsradius</span>
+            <span class="phys-label" data-i18n="physics.collisionRadius">Kollisionsradius</span>
             <span class="phys-value" id="pv-collide">50</span>
           </div>
           <input class="phys-slider" type="range" id="ps-collide" min="5" max="50" step="1" value="50">
@@ -266,7 +270,7 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Zeitl. Schichtung</span>
+            <span class="phys-label" data-i18n="physics.timeStratification">Zeitl. Schichtung</span>
             <span class="phys-value" id="pv-ystr">0.00</span>
           </div>
           <input class="phys-slider" type="range" id="ps-ystr" min="0" max="1" step="0.01" value="0">
@@ -274,7 +278,7 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Zentrierung</span>
+            <span class="phys-label" data-i18n="physics.centering">Zentrierung</span>
             <span class="phys-value" id="pv-center">0.000</span>
           </div>
           <input class="phys-slider" type="range" id="ps-center" min="0" max="0.3" step="0.005" value="0">
@@ -282,7 +286,7 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Dämpfung</span>
+            <span class="phys-label" data-i18n="physics.damping">Dämpfung</span>
             <span class="phys-value" id="pv-vdecay">0.05</span>
           </div>
           <input class="phys-slider" type="range" id="ps-vdecay" min="0.05" max="0.98" step="0.01" value="0.05">
@@ -290,20 +294,20 @@
 
         <div class="phys-row">
           <div class="phys-row-head">
-            <span class="phys-label">Abkühlung</span>
+            <span class="phys-label" data-i18n="physics.cooling">Abkühlung</span>
             <span class="phys-value" id="pv-alphadecay">0.005</span>
           </div>
           <input class="phys-slider" type="range" id="ps-alphadecay" min="0.005" max="0.10" step="0.001" value="0.005">
         </div>
 
-        <button id="phys-reheat-btn" onclick="reheatSimulation()">&#9654; Neu starten</button>
-        <button id="phys-reset-btn" onclick="resetPhysics()">Standardwerte</button>
+        <button id="phys-reheat-btn" onclick="reheatSimulation()">&#9654; <span data-i18n="physics.restart">Neu starten</span></button>
+        <button id="phys-reset-btn" onclick="resetPhysics()" data-i18n="physics.defaults">Standardwerte</button>
 
-        <div class="phys-section-label" style="margin-top:10px">Presets</div>
+        <div class="phys-section-label" style="margin-top:10px" data-i18n="physics.presets">Presets</div>
         <div id="preset-list"></div>
         <div class="preset-save-row">
-          <input class="preset-name-input" type="text" id="preset-name-input" placeholder="Name eingeben…" maxlength="40">
-          <button class="preset-save-btn" onclick="savePreset()" title="Aktuelle Einstellungen speichern">&#x1F4BE;</button>
+          <input class="preset-name-input" type="text" id="preset-name-input" data-i18n-placeholder="physics.presetNamePlaceholder" placeholder="Name eingeben…" maxlength="40">
+          <button class="preset-save-btn" onclick="savePreset()" data-i18n-title="physics.savePreset" title="Aktuelle Einstellungen speichern">&#x1F4BE;</button>
         </div>
       </div>
     </details>
@@ -313,13 +317,13 @@
     <div id="graph-container">
       <div id="loading-overlay">
         <div class="spinner"></div>
-        <span>Simulation läuft...</span>
+        <span data-i18n="graph.loading">Simulation läuft...</span>
       </div>
-      <button id="reset-view-btn" onclick="resetView()" title="Ansicht zurücksetzen (0)">&#x1F5D8;</button>
+      <button id="reset-view-btn" onclick="resetView()" data-i18n-title="graph.resetViewTitle" title="Ansicht zurücksetzen (0)">&#x1F5D8;</button>
       <div id="zoom-controls">
-        <button id="zoom-in-btn"  onclick="svgZoomBy(1.4)"  title="Vergrößern (+)">+</button>
-        <button id="zoom-out-btn" onclick="svgZoomBy(1/1.4)" title="Verkleinern (-)">−</button>
-        <button id="zoom-fit-btn" onclick="zoomToFit()" title="Alles anzeigen">⤢</button>
+        <button id="zoom-in-btn"  onclick="svgZoomBy(1.4)"  data-i18n-title="graph.zoomIn" title="Vergrößern (+)">+</button>
+        <button id="zoom-out-btn" onclick="svgZoomBy(1/1.4)" data-i18n-title="graph.zoomOut" title="Verkleinern (-)">−</button>
+        <button id="zoom-fit-btn" onclick="zoomToFit()" data-i18n-title="graph.zoomFit" title="Alles anzeigen">⤢</button>
       </div>
       <svg id="graph-svg"></svg>
     </div>
@@ -328,23 +332,23 @@
 
   <div id="detail-panel">
     <div class="panel-drag-handle"></div>
-    <button id="close-panel-btn" onclick="closeDetailPanel()" title="Schliessen">&#x2715;</button>
-    <h2 id="detail-name">—</h2>
+    <button id="close-panel-btn" onclick="closeDetailPanel()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    <h2 id="detail-name" data-i18n="detail.empty">—</h2>
     <div id="detail-edit-bar">
-      <button class="edit-bar-btn" onclick="startEdit()">&#x270E; Bearbeiten</button>
-      <button class="edit-bar-btn edit-bar-btn--danger" id="delete-record-btn" onclick="deleteCurrentRecord()">&#x1F5D1; Löschen</button>
+      <button class="edit-bar-btn" onclick="startEdit()">&#x270E; <span data-i18n="detail.edit">Bearbeiten</span></button>
+      <button class="edit-bar-btn edit-bar-btn--danger" id="delete-record-btn" onclick="deleteCurrentRecord()">&#x1F5D1; <span data-i18n="detail.delete">Löschen</span></button>
     </div>
     <div id="delete-confirm-bar" style="display:none">
       <span id="delete-confirm-msg"></span>
-      <button class="edit-bar-btn edit-bar-btn--danger" onclick="confirmDeleteRecord()">Ja, löschen</button>
-      <button class="edit-bar-btn" onclick="cancelDeleteRecord()">Abbrechen</button>
+      <button class="edit-bar-btn edit-bar-btn--danger" onclick="confirmDeleteRecord()" data-i18n="detail.deleteYes">Ja, löschen</button>
+      <button class="edit-bar-btn" onclick="cancelDeleteRecord()" data-i18n="detail.cancel">Abbrechen</button>
     </div>
     <div id="detail-content"></div>
     <div id="detail-buttons">
-      <button class="highlight-btn" id="btn-ancestors" onclick="highlightMode('ancestors')" disabled>&#x2191; Vorfahren</button>
-      <button class="highlight-btn" id="btn-descendants" onclick="highlightMode('descendants')" disabled>&#x2193; Nachfahren</button>
-      <button class="highlight-btn" id="btn-both" onclick="highlightMode('both')" disabled>&#x2195; Beide</button>
-      <button class="highlight-btn" id="btn-clear-hl" onclick="resetHighlight()">&#x2715; Auswahl löschen</button>
+      <button class="highlight-btn" id="btn-ancestors" onclick="highlightMode('ancestors')" disabled>&#x2191; <span data-i18n="detail.ancestors">Vorfahren</span></button>
+      <button class="highlight-btn" id="btn-descendants" onclick="highlightMode('descendants')" disabled>&#x2193; <span data-i18n="detail.descendants">Nachfahren</span></button>
+      <button class="highlight-btn" id="btn-both" onclick="highlightMode('both')" disabled>&#x2195; <span data-i18n="detail.both">Beide</span></button>
+      <button class="highlight-btn" id="btn-clear-hl" onclick="resetHighlight()">&#x2715; <span data-i18n="detail.clearSelection">Auswahl löschen</span></button>
       <div id="hl-count-info" style="display:none"></div>
     </div>
   </div>
@@ -353,27 +357,27 @@
 <div id="reopen-panel-pill" onclick="reopenDetailPanel()" style="display:none"></div>
 
 <div id="relation-panel">
-  <button class="rel-close-btn" onclick="closeRelationTool()" title="Schliessen">&#x2715;</button>
-  <h3 class="rel-title">&#x1F517; Verwandtschaft</h3>
+  <button class="rel-close-btn" onclick="closeRelationTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+  <h3 class="rel-title">&#x1F517; <span data-i18n="relationTool.title">Verwandtschaft</span></h3>
   <div class="rel-slots">
     <div class="rel-slot">
-      <div class="rel-slot-label">Person A</div>
+      <div class="rel-slot-label" data-i18n="relationTool.personA">Person A</div>
       <div class="rel-slot-name" id="rel-name-a">—</div>
       <div class="rel-search-wrap">
-        <input class="rel-search" id="rel-search-a" placeholder="Suchen…" autocomplete="off" oninput="relSearch('A',this.value)" onfocus="relSearch('A',this.value)">
+        <input class="rel-search" id="rel-search-a" data-i18n-placeholder="relationTool.searchPlaceholder" placeholder="Suchen…" autocomplete="off" oninput="relSearch('A',this.value)" onfocus="relSearch('A',this.value)">
         <div class="rel-dropdown" id="rel-drop-a"></div>
       </div>
-      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')" title="Im Graph anklicken">&#x1F449;</button>
+      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449;</button>
     </div>
     <div class="rel-divider">&#x2194;</div>
     <div class="rel-slot">
-      <div class="rel-slot-label">Person B</div>
+      <div class="rel-slot-label" data-i18n="relationTool.personB">Person B</div>
       <div class="rel-slot-name" id="rel-name-b">—</div>
       <div class="rel-search-wrap">
-        <input class="rel-search" id="rel-search-b" placeholder="Suchen…" autocomplete="off" oninput="relSearch('B',this.value)" onfocus="relSearch('B',this.value)">
+        <input class="rel-search" id="rel-search-b" data-i18n-placeholder="relationTool.searchPlaceholder" placeholder="Suchen…" autocomplete="off" oninput="relSearch('B',this.value)" onfocus="relSearch('B',this.value)">
         <div class="rel-dropdown" id="rel-drop-b"></div>
       </div>
-      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')" title="Im Graph anklicken">&#x1F449;</button>
+      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449;</button>
     </div>
   </div>
   <div id="rel-result"></div>
@@ -385,37 +389,37 @@
   <div id="import-modal-backdrop" onclick="closeTextImport()"></div>
   <div id="import-modal-panel">
     <div id="import-modal-header">
-      <h2>&#x1F4E5; Import</h2>
-      <button id="import-close-btn" onclick="closeTextImport()" title="Schliessen">&#x2715;</button>
+      <h2>&#x1F4E5; <span data-i18n="import.title">Import</span></h2>
+      <button id="import-close-btn" onclick="closeTextImport()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
 
     <!-- Step 1: Input -->
     <div id="import-step-input">
-      <p class="import-hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR (offline) gelesen; bei Bedarf steht KI als Fallback bereit.</p>
+      <p class="import-hint" data-i18n-html="import.hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR (offline) gelesen; bei Bedarf steht KI als Fallback bereit.</p>
 
       <div id="import-drop-zone" ondragover="_imDragOver(event)" ondragleave="_imDragLeave(event)" ondrop="_imDrop(event)" onclick="document.getElementById('import-file-input').click()">
-        <div id="import-drop-label">&#x1F4C2; Datei ablegen, klicken zum Wählen, oder Strg+V zum Einfügen</div>
+        <div id="import-drop-label">&#x1F4C2; <span data-i18n="import.dropLabel">Datei ablegen, klicken zum Wählen, oder Strg+V zum Einfügen</span></div>
         <div id="import-drop-filename" style="display:none"></div>
-        <img id="import-image-preview" style="display:none" alt="Vorschau">
+        <img id="import-image-preview" style="display:none" data-i18n-label="import.previewAlt" alt="Vorschau">
       </div>
       <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged,.yaml,.yml,image/jpeg,image/png,image/gif,image/webp" onchange="handleImportFileSelect(event)" style="display:none">
       <span id="import-file-name" style="display:none"></span>
 
-      <textarea id="import-text-area" placeholder="…oder Text hier einfügen"></textarea>
+      <textarea id="import-text-area" data-i18n-placeholder="import.textPlaceholder" placeholder="…oder Text hier einfügen"></textarea>
 
       <!-- Image-only options -->
       <div id="import-image-options" style="display:none">
-        <button class="import-action-btn" onclick="runImportOcr()" id="import-ocr-btn">&#x1F50D; OCR (Tesseract)</button>
-        <button class="import-action-btn" onclick="runImportAi()" id="import-ai-btn">&#x1F916; KI-Fallback</button>
+        <button class="import-action-btn" onclick="runImportOcr()" id="import-ocr-btn">&#x1F50D; <span data-i18n="import.ocr">OCR (Tesseract)</span></button>
+        <button class="import-action-btn" onclick="runImportAi()" id="import-ai-btn">&#x1F916; <span data-i18n="import.ai">KI-Fallback</span></button>
       </div>
       <div id="import-ocr-status" class="import-ocr-status"></div>
 
       <!-- AI key (only shown when AI fallback is used) -->
       <div id="import-ai-key-row" style="display:none">
-        <label for="ai-api-key-input">API Key</label>
-        <input type="password" id="ai-api-key-input" placeholder="sk-ant-… (oder config.local.js)" autocomplete="off" spellcheck="false">
-        <button onclick="_aiToggleKeyVisibility()" title="Anzeigen">&#x1F441;</button>
-        <button onclick="_aiSaveKey()" title="Speichern">&#x1F4BE;</button>
+        <label for="ai-api-key-input" data-i18n="import.apiKey">API Key</label>
+        <input type="password" id="ai-api-key-input" data-i18n-placeholder="import.apiKeyPlaceholder" placeholder="sk-ant-… (oder config.local.js)" autocomplete="off" spellcheck="false">
+        <button onclick="_aiToggleKeyVisibility()" data-i18n-title="import.show" title="Anzeigen">&#x1F441;</button>
+        <button onclick="_aiSaveKey()" data-i18n-title="import.save" title="Speichern">&#x1F4BE;</button>
         <select id="ai-model-select">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
@@ -426,10 +430,10 @@
       <div id="import-error-msg" style="display:none"></div>
 
       <div class="import-step-footer">
-        <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()" id="import-parse-btn">&#x1F50D; Analysieren &amp; zusammenführen</button>
-        <button class="import-action-btn" onclick="runImportAi('text')" id="import-ai-text-btn" title="Text per KI in strukturierte Daten umwandeln">&#x1F916; KI-Analyse</button>
-        <button class="import-action-btn" onclick="importReplaceDataset()" id="import-replace-btn" style="display:none" title="Aktuelle Daten komplett ersetzen">&#x21BB; Ersetzen</button>
-        <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
+        <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()" id="import-parse-btn">&#x1F50D; <span data-i18n="import.analyze">Analysieren &amp; zusammenführen</span></button>
+        <button class="import-action-btn" onclick="runImportAi('text')" id="import-ai-text-btn" data-i18n-title="import.replaceTitle" title="Text per KI in strukturierte Daten umwandeln">&#x1F916; <span data-i18n="import.aiText">KI-Analyse</span></button>
+        <button class="import-action-btn" onclick="importReplaceDataset()" id="import-replace-btn" style="display:none" data-i18n-title="import.replaceTitle" title="Aktuelle Daten komplett ersetzen">&#x21BB; <span data-i18n="import.replace">Ersetzen</span></button>
+        <button class="import-action-btn" onclick="closeTextImport()" data-i18n="import.cancel">Abbrechen</button>
       </div>
     </div>
 
@@ -438,40 +442,40 @@
       <div id="import-summary"></div>
       <div id="import-actions-list"></div>
       <div class="import-step-footer import-step-footer--review">
-        <button class="import-action-btn import-action-btn--primary" onclick="applyImport()">&#x2713; Änderungen anwenden</button>
-        <button class="import-action-btn" onclick="backToInputImport()">&#x2190; Zurück</button>
-        <button class="import-action-btn" onclick="closeTextImport()">Abbrechen</button>
+        <button class="import-action-btn import-action-btn--primary" onclick="applyImport()">&#x2713; <span data-i18n="import.apply">Änderungen anwenden</span></button>
+        <button class="import-action-btn" onclick="backToInputImport()">&#x2190; <span data-i18n="import.back">Zurück</span></button>
+        <button class="import-action-btn" onclick="closeTextImport()" data-i18n="import.cancel">Abbrechen</button>
       </div>
     </div>
 
     <!-- Progress overlay (shown during apply) -->
     <div id="import-progress-overlay" style="display:none">
-      <div id="import-progress-label">Wird angewendet…</div>
+      <div id="import-progress-label" data-i18n="import.applyProgress">Wird angewendet…</div>
       <div id="import-progress-track"><div id="import-progress-bar"></div></div>
       <div id="import-progress-count"></div>
     </div>
 
     <!-- Match Selection Dialog -->
-    <div id="import-match-dialog" style="display:none" role="dialog" aria-modal="true" aria-label="Person auswählen">
+    <div id="import-match-dialog" style="display:none" role="dialog" aria-modal="true" data-i18n-label="import.matchTitle" aria-label="Person auswählen">
       <div id="import-match-backdrop" onclick="closeMatchDialog()"></div>
       <div id="import-match-panel">
         <div id="import-match-header">
-          <h3>&#x1F50D; Person auswählen</h3>
-          <button id="import-match-close" onclick="closeMatchDialog()" title="Schliessen">&#x2715;</button>
+          <h3>&#x1F50D; <span data-i18n="import.matchTitle">Person auswählen</span></h3>
+          <button id="import-match-close" onclick="closeMatchDialog()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
         </div>
         <div id="import-match-current">
-          <div class="import-match-section-title">Aktueller Eintrag:</div>
+          <div class="import-match-section-title" data-i18n="import.currentEntry">Aktueller Eintrag:</div>
           <div id="import-match-current-content"></div>
         </div>
         <div id="import-match-search">
-          <input type="text" id="import-match-search-input" placeholder="Nach Name suchen..." oninput="searchMatchCandidates()">
+          <input type="text" id="import-match-search-input" data-i18n-placeholder="import.searchNamePlaceholder" placeholder="Nach Name suchen..." oninput="searchMatchCandidates()">
         </div>
         <div id="import-match-candidates">
-          <div class="import-match-section-title">Vorschläge:</div>
+          <div class="import-match-section-title" data-i18n="import.suggestions">Vorschläge:</div>
           <div id="import-match-list"></div>
         </div>
         <div id="import-match-actions">
-          <button class="import-action-btn" onclick="closeMatchDialog()">Abbrechen</button>
+          <button class="import-action-btn" onclick="closeMatchDialog()" data-i18n="import.cancel">Abbrechen</button>
         </div>
       </div>
     </div>
@@ -485,6 +489,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.137.5/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.5/dist/3d-force-graph.min.js"></script>
 <script src="gedcom.js"></script>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

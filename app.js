@@ -153,12 +153,12 @@ function _tryRestoreAutosave() {
   if (!raw) return;
   let data;
   try { data = JSON.parse(raw); } catch (e) { localStorage.removeItem('gedcomAutosave'); return; }
-  const when = new Date(data.ts).toLocaleString('de-CH');
-  const label = data.filename || 'ohne Namen';
-  if (confirm(`Nicht gespeicherte Sitzung gefunden (${label}, ${when}).\nWiederherstellen?`)) {
+  const when = new Date(data.ts).toLocaleString(currentLang === 'de' ? 'de-CH' : 'en-US');
+  const label = data.filename || t('autosave.unnamed');
+  if (confirm(t('autosave.found', { name: label, date: when }))) {
     // Autosave content is always GEDCOM — force .ged so a .json/.yaml original
     // filename doesn't route it into the JSON/YAML importer
-    const fname = (data.filename || 'wiederhergestellt').replace(/\.(ged|json|ya?ml)$/i, '') + '.ged';
+    const fname = (data.filename || t('autosave.restoredName')).replace(/\.(ged|json|ya?ml)$/i, '') + '.ged';
     _loadDatasetFile(new File([data.ged], fname));
     _autosave(); // loading marks the session clean, but this data is still unsaved to disk
   } else {
@@ -348,7 +348,7 @@ function _fullRebuildGraph() {
   if (!svgSel) initSVG();
   console.time('[rebuild] renderGraph');     renderGraph();                           console.timeEnd('[rebuild] renderGraph');
   document.getElementById('status').textContent =
-    `${individuals.size} Person${individuals.size !== 1 ? 'en' : ''}, ${families.size} Familien`;
+    t('topbar.status', { persons: individuals.size, personsPlural: individuals.size !== 1 ? 'en' : '', families: families.size });
   _genDepthsCache = null;  // invalidate depth cache before rebuild
   _estimatedYears = null;
   _firstLoad = true;
@@ -1357,23 +1357,23 @@ function onHover(evt, d) {
     if (i.birth.date) {
       html += `<div class="tt-detail">* ${escHtml(i.birth.date)}${i.birth.plac ? ', ' + escHtml(i.birth.plac) : ''}</div>`;
     } else if (_estimatedYears && _estimatedYears.has(d.id)) {
-      html += `<div class="tt-detail" style="color:#888">~${_estimatedYears.get(d.id)} (geschätzt)</div>`;
+      html += `<div class="tt-detail" style="color:#888">~${_estimatedYears.get(d.id)} (${t('detail.estimated')})</div>`;
     }
     if (i.deceased) {
-      html += `<div class="tt-detail">† ${i.death.date ? escHtml(i.death.date) : 'Datum unbekannt'}</div>`;
+      html += `<div class="tt-detail">† ${i.death.date ? escHtml(i.death.date) : t('tooltip.unknownDate')}</div>`;
     }
     if (i.occu) html += `<div class="tt-detail" style="color:#7ac">${escHtml(i.occu)}</div>`;
-    if (i.maidenName) html += `<div class="tt-detail" style="color:#888">geb. ${escHtml(i.maidenName)}</div>`;
-    else if (i.surn) html += `<div class="tt-detail" style="color:#888">Familienname: ${escHtml(i.surn)}</div>`;
+    if (i.maidenName) html += `<div class="tt-detail" style="color:#888">${t('tooltip.born', { name: escHtml(i.maidenName) })}</div>`;
+    else if (i.surn) html += `<div class="tt-detail" style="color:#888">${t('tooltip.familyName', { name: escHtml(i.surn) })}</div>`;
   } else {
     const f = d.data;
     const names = [f.husb, f.wife].filter(Boolean)
       .map(id => escHtml(individuals.get(id)?.name || id)).join(' &amp; ');
-    html = `<div class="tt-name">Familie</div>`;
+    html = `<div class="tt-name">${t('tooltip.family')}</div>`;
     if (names) html += `<div class="tt-detail">${names}</div>`;
     if (f.marriages?.[0]?.date) html += `<div class="tt-detail">⚭ ${escHtml(f.marriages[0].date)}</div>`;
-    if (f.div) html += `<div class="tt-detail" style="color:#e74c3c">Geschieden${f.divDate ? ' ' + escHtml(f.divDate) : ''}</div>`;
-    html += `<div class="tt-detail">${f.chil.length} ${f.chil.length === 1 ? 'Kind' : 'Kinder'}</div>`;
+    if (f.div) html += `<div class="tt-detail" style="color:#e74c3c">${t('tooltip.divorced', { date: f.divDate ? ' ' + escHtml(f.divDate) : '' })}</div>`;
+    html += `<div class="tt-detail">${f.chil.length} ${f.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</div>`;
   }
   tt.innerHTML = html;
   tt.style.display = 'block';
@@ -1415,32 +1415,32 @@ function showIndiDetail(id) {
   let html = '';
 
   // Sex + ID
-  const sexLabel = indi.sex === 'M' ? 'männlich' : indi.sex === 'F' ? 'weiblich' : 'unbekannt';
-  html += row('Geschlecht', sexLabel);
+  const sexLabel = indi.sex === 'M' ? t('detail.male') : indi.sex === 'F' ? t('detail.female') : t('detail.unknown');
+  html += row(t('detail.sex'), sexLabel);
 
   // Birth
   if (indi.birth.date || indi.birth.plac) {
-    html += row('Geboren', fmtPlace(indi.birth.date, indi.birth.plac));
+    html += row(t('detail.born'), fmtPlace(indi.birth.date, indi.birth.plac));
   } else if (_estimatedYears && _estimatedYears.has(id)) {
-    html += row('Geboren', `<span style="color:#888">~${_estimatedYears.get(id)} (geschätzt)</span>`);
+    html += row(t('detail.born'), `<span style="color:#888">~${_estimatedYears.get(id)} (${t('detail.estimated')})</span>`);
   }
 
   // Death
   if (indi.deceased) {
-    const ds = fmtPlace(indi.death.date || 'Datum unbekannt', indi.death.plac);
+    const ds = fmtPlace(indi.death.date || t('tooltip.unknownDate'), indi.death.plac);
     const caus = indi.death.caus ? `<br><span style="color:#888;font-size:11px">${escHtml(indi.death.caus)}</span>` : '';
-    html += row('Gestorben', ds + caus);
+    html += row(t('detail.died'), ds + caus);
   }
 
   // Occupation
-  if (indi.occu) html += row('Beruf', escHtml(indi.occu));
+  if (indi.occu) html += row(t('detail.occupation'), escHtml(indi.occu));
 
   // Maiden name
-  if (indi.maidenName) html += row('Geburtsname', escHtml(indi.maidenName));
+  if (indi.maidenName) html += row(t('detail.maidenName'), escHtml(indi.maidenName));
 
   // Parents
   if (indi.famc.length) {
-    html += `<div class="detail-section"><div class="detail-label">Eltern</div>`;
+    html += `<div class="detail-section"><div class="detail-label">${t('detail.parents')}</div>`;
     for (const famId of indi.famc) {
       const fam = families.get(famId);
       if (!fam) continue;
@@ -1450,14 +1450,14 @@ function showIndiDetail(id) {
           ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(pid)}')">${escHtml(p.name)}</span>`
           : escHtml(pid);
       }).join(' &amp; ');
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="Familie öffnen">${ps || '<em>unbekannt</em>'}</div>`;
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}">${ps || `<em>${t('detail.unknownName')}</em>`}</div>`;
     }
     html += `</div>`;
   }
 
   // Marriages / partners
   if (indi.fams.length) {
-    html += `<div class="detail-section"><div class="detail-label">Ehe / Partnerschaft</div>`;
+    html += `<div class="detail-section"><div class="detail-label">${t('detail.marriages')}</div>`;
     for (const famId of indi.fams) {
       const fam = families.get(famId);
       if (!fam) continue;
@@ -1465,27 +1465,27 @@ function showIndiDetail(id) {
       const sp = spId ? individuals.get(spId) : null;
       const spName = sp
         ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(spId)}')">${escHtml(sp.name)}</span>`
-        : (spId ? escHtml(spId) : '<em>unbekannt</em>');
+        : (spId ? escHtml(spId) : `<em>${t('detail.unknownName')}</em>`);
       const m0 = fam.marriages?.[0];
       const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
-      const dInfo = fam.div ? ` <span style="color:#e74c3c">[Geschieden${fam.divDate ? ' ' + escHtml(fam.divDate) : ''}]</span>` : '';
-      const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? 'Kind' : 'Kinder'}</span>` : '';
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="Familie öffnen">${spName}${mInfo}${dInfo}${kids}</div>`;
+      const dInfo = fam.div ? ` <span style="color:#e74c3c">[${t('tooltip.divorced', { date: fam.divDate ? ' ' + escHtml(fam.divDate) : '' })}]</span>` : '';
+      const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</span>` : '';
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}">${spName}${mInfo}${dInfo}${kids}</div>`;
     }
     html += `</div>`;
   }
 
   // Note
   if (indi.note) {
-    html += row('Notiz', `<span style="font-size:11px;color:#999">${escHtml(indi.note).replace(/\n/g, '<br>')}</span>`);
+    html += row(t('detail.note'), `<span style="font-size:11px;color:#999">${escHtml(indi.note).replace(/\n/g, '<br>')}</span>`);
   }
 
   // Quick-add relative — one click from the read-only view, no need to enter edit mode
   html += `<div class="detail-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
     <div class="ef-rel-add-row">
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; Elternteil</button>
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; Ehepartner</button>
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('child')">&#xff0b; Kind</button>
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; ${t('detail.addParent')}</button>
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; ${t('detail.addSpouse')}</button>
+      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('child')">&#xff0b; ${t('detail.addChild')}</button>
     </div>
     ${_quickAddFormHtml('parent', id)}
     ${_quickAddFormHtml('spouse', id)}
@@ -1502,25 +1502,25 @@ function showIndiDetail(id) {
   if (currentView === '3d') _setOrbitTarget3D(id);
 }
 
-const _QUICK_ADD_LABELS = { parent: 'Elternteil', spouse: 'Ehepartner', child: 'Kind' };
+const _QUICK_ADD_LABELS = { parent: 'detail.addParent', spouse: 'detail.addSpouse', child: 'detail.addChild' };
 
 function _quickAddFormHtml(type, personId) {
   return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
-    <div class="edit-label" style="margin-bottom:6px">Neu: ${_QUICK_ADD_LABELS[type]}</div>
+    <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t(_QUICK_ADD_LABELS[type]) })}</div>
     <div style="display:flex;gap:6px;margin-bottom:6px">
-      <input class="edit-input" id="qa-${type}-givn" placeholder="Vorname" style="flex:1">
-      <input class="edit-input" id="qa-${type}-surn" placeholder="Familienname" style="flex:1">
+      <input class="edit-input" id="qa-${type}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+      <input class="edit-input" id="qa-${type}-surn" placeholder="${t('detail.familyName')}" style="flex:1">
     </div>
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <select class="edit-select" id="qa-${type}-sex">
-        <option value="U">Geschlecht…</option>
-        <option value="M">männlich</option>
-        <option value="F">weiblich</option>
+        <option value="U">${t('detail.sexPlaceholder')}</option>
+        <option value="M">${t('detail.male')}</option>
+        <option value="F">${t('detail.female')}</option>
       </select>
     </div>
     <div style="display:flex;gap:6px">
-      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; Hinzufügen</button>
-      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('${type}')">Abbrechen</button>
+      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; ${t('detail.add')}</button>
+      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('${type}')">${t('detail.cancel')}</button>
     </div>
   </div>`;
 }
@@ -1591,19 +1591,19 @@ function showFamDetail(id) {
 
   const names = [fam.husb, fam.wife].filter(Boolean)
     .map(pid => individuals.get(pid)?.name || pid).join(' & ');
-  document.getElementById('detail-name').textContent = 'Familie' + (names ? ': ' + names : '');
+  document.getElementById('detail-name').textContent = t('detail.family') + (names ? ': ' + names : '');
 
   let html = '';
   (fam.marriages || []).forEach((m, i) => {
     if (!m.date && !m.plac && !m.types?.length) return;
     let marrVal = fmtPlace(m.date, m.plac);
     if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:#7ac;font-size:11px">${escHtml(m.types.join(', '))}</span>`;
-    const label = (fam.marriages.length > 1) ? `Heirat ${i + 1}` : 'Heirat';
+    const label = (fam.marriages.length > 1) ? t('detail.marriageN', { n: i + 1 }) : t('detail.marriage');
     html += row(label, marrVal);
   });
   if (fam.div) {
-    const divTxt = `<span style="color:#e74c3c">Geschieden${fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : ''}</span>`;
-    html += row('Status', divTxt);
+    const divTxt = `<span style="color:#e74c3c">${t('tooltip.divorced', { date: fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : '' })}</span>`;
+    html += row(t('detail.status'), divTxt);
   }
 
   const spouses = [fam.husb, fam.wife].filter(Boolean);
@@ -1612,11 +1612,11 @@ function showFamDetail(id) {
       const p = individuals.get(pid);
       return p ? `<span class="clickable-name" onclick="showIndiDetail('${escJs(pid)}')">${escHtml(p.name)}</span>` : escHtml(pid);
     }).join(' &amp; ');
-    html += row('Eheleute', sl);
+    html += row(t('detail.spouses'), sl);
   }
 
   if (fam.chil.length) {
-    html += `<div class="detail-section"><div class="detail-label">Kinder (${fam.chil.length})</div>`;
+    html += `<div class="detail-section"><div class="detail-label">${t('detail.children')} (${fam.chil.length})</div>`;
     for (const cid of fam.chil) {
       const c = individuals.get(cid);
       if (c) html += `<div class="detail-value"><span class="clickable-name" onclick="showIndiDetail('${escJs(cid)}')">${escHtml(c.name)}</span></div>`;
@@ -1857,20 +1857,20 @@ function updateHLButtons() {
     btn.disabled = !hasSource;
     btn.classList.remove('active');
   });
-  btnA.textContent = '↑ Vorfahren';
-  btnD.textContent = '↓ Nachfahren';
-  btnB.textContent = '↕ Beide';
+  btnA.textContent = '↑ ' + t('highlight.ancestors');
+  btnD.textContent = '↓ ' + t('highlight.descendants');
+  btnB.textContent = '↕ ' + t('highlight.both');
 
   // Apply counts and active class for current mode
   if (hlMode === 'ancestors') {
-    btnA.textContent = `↑ Vorfahren (${_hlAncestorCount})`;
+    btnA.textContent = `↑ ${t('highlight.ancestors')} (${_hlAncestorCount})`;
     btnA.classList.add('active');
   } else if (hlMode === 'descendants') {
-    btnD.textContent = `↓ Nachfahren (${_hlDescendantCount})`;
+    btnD.textContent = `↓ ${t('highlight.descendants')} (${_hlDescendantCount})`;
     btnD.classList.add('active');
   } else if (hlMode === 'both') {
-    btnA.textContent = `↑ Vorfahren (${_hlAncestorCount})`;
-    btnD.textContent = `↓ Nachfahren (${_hlDescendantCount})`;
+    btnA.textContent = `↑ ${t('highlight.ancestors')} (${_hlAncestorCount})`;
+    btnD.textContent = `↓ ${t('highlight.descendants')} (${_hlDescendantCount})`;
     btnB.classList.add('active');
   }
 
@@ -1881,13 +1881,13 @@ function updateHLButtons() {
     info.textContent = '';
     info.style.display = 'none';
   } else if (hlMode === 'ancestors') {
-    info.textContent = `${_hlAncestorCount} Vorfahren hervorgehoben`;
+    info.textContent = t('highlight.ancestorsCount', { n: _hlAncestorCount });
     info.style.display = '';
   } else if (hlMode === 'descendants') {
-    info.textContent = `${_hlDescendantCount} Nachfahren hervorgehoben`;
+    info.textContent = t('highlight.descendantsCount', { n: _hlDescendantCount });
     info.style.display = '';
   } else if (hlMode === 'both') {
-    info.textContent = `${_hlAncestorCount} Vorfahren · ${_hlDescendantCount} Nachfahren`;
+    info.textContent = t('highlight.bothCount', { ancestors: _hlAncestorCount, descendants: _hlDescendantCount });
     info.style.display = '';
   }
 }
@@ -1902,8 +1902,8 @@ function buildSurnameList(sorted) {
     const isNoSurn = surn === null;
     // Use hash color as default, or custom color if set
     const color = isNoSurn ? '#888' : surnameColor(surn);
-    const label = isNoSurn ? '(kein Nachname)' : surn;
-    const title = isNoSurn ? 'Personen ohne Nachname' : escAttr(surn);
+    const label = isNoSurn ? t('detail.noSurname') : surn;
+    const title = isNoSurn ? t('detail.personsWithoutSurname') : escAttr(surn);
 
     const div = document.createElement('div');
     div.className = 'surname-item';
@@ -1920,7 +1920,7 @@ function buildSurnameList(sorted) {
       const hasCustom = surnameCustomColors.has(surn);
       div.innerHTML = `
         <input type="checkbox" checked>
-        <input type="color" class="surname-color-picker" value="${color}" title="Farbe wählen (Rechtsklick zum Zurücksetzen)">
+        <input type="color" class="surname-color-picker" value="${color}" title="${t('detail.chooseColor')}">
         <span class="surname-label" title="${title}">${escHtml(label)}</span>
         <span class="surname-count">${count}</span>`;
 
@@ -1992,7 +1992,7 @@ document.getElementById('search-input').addEventListener('input', function () {
     const el = document.createElement('div');
     el.className = 'result-item';
     el.style.color = '#666';
-    el.textContent = 'Keine Treffer';
+    el.textContent = t('detail.noMatches');
     box.appendChild(el);
   }
 });
@@ -2011,7 +2011,7 @@ document.addEventListener('click', e => {
 function _loadDatasetFile(file) {
   if (!file) return;
 
-  document.getElementById('status').textContent = 'Lade Datei…';
+  document.getElementById('status').textContent = t('graph.loading');
   document.getElementById('loading-overlay').style.display = 'flex';
 
   const reader = new FileReader();
@@ -2037,7 +2037,7 @@ function _loadDatasetFile(file) {
       const iCount = individuals.size;
       const fCount = families.size;
       document.getElementById('status').textContent =
-        `${iCount} Personen, ${fCount} Familien geladen`;
+        t('topbar.statusLoaded', { persons: iCount, families: fCount });
 
       const sorted = buildSurnameColorMap();
       buildSurnameList(sorted);
@@ -2070,13 +2070,13 @@ function _loadDatasetFile(file) {
 
     } catch (err) {
       document.getElementById('loading-overlay').style.display = 'none';
-      document.getElementById('status').textContent = 'Fehler beim Laden: ' + err.message;
+      document.getElementById('status').textContent = t('errors.loadError', { msg: err.message });
       console.error(err);
     }
   };
   reader.onerror = () => {
     document.getElementById('loading-overlay').style.display = 'none';
-    document.getElementById('status').textContent = 'Datei konnte nicht gelesen werden.';
+    document.getElementById('status').textContent = t('errors.readError');
   };
   reader.readAsText(file, 'UTF-8');
 }
@@ -2119,27 +2119,27 @@ function _parseGedcomDate(str) {
 
 function _buildFamEditSections(personId) {
   const i = individuals.get(personId);
-  if (!i || !i.fams.length) return '<div style="color:#555;font-size:11px;padding:2px 0">Keine Ehe / Partnerschaft</div>';
+  if (!i || !i.fams.length) return `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyMarriages')}</div>`;
   return i.fams.map(famId => {
     const fam = families.get(famId);
     if (!fam) return '';
     const spouseId = fam.husb === personId ? fam.wife : fam.husb;
     const spouse   = spouseId ? individuals.get(spouseId) : null;
-    const spouseLbl = spouse ? escHtml(spouse.name) : (spouseId ? escHtml(spouseId) : '<em>unbekannt</em>');
+    const spouseLbl = spouse ? escHtml(spouse.name) : (spouseId ? escHtml(spouseId) : `<em>${t('detail.unknownName')}</em>`);
     const sid = _safeId(famId);
     return `<div class="ef-fam-block">
       <div class="ef-fam-header">&#x26a1; ${spouseLbl}</div>
       <div class="edit-section">
-        <div class="edit-label">Heiratsdatum</div>
+        <div class="edit-label">${t('detail.marriageDate')}</div>
         ${_gedcomDateWidget('ef-fam-' + sid + '-mdate', fam.marriages?.[0]?.date || '')}
       </div>
       <div class="edit-section">
-        <div class="edit-label">Heiratsort</div>
+        <div class="edit-label">${t('detail.marriagePlace')}</div>
         <input class="edit-input" id="ef-fam-${sid}-mplac" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
       </div>
       <label class="edit-checkbox-row">
         <input type="checkbox" id="ef-fam-${sid}-div"${fam.div ? ' checked' : ''}>
-        Geschieden
+        ${t('detail.divorced')}
       </label>
     </div>`;
   }).join('');
@@ -2150,13 +2150,13 @@ function _gedcomDateWidget(fieldId, value) {
   const monthOpts = _GD_MONTHS.map(m =>
     `<option value="${m}"${month===m?' selected':''}>${m[0]}${m.slice(1).toLowerCase()}</option>`
   ).join('');
-  const prefixOpts = [['','exakt'],['ABT','ca.'],['BEF','vor'],['AFT','nach'],['EST','gesch.']]
+  const prefixOpts = [['', t('dateWidget.exact')],['ABT', t('dateWidget.about')],['BEF', t('dateWidget.before')],['AFT', t('dateWidget.after')],['EST', t('dateWidget.estimated')]]
     .map(([v,l]) => `<option value="${v}"${prefix===v?' selected':''}>${l}</option>`).join('');
   return `<div class="gd-widget" id="${fieldId}">` +
     `<select class="gd-prefix">${prefixOpts}</select>` +
-    `<input  class="gd-day"    type="number" min="1" max="31" placeholder="TT"   value="${day}"  title="Tag">` +
-    `<select class="gd-month"><option value="">Mon.</option>${monthOpts}</select>` +
-    `<input  class="gd-year"   type="number" min="1" max="2200" placeholder="JJJJ" value="${year}" title="Jahr">` +
+    `<input  class="gd-day"    type="number" min="1" max="31" placeholder="${t('dateWidget.dayPlaceholder')}"   value="${day}"  title="${t('dateWidget.day')}">` +
+    `<select class="gd-month"><option value="">${t('dateWidget.monthPlaceholder')}</option>${monthOpts}</select>` +
+    `<input  class="gd-year"   type="number" min="1" max="2200" placeholder="${t('dateWidget.yearPlaceholder')}" value="${year}" title="${t('dateWidget.year')}">` +
     `</div>`;
 }
 
@@ -2264,7 +2264,7 @@ function _buildPersonDatalist(excludeId) {
   for (const [pid, p] of individuals) {
     if (pid === excludeId) continue;
     const yr = p.birthYear || (_estimatedYears?.get(pid));
-    const maiden = p.maidenName ? ` (geb. ${p.maidenName})` : '';
+    const maiden = p.maidenName ? ` (${t('tooltip.born', { name: p.maidenName })})` : '';
     const display = `${p.name || pid}${maiden}${yr ? ` *${yr}` : ''}`;
     opts += `<option value="${escAttr(display)}" data-id="${escAttr(pid)}">`;
   }
@@ -2277,7 +2277,7 @@ function _resolvePersonInput(val) {
   // Direct ID match
   if (individuals.has(val)) return val;
   // Strip maiden name / year suffix added by _buildPersonDatalist (e.g. "Name (geb. X) *1900")
-  const baseName = val.replace(/\s*\(geb\.[^)]*\)/, '').replace(/\s*\*\d{4}$/, '').trim();
+  const baseName = val.replace(/\s*\([^)]*\)/, '').replace(/\s*\*\d{4}$/, '').trim();
   // Exact match on full datalist label or base name
   for (const [pid, p] of individuals) {
     const name = p.name || pid;
@@ -2295,18 +2295,18 @@ function _renderPendingRelations() {
   const el = document.getElementById('ef-rel-list');
   if (!el) return;
   if (!_pendingRelations.length) {
-    el.innerHTML = '<div style="color:#555;font-size:11px;padding:2px 0">Keine Beziehungen hinzugefügt</div>';
+    el.innerHTML = `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyRelations')}</div>`;
     return;
   }
-  const labels = { parent: 'Elternteil von', child: 'Kind von', spouse: 'Ehepartner von' };
+  const labels = { parent: t('detail.relationParent'), child: t('detail.relationChild'), spouse: t('detail.relationSpouse') };
   el.innerHTML = _pendingRelations.map((r, idx) => {
     const p = individuals.get(r.targetId);
     const name = p ? escHtml(p.name || r.targetId) : escHtml(r.targetId);
-    const badge = r.isNew ? '<span class="ef-rel-new-badge">neu</span>' : '';
+    const badge = r.isNew ? `<span class="ef-rel-new-badge">${t('import.newBadge')}</span>` : '';
     return `<div class="ef-rel-item">
       <span class="ef-rel-type">${labels[r.type]}</span>
       <span class="ef-rel-name">${name}${badge}</span>
-      <button class="ef-rel-remove" onclick="removeRelation(${idx})" title="Entfernen">&#x2715;</button>
+      <button class="ef-rel-remove" onclick="removeRelation(${idx})" title="${t('import.unlinkTitle')}">&#x2715;</button>
     </div>`;
   }).join('');
 }
@@ -2388,17 +2388,17 @@ function _getExistingRelations(id) {
   for (const famId of i.famc) {
     const fam = families.get(famId);
     if (!fam) continue;
-    if (fam.husb) rels.push({ type: 'parent', targetId: fam.husb, famId, label: 'Vater' });
-    if (fam.wife) rels.push({ type: 'parent', targetId: fam.wife, famId, label: 'Mutter' });
+    if (fam.husb) rels.push({ type: 'parent', targetId: fam.husb, famId, label: t('detail.relationVater') });
+    if (fam.wife) rels.push({ type: 'parent', targetId: fam.wife, famId, label: t('detail.relationMutter') });
   }
   // Spouses and children: families where this person is a spouse
   for (const famId of i.fams) {
     const fam = families.get(famId);
     if (!fam) continue;
     const spouseId = fam.husb === id ? fam.wife : fam.husb;
-    if (spouseId) rels.push({ type: 'spouse', targetId: spouseId, famId, label: 'Ehepartner' });
+    if (spouseId) rels.push({ type: 'spouse', targetId: spouseId, famId, label: t('detail.relationEhepartner') });
     for (const childId of fam.chil) {
-      rels.push({ type: 'child', targetId: childId, famId, label: 'Kind' });
+      rels.push({ type: 'child', targetId: childId, famId, label: t('detail.relationKind') });
     }
   }
   return rels;
@@ -2417,7 +2417,7 @@ function _renderExistingRelations(id) {
     return `<div class="ef-rel-item ef-existing-rel">
       <span class="ef-rel-type">${r.label}</span>
       <span class="ef-rel-name">${name}</span>
-      <button class="ef-rel-remove" onclick="removeExistingRelation(${JSON.stringify(r).split('"').join("'")})" title="Entfernen">&#x2715;</button>
+      <button class="ef-rel-remove" onclick="removeExistingRelation(${JSON.stringify(r).split('"').join("'")})" title="${t('import.unlinkTitle')}">&#x2715;</button>
     </div>`;
   }).join('');
 }
@@ -2443,105 +2443,105 @@ function showIndiEditForm(id) {
 
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
-      <div class="edit-label">Vorname</div>
+      <div class="edit-label">${t('detail.firstName')}</div>
       <input class="edit-input" id="ef-givn" value="${escAttr(i.givn)}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Familienname</div>
+      <div class="edit-label">${t('detail.familyName')}</div>
       <input class="edit-input" id="ef-surn" value="${escAttr(i.surn)}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Geburtsname (Mädchenname)</div>
+      <div class="edit-label">${t('detail.birthName')}</div>
       <input class="edit-input" id="ef-maiden" value="${escAttr(i.maidenName || '')}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Geschlecht</div>
+      <div class="edit-label">${t('detail.sex')}</div>
       <select class="edit-select" id="ef-sex">
-        <option value="M"${i.sex==='M'?' selected':''}>männlich</option>
-        <option value="F"${i.sex==='F'?' selected':''}>weiblich</option>
-        <option value="U"${i.sex==='U'||!i.sex?' selected':''}>unbekannt</option>
+        <option value="M"${i.sex==='M'?' selected':''}>${t('detail.male')}</option>
+        <option value="F"${i.sex==='F'?' selected':''}>${t('detail.female')}</option>
+        <option value="U"${i.sex==='U'||!i.sex?' selected':''}>${t('detail.unknown')}</option>
       </select>
     </div>
     <div class="edit-section">
-      <div class="edit-label">Geburtsdatum</div>
+      <div class="edit-label">${t('detail.birthDate')}</div>
       ${_gedcomDateWidget('ef-bdate', i.birth.date)}
     </div>
     <div class="edit-section">
-      <div class="edit-label">Geburtsort</div>
+      <div class="edit-label">${t('detail.birthPlace')}</div>
       <input class="edit-input" id="ef-bplac" value="${escAttr(i.birth.plac)}">
     </div>
     <label class="edit-checkbox-row">
       <input type="checkbox" id="ef-dead"${i.deceased?' checked':''}>
-      Verstorben
+      ${t('detail.deceased')}
     </label>
     <div class="edit-section">
-      <div class="edit-label">Sterbedatum</div>
+      <div class="edit-label">${t('detail.deathDate')}</div>
       ${_gedcomDateWidget('ef-ddate', i.death.date)}
     </div>
     <div class="edit-section">
-      <div class="edit-label">Sterbeort</div>
+      <div class="edit-label">${t('detail.deathPlace')}</div>
       <input class="edit-input" id="ef-dplac" value="${escAttr(i.death.plac)}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Todesursache</div>
+      <div class="edit-label">${t('detail.causeOfDeath')}</div>
       <input class="edit-input" id="ef-dcaus" value="${escAttr(i.death.caus)}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Beruf</div>
+      <div class="edit-label">${t('detail.occupation')}</div>
       <input class="edit-input" id="ef-occu" value="${escAttr(i.occu)}">
     </div>
     <div class="edit-section">
-      <div class="edit-label">Notiz</div>
+      <div class="edit-label">${t('detail.note')}</div>
       <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
     </div>
     <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
-      <div class="edit-label">Ehen &amp; Partnerschaften</div>
+      <div class="edit-label">${t('detail.marriages')}</div>
       <div id="ef-fam-sections">${_buildFamEditSections(id)}</div>
     </div>
     <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
-      <div class="edit-label">Beziehungen</div>
+      <div class="edit-label">${t('detail.relations')}</div>
       <div id="ef-existing-rel-list" style="margin-bottom:4px"></div>
       <div id="ef-rel-list" style="margin-bottom:6px">
-        <div style="color:#555;font-size:11px;padding:2px 0">Keine neuen Beziehungen</div>
+        <div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyNewRelations')}</div>
       </div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="Person suchen…" autocomplete="off">
+        <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <datalist id="ef-rel-datalist">${datalistHtml}</datalist>
         <select class="edit-select" id="ef-rel-type" style="width:auto;min-width:100px">
-          <option value="child">Kind von</option>
-          <option value="parent">Elternteil von</option>
-          <option value="spouse">Ehepartner von</option>
+          <option value="child">${t('detail.relationChild')}</option>
+          <option value="parent">${t('detail.relationParent')}</option>
+          <option value="spouse">${t('detail.relationSpouse')}</option>
         </select>
-        <button class="ef-rel-add-btn" onclick="addRelation()" title="Beziehung hinzufügen">+</button>
+        <button class="ef-rel-add-btn" onclick="addRelation()" title="${t('detail.addRelation')}">+</button>
       </div>
-      <button class="ef-new-person-btn" onclick="toggleNewPersonSubform()">&#xff0b; Neue Person erstellen</button>
+      <button class="ef-new-person-btn" onclick="toggleNewPersonSubform()">&#xff0b; ${t('detail.createNewPerson')}</button>
       <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
-        <div class="edit-label" style="margin-bottom:6px">Neue Person</div>
+        <div class="edit-label" style="margin-bottom:6px">${t('detail.newPerson')}</div>
         <div style="display:flex;gap:6px;margin-bottom:6px">
-          <input class="edit-input" id="ef-np-givn" placeholder="Vorname" style="flex:1">
-          <input class="edit-input" id="ef-np-surn" placeholder="Familienname" style="flex:1">
+          <input class="edit-input" id="ef-np-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+          <input class="edit-input" id="ef-np-surn" placeholder="${t('detail.familyName')}" style="flex:1">
         </div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
           <select class="edit-select" id="ef-np-sex" style="flex:1">
-            <option value="U">Geschlecht…</option>
-            <option value="M">männlich</option>
-            <option value="F">weiblich</option>
+            <option value="U">${t('detail.sexPlaceholder')}</option>
+            <option value="M">${t('detail.male')}</option>
+            <option value="F">${t('detail.female')}</option>
           </select>
           <select class="edit-select" id="ef-np-type" style="flex:1">
-            <option value="child">Kind von</option>
-            <option value="parent">Elternteil von</option>
-            <option value="spouse">Ehepartner von</option>
+            <option value="child">${t('detail.relationChild')}</option>
+            <option value="parent">${t('detail.relationParent')}</option>
+            <option value="spouse">${t('detail.relationSpouse')}</option>
           </select>
         </div>
         <div style="display:flex;gap:6px">
-          <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmNewPersonRelation()">&#x2713; Hinzufügen</button>
-          <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleNewPersonSubform()">Abbrechen</button>
+          <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmNewPersonRelation()">&#x2713; ${t('detail.add')}</button>
+          <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleNewPersonSubform()">${t('detail.cancel')}</button>
         </div>
       </div>
     </div>
     <div class="edit-form-buttons">
-      <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; Speichern</button>
-      <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
+      <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; ${t('detail.save')}</button>
+      <button class="edit-cancel-btn" onclick="cancelEdit()">${t('detail.cancel')}</button>
     </div>`;
 
   _renderExistingRelations(id);
@@ -2719,10 +2719,10 @@ function _findOrCreateFamAsParent(personId) {
 }
 
 const _FAM_MARR_TYPES = [
-  { val: 'civil',         label: 'Standesamtlich' },
-  { val: 'kirchlich',     label: 'Kirchlich' },
-  { val: 'partnerschaft', label: 'Partnerschaft' },
-  { val: 'eheähnlich',   label: 'Eheähnlich' },
+  { val: 'civil',         label: 'marriageType.civil' },
+  { val: 'kirchlich',     label: 'marriageType.kirchlich' },
+  { val: 'partnerschaft', label: 'marriageType.partnerschaft' },
+  { val: 'eheähnlich',   label: 'marriageType.eheaehnlich' },
 ];
 
 function showFamEditForm(id) {
@@ -2745,63 +2745,63 @@ function showFamEditForm(id) {
 
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
-      <div class="edit-label">Partner 1</div>
+      <div class="edit-label">${t('detail.partner1')}</div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-husb" list="ef-husb-dl" value="${escAttr(husbName)}" placeholder="Person suchen…" autocomplete="off">
+        <input class="edit-input" id="ef-husb" list="ef-husb-dl" value="${escAttr(husbName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <datalist id="ef-husb-dl">${dl}</datalist>
-        <button class="ef-rel-remove" onclick="document.getElementById('ef-husb').value=''" title="Leeren">&#x2715;</button>
+        <button class="ef-rel-remove" onclick="document.getElementById('ef-husb').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
     </div>
     <div class="edit-section">
-      <div class="edit-label">Partner 2</div>
+      <div class="edit-label">${t('detail.partner2')}</div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-wife" list="ef-wife-dl" value="${escAttr(wifeName)}" placeholder="Person suchen…" autocomplete="off">
+        <input class="edit-input" id="ef-wife" list="ef-wife-dl" value="${escAttr(wifeName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <datalist id="ef-wife-dl">${dl}</datalist>
-        <button class="ef-rel-remove" onclick="document.getElementById('ef-wife').value=''" title="Leeren">&#x2715;</button>
+        <button class="ef-rel-remove" onclick="document.getElementById('ef-wife').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
     </div>
     <div class="edit-section">
-      <div class="edit-label">Zeremonien</div>
+      <div class="edit-label">${t('detail.ceremonies')}</div>
       <div id="ef-fam-marr-list"></div>
-      <button class="ef-toggle-new-btn" onclick="_famEditAddMarr()" style="margin-top:4px">&#x2795; Zeremonie hinzufügen</button>
+      <button class="ef-toggle-new-btn" onclick="_famEditAddMarr()" style="margin-top:4px">&#x2795; ${t('detail.addCeremony')}</button>
     </div>
     <div class="edit-section">
       <label class="edit-checkbox-row" style="margin-bottom:4px">
         <input type="checkbox" id="ef-div"${f.div ? ' checked' : ''} onchange="_famEditToggleDivDate(this.checked)">
-        Geschieden
+        ${t('detail.divorced')}
       </label>
       <div id="ef-div-date-row" style="display:${f.div ? 'block' : 'none'}">
-        <div class="edit-label" style="margin-top:4px">Scheidungsdatum</div>
+        <div class="edit-label" style="margin-top:4px">${t('detail.divorceDate')}</div>
         ${_gedcomDateWidget('ef-divdate', f.divDate || '')}
       </div>
     </div>
     <div class="edit-section">
-      <div class="edit-label">Kinder</div>
+      <div class="edit-label">${t('detail.children')}</div>
       <div id="ef-fam-chil-list"></div>
       <div class="ef-rel-add-row" style="margin-top:4px">
-        <input class="edit-input" id="ef-fam-chil-search" list="ef-fam-chil-dl" placeholder="Kind suchen…" autocomplete="off">
+        <input class="edit-input" id="ef-fam-chil-search" list="ef-fam-chil-dl" placeholder="${t('detail.searchChild')}" autocomplete="off">
         <datalist id="ef-fam-chil-dl">${dl}</datalist>
-        <button class="ef-rel-add-btn" onclick="_famEditAddChild()" title="Kind hinzufügen">+</button>
+        <button class="ef-rel-add-btn" onclick="_famEditAddChild()" title="${t('detail.addChildTitle')}">+</button>
       </div>
-      <button class="ef-toggle-new-btn" onclick="_famEditToggleNewChild()" style="margin-top:4px">&#x2795; Neues Kind</button>
+      <button class="ef-toggle-new-btn" onclick="_famEditToggleNewChild()" style="margin-top:4px">&#x2795; ${t('detail.newChild')}</button>
       <div id="ef-fam-new-child-form" style="display:none;margin-top:6px">
         <div class="ef-rel-add-row">
-          <input class="edit-input" id="ef-fnc-givn" placeholder="Vorname" style="flex:1">
-          <input class="edit-input" id="ef-fnc-surn" placeholder="Familienname" style="flex:1">
+          <input class="edit-input" id="ef-fnc-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+          <input class="edit-input" id="ef-fnc-surn" placeholder="${t('detail.familyName')}" style="flex:1">
         </div>
         <div class="ef-rel-add-row" style="margin-top:4px">
           <select class="edit-select" id="ef-fnc-sex" style="flex:1">
-            <option value="U">Geschlecht</option>
-            <option value="M">Männlich</option>
-            <option value="F">Weiblich</option>
+            <option value="U">${t('detail.sexSelect')}</option>
+            <option value="M">${t('detail.maleCap')}</option>
+            <option value="F">${t('detail.femaleCap')}</option>
           </select>
-          <button class="ef-rel-add-btn" onclick="_famEditCreateChild()" title="Kind erstellen" style="width:auto;padding:0 10px">Hinzufügen</button>
+          <button class="ef-rel-add-btn" onclick="_famEditCreateChild()" title="${t('detail.addChildTitle')}" style="width:auto;padding:0 10px">${t('detail.add')}</button>
         </div>
       </div>
     </div>
     <div class="edit-form-buttons">
-      <button class="edit-save-btn" onclick="commitFamEdit()">&#x2713; Speichern</button>
-      <button class="edit-cancel-btn" onclick="cancelEdit()">Abbrechen</button>
+      <button class="edit-save-btn" onclick="commitFamEdit()">&#x2713; ${t('detail.save')}</button>
+      <button class="edit-cancel-btn" onclick="cancelEdit()">${t('detail.cancel')}</button>
     </div>`;
 
   _famEditRenderMarriages();
@@ -2813,19 +2813,19 @@ function _famEditRenderMarriages() {
   if (!el) return;
   el.innerHTML = _famEditMarriages.map((m, i) => {
     const typesHtml = _FAM_MARR_TYPES.map(t =>
-      `<label class="fam-type-check"><input type="checkbox" data-marr-idx="${i}" data-marr-type="${escAttr(t.val)}"${m.types.includes(t.val) ? ' checked' : ''}> ${escHtml(t.label)}</label>`
+      `<label class="fam-type-check"><input type="checkbox" data-marr-idx="${i}" data-marr-type="${escAttr(t.val)}"${m.types.includes(t.val) ? ' checked' : ''}> ${escHtml(t(t.label))}</label>`
     ).join('');
     const canRemove = _famEditMarriages.length > 1;
     return `<div class="fam-marr-block">
       <div class="fam-marr-block-header">
-        <span>Zeremonie ${i + 1}</span>
-        ${canRemove ? `<button class="ef-rel-remove" onclick="_famEditRemoveMarr(${i})" title="Entfernen">&#x2715;</button>` : ''}
+        <span>${t('detail.marriageN', { n: i + 1 })}</span>
+        ${canRemove ? `<button class="ef-rel-remove" onclick="_famEditRemoveMarr(${i})" title="${t('import.unlinkTitle')}">&#x2715;</button>` : ''}
       </div>
       <div class="fam-type-checks" style="margin-bottom:6px">${typesHtml}</div>
-      <div class="edit-label" style="font-size:11px">Datum</div>
+      <div class="edit-label" style="font-size:11px">${t('detail.date')}</div>
       ${_gedcomDateWidget('ef-marr-' + i + '-date', m.date)}
-      <div class="edit-label" style="font-size:11px;margin-top:4px">Ort</div>
-      <input class="edit-input" id="ef-marr-${i}-plac" value="${escAttr(m.plac)}" placeholder="Ort">
+      <div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.place')}</div>
+      <input class="edit-input" id="ef-marr-${i}-plac" value="${escAttr(m.plac)}" placeholder="${t('detail.place')}">
     </div>`;
   }).join('');
 }
@@ -2865,19 +2865,19 @@ function _famEditRenderChildren(f) {
       const name = p ? escHtml(p.name || cid) : escHtml(cid);
       return `<div class="ef-rel-item">
         <span class="ef-rel-name">${name}</span>
-        <button class="ef-rel-remove" onclick="_famEditRemoveChild('${escJs(cid)}')" title="Entfernen">&#x2715;</button>
+        <button class="ef-rel-remove" onclick="_famEditRemoveChild('${escJs(cid)}')" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>`;
     });
   const pending = _famEditPendingChil.map((c, i) => {
     return `<div class="ef-rel-item">
       <span class="ef-rel-name">${escHtml(c.name)}</span>
-      <span class="ef-rel-new-badge">neu</span>
-      <button class="ef-rel-remove" onclick="_famEditRemovePending(${i})" title="Entfernen">&#x2715;</button>
+      <span class="ef-rel-new-badge">${t('import.newBadge')}</span>
+      <button class="ef-rel-remove" onclick="_famEditRemovePending(${i})" title="${t('import.unlinkTitle')}">&#x2715;</button>
     </div>`;
   });
   el.innerHTML = (existing.length || pending.length)
     ? existing.join('') + pending.join('')
-    : '<div style="color:#555;font-size:11px;padding:2px 0">Keine Kinder</div>';
+    : `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.noChildren')}</div>`;
 }
 
 function _famEditRemoveChild(cid) {
@@ -3035,8 +3035,8 @@ function deleteCurrentRecord() {
   _pendingDeleteType = type;
   const name = type === 'INDI'
     ? (individuals.get(id)?.name || id)
-    : (() => { const f = families.get(id); return 'Familie' + (f ? ': ' + [f.husb, f.wife].filter(Boolean).map(p => individuals.get(p)?.name || p).join(' & ') : ''); })();
-  document.getElementById('delete-confirm-msg').textContent = `„${name}" wirklich löschen?`;
+    : (() => { const f = families.get(id); return t('detail.family') + (f ? ': ' + [f.husb, f.wife].filter(Boolean).map(p => individuals.get(p)?.name || p).join(' & ') : ''); })();
+  document.getElementById('delete-confirm-msg').textContent = t('detail.deleteConfirm', { name });
   document.getElementById('delete-confirm-bar').style.display = 'flex';
   document.getElementById('detail-edit-bar').style.display   = 'none';
 }
@@ -3131,7 +3131,7 @@ function addNewPerson() {
   _isNewRecord  = true;
   _editingId    = id;
   _editingType  = 'INDI';
-  document.getElementById('detail-name').textContent = 'Neue Person';
+  document.getElementById('detail-name').textContent = t('detail.newPerson');
   document.getElementById('detail-edit-bar').style.display  = 'none';
   document.getElementById('detail-buttons').style.display   = 'none';
   openPanel();
@@ -3202,12 +3202,12 @@ function renderPresetList() {
     row.className = 'preset-row user';
     row.innerHTML = `
       <span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escJs(name)}',false)">${escHtml(name)}</span>
-      <button class="preset-del" onclick="deletePreset('${escJs(name)}')" title="Löschen">&#x2715;</button>`;
+      <button class="preset-del" onclick="deletePreset('${escJs(name)}')" title="${t('detail.delete')}">&#x2715;</button>`;
     container.appendChild(row);
   }
 
   if (!names.length && !Object.keys(BUILTIN_PRESETS).length) {
-    container.innerHTML = '<div style="color:#555;font-size:11px;font-style:italic;padding:2px 4px">Keine Presets</div>';
+    container.innerHTML = `<div style="color:#555;font-size:11px;font-style:italic;padding:2px 4px">${t('physics.noPresets')}</div>`;
   }
 }
 
@@ -3225,7 +3225,7 @@ function toggleView() {
     currentView = '3d';
     c2d.style.display = 'none';
     c3d.style.display = 'block';
-    btn.textContent = '◨ 2D'; btn.classList.add('active-3d');
+    btn.textContent = '◨ ' + t('topbar.view2d'); btn.classList.add('active-3d');
     document.getElementById('sort-time-3d-row').style.display = 'flex';
     document.getElementById('time-spread-row').style.display = sortByTime3D ? 'block' : 'none';
     document.getElementById('show-names-3d-row').style.display = 'flex';
@@ -3240,7 +3240,7 @@ function toggleView() {
     currentView = '2d';
     c3d.style.display = 'none';
     c2d.style.display = 'block';
-    btn.textContent = '◧ 3D'; btn.classList.remove('active-3d');
+    btn.textContent = '◧ ' + t('topbar.view3d'); btn.classList.remove('active-3d');
     document.getElementById('sort-time-3d-row').style.display = 'none';
     document.getElementById('time-spread-row').style.display = 'none';
     document.getElementById('show-names-3d-row').style.display = 'none';
@@ -3774,7 +3774,9 @@ function toggleNodeDrag() {
   if (graph3d) graph3d.enableNodeDrag(_nodeDragEnabled);
   const btn = document.getElementById('node-drag-btn');
   if (btn) {
-    btn.textContent = _nodeDragEnabled ? '🔓 Ziehen an' : '🔒 Ziehen aus';
+    btn.textContent = _nodeDragEnabled
+      ? '🔓 ' + t('sidebar.dragOn')
+      : '🔒 ' + t('sidebar.dragOff');
     btn.style.opacity = _nodeDragEnabled ? '1' : '0.6';
   }
 }
@@ -3784,7 +3786,7 @@ function export3DTopDown() {
   if (!graph3d) return;
 
   const btn = document.querySelector('button[onclick="export3DTopDown()"]');
-  if (btn) { btn.textContent = '⏳ Wird gerendert…'; btn.disabled = true; }
+  if (btn) { btn.textContent = '⏳ ' + t('appearance.rendering'); btn.disabled = true; }
 
   const origHalfSpan = _3dYHalfSpan;
 
@@ -3937,10 +3939,10 @@ function export3DTopDown() {
     applyTimelineYFix();
     graph3d.d3ReheatSimulation();
 
-    if (btn) { btn.textContent = '📥 Export Top-Down'; btn.disabled = false; }
+    if (btn) { btn.textContent = '📥 ' + t('appearance.exportTopDown'); btn.disabled = false; }
 
     const a = document.createElement('a');
-    a.download = 'stammbaum_export.png';
+    a.download = t('appearance.exportFileName') + '.png';
     a.href = canvas.toDataURL('image/png');
     a.click();
   }, 2500);
@@ -4147,7 +4149,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const colorBySurnameToggle = document.getElementById('color-by-surname');
   const colorModeLabelEl = document.getElementById('color-mode-label');
   function _syncColorModeLabel() {
-    if (colorModeLabelEl) colorModeLabelEl.textContent = colorBySurname ? 'Nachname' : 'Geschlecht';
+    if (colorModeLabelEl) colorModeLabelEl.textContent = colorBySurname ? t('sidebar.colorModeSurname') : t('sidebar.colorModeSex');
   }
   if (colorBySurnameToggle) {
     colorBySurnameToggle.checked = colorBySurname;
@@ -4383,18 +4385,18 @@ function _computeAndShowRelation() {
   const idA = _relPersonA, idB = _relPersonB;
   const result = document.getElementById('rel-result');
   if (!idA || !idB) { result.textContent = ''; return; }
-  if (idA === idB)  { result.textContent = 'Dieselbe Person'; return; }
+  if (idA === idB)  { result.textContent = t('relationTool.samePerson'); return; }
 
   const indiA = individuals.get(idA);
   const indiB = individuals.get(idB);
-  if (!indiA || !indiB) { result.textContent = 'Person nicht gefunden'; return; }
+  if (!indiA || !indiB) { result.textContent = t('relationTool.personNotFound'); return; }
 
   // --- Check spouse ---
   for (const famId of indiA.fams) {
     const fam = families.get(famId);
     if (!fam) continue;
     if (fam.husb === idB || fam.wife === idB) {
-      result.innerHTML = _relLine('💍', 'Ehepartner/in');
+      result.innerHTML = _relLine('💍', t('relationTool.spouse'));
       return;
     }
   }
@@ -4478,21 +4480,21 @@ function _computeAndShowRelation() {
 
   // aunt/uncle: genA=1, genB=2 (B is grandparent of A's parent)
   if (bestGenA === 1 && bestGenB === 2) {
-    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? 'Onkel' : indiB.sex === 'F' ? 'Tante' : 'Onkel/Tante');
+    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? t('relationTool.uncle') : indiB.sex === 'F' ? t('relationTool.aunt') : t('relationTool.uncleAunt'));
     return;
   }
   if (bestGenA === 2 && bestGenB === 1) {
-    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? 'Neffe' : indiA.sex === 'F' ? 'Nichte' : 'Neffe/Nichte');
+    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? t('relationTool.nephew') : indiA.sex === 'F' ? t('relationTool.niece') : t('relationTool.nephewNiece'));
     return;
   }
 
   // great-aunt/uncle
   if (bestGenA === 1 && bestGenB === 3) {
-    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? 'Großonkel' : indiB.sex === 'F' ? 'Großtante' : 'Großonkel/-tante');
+    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? t('relationTool.greatUncle') : indiB.sex === 'F' ? t('relationTool.greatAunt') : t('relationTool.greatUncleAunt'));
     return;
   }
   if (bestGenA === 3 && bestGenB === 1) {
-    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? 'Großneffe' : indiA.sex === 'F' ? 'Großnichte' : 'Großneffe/-nichte');
+    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? t('relationTool.greatNephew') : indiA.sex === 'F' ? t('relationTool.greatNiece') : t('relationTool.greatNephewNiece'));
     return;
   }
 
@@ -4511,29 +4513,29 @@ function _sexIcon(indi) {
 
 function _ancestorLabel(gen, sex) {
   const m = sex === 'M', f = sex === 'F';
-  if (gen === 1) return m ? 'Vater' : f ? 'Mutter' : 'Elternteil';
-  if (gen === 2) return m ? 'Großvater' : f ? 'Großmutter' : 'Großelternteil';
-  const prefix = 'Ur-'.repeat(gen - 2);
-  return prefix + (m ? 'Urgroßvater' : f ? 'Urgroßmutter' : 'Urgroßelternteil');
+  if (gen === 1) return m ? t('relationTool.father') : f ? t('relationTool.mother') : t('relationTool.parent');
+  if (gen === 2) return m ? t('relationTool.grandfather') : f ? t('relationTool.grandmother') : t('relationTool.grandparent');
+  const prefix = t('relationTool.greatPrefix').repeat(gen - 2);
+  return prefix + (m ? t('relationTool.greatGrandfather') : f ? t('relationTool.greatGrandmother') : t('relationTool.greatGrandparent'));
 }
 function _descendantLabel(gen, sex) {
   const m = sex === 'M', f = sex === 'F';
-  if (gen === 1) return m ? 'Sohn' : f ? 'Tochter' : 'Kind';
-  if (gen === 2) return m ? 'Enkel' : f ? 'Enkelin' : 'Enkelkind';
-  const prefix = 'Ur-'.repeat(gen - 2);
-  return prefix + (m ? 'Urenkel' : f ? 'Urenkelin' : 'Urenkelkind');
+  if (gen === 1) return m ? t('relationTool.son') : f ? t('relationTool.daughter') : t('relationTool.child');
+  if (gen === 2) return m ? t('relationTool.grandson') : f ? t('relationTool.granddaughter') : t('relationTool.grandchild');
+  const prefix = t('relationTool.greatPrefix').repeat(gen - 2);
+  return prefix + (m ? t('relationTool.greatGrandson') : f ? t('relationTool.greatGranddaughter') : t('relationTool.greatGrandchild'));
 }
 function _siblingLabel(sex) {
-  return sex === 'M' ? 'Bruder' : sex === 'F' ? 'Schwester' : 'Geschwister';
+  return sex === 'M' ? t('relationTool.brother') : sex === 'F' ? t('relationTool.sister') : t('relationTool.sibling');
 }
 function _halfSiblingLabel(sex) {
-  return sex === 'M' ? 'Halbbruder' : sex === 'F' ? 'Halbschwester' : 'Halbgeschwister';
+  return sex === 'M' ? t('relationTool.halfBrother') : sex === 'F' ? t('relationTool.halfSister') : t('relationTool.halfSibling');
 }
 function _cousinLabel(degree, removed, sex) {
   let base;
-  if (degree === 1) base = sex === 'F' ? 'Cousine' : 'Cousin';
-  else              base = (sex === 'F' ? 'Cousine' : 'Cousin') + ` ${degree}. Grades`;
-  return removed > 0 ? `${base}, ${removed}× entfernt` : base;
+  if (degree === 1) base = sex === 'F' ? t('relationTool.femaleCousin') : t('relationTool.cousin');
+  else              base = t('relationTool.cousinDegree', { degree });
+  return removed > 0 ? t('relationTool.cousinRemoved', { base, removed }) : base;
 }
 
 // BFS path label — fallback for step/in-law/blended families
@@ -4568,7 +4570,7 @@ function _bfsPathLabel(idA, idB) {
       let c = cur;
       while (c) { path.unshift(c); c = visited.get(c)?.from; }
       const steps = path.length - 1;
-      return steps > 0 ? `${steps} Verwandtschaftsschritte entfernt` : 'Verbunden';
+      return steps > 0 ? t('relationTool.stepsAway', { steps }) : t('relationTool.connected');
     }
     for (const nb of (adj.get(cur) || [])) {
       if (!visited.has(nb.id)) {
@@ -4577,7 +4579,7 @@ function _bfsPathLabel(idA, idB) {
       }
     }
   }
-  return 'Keine Verbindung gefunden';
+  return t('relationTool.noConnection');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5589,9 +5591,9 @@ function _imLoadFile(file) {
       if (persons?.length) {
         _importJsonPersons = persons;
         document.getElementById('import-text-area').value =
-          `[GEDCOM geladen: ${persons.length} Person${persons.length !== 1 ? 'en' : ''} erkannt. «Analysieren» zum Zusammenführen, «Ersetzen» um den aktuellen Datensatz zu überschreiben.]`;
+          t('import.gedcomLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
       } else {
-        _imShowError('GEDCOM-Datei konnte nicht geparst werden oder enthält keine Personen.');
+        _imShowError(t('import.parseError'));
       }
     };
     reader.readAsText(file, 'utf-8');
@@ -5603,20 +5605,20 @@ function _imLoadFile(file) {
         if (persons && persons.length) {
           _importJsonPersons = persons;
           document.getElementById('import-text-area').value =
-            `[Strukturierte JSON-Datei geladen: ${persons.length} Person${persons.length!==1?'en':''} erkannt.]`;
+            t('import.jsonLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
         } else {
           document.getElementById('import-text-area').value =
-            '[JSON geladen — kein bekanntes Personen-Schema. «Ersetzen» wird die Datei direkt als Datensatz laden.]';
+            t('import.jsonFallback');
         }
       } catch(err) {
-        _imShowError('Ungültige JSON-Datei: ' + err.message);
+        _imShowError(t('import.invalidJson', { msg: err.message }));
       }
     };
     reader.readAsText(file, 'utf-8');
   } else if (isYaml) {
     reader.onload = ev => {
       document.getElementById('import-text-area').value =
-        `[YAML geladen — «Ersetzen» klicken, um den Datensatz zu überschreiben.]`;
+        t('import.yamlLoaded');
     };
     reader.readAsText(file, 'utf-8');
   } else {
@@ -5626,8 +5628,8 @@ function _imLoadFile(file) {
 }
 
 function importReplaceDataset() {
-  if (!_importLoadedFile) { _imShowError('Keine Datei geladen.'); return; }
-  if (individuals.size && !confirm('Aktuellen Datensatz vollständig ersetzen?')) return;
+  if (!_importLoadedFile) { _imShowError(t('import.noFileLoaded')); return; }
+  if (individuals.size && !confirm(t('import.replaceConfirm'))) return;
   const file = _importLoadedFile;
   closeTextImport();
   _loadDatasetFile(file);
@@ -5642,35 +5644,35 @@ function _loadTesseract() {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
     s.onload = () => resolve(window.Tesseract);
-    s.onerror = () => reject(new Error('Tesseract konnte nicht geladen werden.'));
+    s.onerror = () => reject(new Error(t('import.tesseractLoadError')));
     document.head.appendChild(s);
   });
   return _tesseractLoading;
 }
 
 async function runImportOcr() {
-  if (!_importImageData) { _imShowError('Kein Bild geladen.'); return; }
+  if (!_importImageData) { _imShowError(t('import.noImage')); return; }
   const statusEl = document.getElementById('import-ocr-status');
   const btn = document.getElementById('import-ocr-btn');
   btn.disabled = true;
-  statusEl.textContent = 'Lade OCR…';
+  statusEl.textContent = t('import.ocrLoading');
   try {
     const Tesseract = await _loadTesseract();
     const dataUrl = 'data:' + _importImageData.mediaType + ';base64,' + _importImageData.base64;
-    statusEl.textContent = 'OCR läuft 0%…';
+    statusEl.textContent = t('import.ocrProgress', { pct: 0 });
     const { data } = await Tesseract.recognize(dataUrl, 'deu+eng', {
       logger: m => {
         if (m.status === 'recognizing text') {
-          statusEl.textContent = `OCR ${Math.round(m.progress*100)}%`;
+          statusEl.textContent = t('import.ocrProgress', { pct: Math.round(m.progress*100) });
         }
       }
     });
     const text = (data?.text || '').trim();
-    if (!text) { _imShowError('OCR lieferte keinen Text.'); statusEl.textContent = ''; return; }
+    if (!text) { _imShowError(t('import.ocrNoText')); statusEl.textContent = ''; return; }
     document.getElementById('import-text-area').value = text;
-    statusEl.textContent = `OCR fertig (${text.length} Zeichen)`;
+    statusEl.textContent = t('import.ocrDone', { chars: text.length });
   } catch (err) {
-    _imShowError('OCR-Fehler: ' + (err.message || String(err)));
+    _imShowError(t('import.ocrError', { msg: err.message || String(err) }));
     statusEl.textContent = '';
   } finally {
     btn.disabled = false;
@@ -5682,9 +5684,9 @@ async function runImportAi(mode) {
   const useText = mode === 'text' || (!_importImageData && mode !== 'image');
   const textVal = (document.getElementById('import-text-area').value || '').trim();
   if (useText) {
-    if (!textVal || textVal.startsWith('[')) { _imShowError('Kein Text zum Analysieren.'); return; }
+    if (!textVal || textVal.startsWith('[')) { _imShowError(t('import.noTextToAnalyze')); return; }
   } else if (!_importImageData) {
-    _imShowError('Kein Bild geladen.'); return;
+    _imShowError(t('import.noImage')); return;
   }
 
   document.getElementById('import-ai-key-row').style.display = 'flex';
@@ -5697,23 +5699,23 @@ async function runImportAi(mode) {
     }
   }
   const apiKey = _aiGetKey();
-  if (!apiKey) { _imShowError('Bitte API Key eingeben.'); keyInput.focus(); return; }
+  if (!apiKey) { _imShowError(t('import.enterApiKey')); keyInput.focus(); return; }
   const model = document.getElementById('ai-model-select').value;
   const imgBtn  = document.getElementById('import-ai-btn');
   const textBtn = document.getElementById('import-ai-text-btn');
   if (imgBtn)  imgBtn.disabled  = true;
   if (textBtn) textBtn.disabled = true;
   const statusEl = document.getElementById('import-ocr-status');
-  statusEl.textContent = 'KI analysiert…';
+  statusEl.textContent = t('import.aiAnalyzing');
   try {
     const persons = await _aiParseContent(apiKey, model, useText ? textVal : null, useText ? null : _importImageData);
-    if (!persons || !persons.length) { _imShowError('KI hat keine Personen erkannt.'); statusEl.textContent = ''; return; }
+    if (!persons || !persons.length) { _imShowError(t('import.aiNoPersons')); statusEl.textContent = ''; return; }
     _importJsonPersons = persons;
     document.getElementById('import-text-area').value =
-      `[KI-Analyse: ${persons.length} Person${persons.length!==1?'en':''} erkannt.]`;
-    statusEl.textContent = 'KI fertig';
+      t('import.aiSummary', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
+    statusEl.textContent = t('import.aiDone');
   } catch (err) {
-    _imShowError('KI-Fehler: ' + (err.message || String(err)));
+    _imShowError(t('import.aiError', { msg: err.message || String(err) }));
     statusEl.textContent = '';
   } finally {
     if (imgBtn)  imgBtn.disabled  = false;
@@ -5727,11 +5729,11 @@ function parseImportText() {
     persons = _importJsonPersons;
   } else {
     const raw = (document.getElementById('import-text-area').value || '').trim();
-    if (!raw) { alert('Bitte Text eingeben oder Datei laden.'); return; }
+    if (!raw) { alert(t('import.enterText')); return; }
     const clean = _tiCleanText(raw);
     persons = _tiParseText(clean);
     if (!persons.length) {
-      alert('Keine Personen erkannt.\nErwartet wird englischer Genealogietext mit Mustern wie:\n  «was born on … married … son/daughter of …»');
+      alert(t('import.noPersons'));
       return;
     }
   }
@@ -5739,7 +5741,7 @@ function parseImportText() {
   _importActions = _tiGenerateActions(persons);
 
   if (!_importActions.length) {
-    alert(`${persons.length} Person(en) erkannt, aber alle sind bereits in der GEDCOM-Datei vorhanden.`);
+    alert(t('import.allExisting', { n: persons.length }));
     return;
   }
 
@@ -5758,18 +5760,18 @@ function _renderImportSummary() {
 
   document.getElementById('import-summary').innerHTML = `
     <div class="import-summary-bar">
-      <span class="import-stat"><b>${_importActions.length}</b> Vorschläge</span>
-      <span class="import-stat import-stat--person">&#x1F464; <b>${nPers}</b> neu</span>
-      <span class="import-stat import-stat--update">&#x270F; <b>${nUpd}</b> Erg\u00e4nzung${nUpd!==1?'en':''}</span>
-      <span class="import-stat import-stat--marriage">&#x1F48D; <b>${nMarr}</b> Ehe${nMarr!==1?'n':''}</span>
-      <span class="import-stat import-stat--approved">&#x2713; <b>${nApp}</b> genehmigt</span>
-      <span class="import-stat import-stat--skipped">&#x2715; <b>${nSkip}</b> übersprungen</span>
-      <span class="import-stat import-stat--pending">&#x23F3; <b>${nPend}</b> ausstehend</span>
+      <span class="import-stat"><b>${_importActions.length}</b> ${t('import.summarySuggestions', { total: _importActions.length })}</span>
+      <span class="import-stat import-stat--person">&#x1F464; <b>${nPers}</b> ${t('import.summaryNew', { n: nPers })}</span>
+      <span class="import-stat import-stat--update">&#x270F; <b>${nUpd}</b> ${t('import.summaryUpdate', { n: nUpd, plural: nUpd !== 1 ? 'en' : '' })}</span>
+      <span class="import-stat import-stat--marriage">&#x1F48D; <b>${nMarr}</b> ${t('import.summaryMarriage', { n: nMarr, plural: nMarr !== 1 ? 'n' : '' })}</span>
+      <span class="import-stat import-stat--approved">&#x2713; <b>${nApp}</b> ${t('import.summaryApproved', { n: nApp })}</span>
+      <span class="import-stat import-stat--skipped">&#x2715; <b>${nSkip}</b> ${t('import.summarySkipped', { n: nSkip })}</span>
+      <span class="import-stat import-stat--pending">&#x23F3; <b>${nPend}</b> ${t('import.summaryPending', { n: nPend })}</span>
     </div>
     <div class="import-bulk-actions">
-      <button class="import-bulk-btn import-bulk-btn--approve" onclick="_importApproveAll()">&#x2713; Alle genehmigen</button>
-      <button class="import-bulk-btn import-bulk-btn--skip"    onclick="_importSkipAll()">&#x2715; Alle überspringen</button>
-      <button class="import-bulk-btn import-bulk-btn--reset"   onclick="_importResetAll()">&#x21BA; Zurücksetzen</button>
+      <button class="import-bulk-btn import-bulk-btn--approve" onclick="_importApproveAll()">&#x2713; ${t('import.approveAll')}</button>
+      <button class="import-bulk-btn import-bulk-btn--skip"    onclick="_importSkipAll()">&#x2715; ${t('import.skipAll')}</button>
+      <button class="import-bulk-btn import-bulk-btn--reset"   onclick="_importResetAll()">&#x21BA; ${t('import.resetAll')}</button>
     </div>
   `;
 }
@@ -5783,6 +5785,12 @@ function _renderImportReview() {
 
 // Person-reference fields that get autocomplete + link/unlink in import cards
 const _IM_PERSON_FIELDS = new Set(['Name','Father','Mother','Husband','Wife']);
+
+function _imFieldLabel(label) {
+  const key = 'import.field' + label.replace(/\s+/g, '');
+  const tr = t(key);
+  return tr === key ? label : tr;
+}
 
 function _imDropId(actionId, fieldKey) {
   return 'nacd-' + actionId + '-' + fieldKey.replace(/[\s:]/g, '_');
@@ -5808,7 +5816,7 @@ function _imLinkedDisplay(link) {
     maiden:    '',
     year:      (pa.fields['Birth Date']||'').match(/\b(\d{4})\b/)?.[1] || '',
     deathYear: (pa.fields['Death Date']||'').match(/\b(\d{4})\b/)?.[1] || '',
-    tag:       'Import',
+    tag:       t('import.badgeImport'),
   };
 }
 
@@ -5819,15 +5827,15 @@ function _imLinkedTooltipHtml(link) {
     const indi = individuals.get(link.id);
     if (!indi) return '';
     const rows = [];
-    rows.push(`<div class="import-tt-name">${escHtml(indi.name || '(ohne Name)')}</div>`);
+    rows.push(`<div class="import-tt-name">${escHtml(indi.name || t('import.noName'))}</div>`);
     const sub = [];
-    if (indi.maidenName) sub.push(`geb. ${escHtml(indi.maidenName)}`);
+    if (indi.maidenName) sub.push(`${t('tooltip.born', { name: indi.maidenName })}`);
     if (indi.sex) sub.push(indi.sex);
     if (sub.length) rows.push(`<div class="import-tt-sub">${sub.join(' · ')}</div>`);
     if (indi.birth?.date || indi.birth?.plac)
-      rows.push(`<div class="import-tt-line"><b>* </b>${escHtml(indi.birth?.date || '?')}${indi.birth?.plac ? ' in ' + escHtml(indi.birth.plac) : ''}</div>`);
+      rows.push(`<div class="import-tt-line"><b>${t('import.tooltipBorn')}</b>${escHtml(indi.birth?.date || '?')}${indi.birth?.plac ? t('import.tooltipIn') + escHtml(indi.birth.plac) : ''}</div>`);
     if (indi.death?.date || indi.death?.plac)
-      rows.push(`<div class="import-tt-line"><b>† </b>${escHtml(indi.death?.date || '?')}${indi.death?.plac ? ' in ' + escHtml(indi.death.plac) : ''}</div>`);
+      rows.push(`<div class="import-tt-line"><b>${t('import.tooltipDied')}</b>${escHtml(indi.death?.date || '?')}${indi.death?.plac ? t('import.tooltipIn') + escHtml(indi.death.plac) : ''}</div>`);
     // Parents
     const famc = (indi.famc || [])[0];
     if (famc) {
@@ -5835,7 +5843,7 @@ function _imLinkedTooltipHtml(link) {
       if (fam) {
         const fa = fam.husb ? individuals.get(fam.husb)?.name : '';
         const mo = fam.wife ? individuals.get(fam.wife)?.name : '';
-        if (fa || mo) rows.push(`<div class="import-tt-line">Eltern: ${escHtml([fa, mo].filter(Boolean).join(' & '))}</div>`);
+        if (fa || mo) rows.push(`<div class="import-tt-line">${t('import.parents')}: ${escHtml([fa, mo].filter(Boolean).join(' & '))}</div>`);
       }
     }
     // Spouses
@@ -5844,7 +5852,7 @@ function _imLinkedTooltipHtml(link) {
       const sId = f.husb === link.id ? f.wife : f.husb;
       return sId ? individuals.get(sId)?.name : null;
     }).filter(Boolean);
-    if (spouseNames.length) rows.push(`<div class="import-tt-line">Ehe: ${escHtml(spouseNames.join(', '))}</div>`);
+    if (spouseNames.length) rows.push(`<div class="import-tt-line">${t('import.marriage')}: ${escHtml(spouseNames.join(', '))}</div>`);
     // Children
     const children = [];
     for (const fId of (indi.fams || [])) {
@@ -5854,20 +5862,20 @@ function _imLinkedTooltipHtml(link) {
         if (c) children.push(c.name);
       }
     }
-    if (children.length) rows.push(`<div class="import-tt-line">Kinder: ${escHtml(children.join(', '))}</div>`);
+    if (children.length) rows.push(`<div class="import-tt-line">${t('import.children')}: ${escHtml(children.join(', '))}</div>`);
     if (indi.note) rows.push(`<div class="import-tt-note">${escHtml(indi.note.slice(0, 220))}${indi.note.length > 220 ? '…' : ''}</div>`);
-    rows.push(`<div class="import-tt-id">ID: ${escHtml(link.id)}</div>`);
+    rows.push(`<div class="import-tt-id">${t('import.id')}: ${escHtml(link.id)}</div>`);
     return rows.join('');
   }
   // Pending (another import action)
   const pa = _importActions.find(a => a.id === link.id);
   if (!pa) return '';
   const rows = [];
-  rows.push(`<div class="import-tt-name">${escHtml(pa.fields['Name'] || '(ohne Name)')}</div>`);
-  rows.push(`<div class="import-tt-sub">aus Import</div>`);
+  rows.push(`<div class="import-tt-name">${escHtml(pa.fields['Name'] || t('import.noName'))}</div>`);
+  rows.push(`<div class="import-tt-sub">${t('import.fromImport')}</div>`);
   for (const [k, v] of Object.entries(pa.fields)) {
     if (k === 'Name' || !v) continue;
-    rows.push(`<div class="import-tt-line"><b>${escHtml(k)}:</b> ${escHtml(String(v).slice(0, 200))}</div>`);
+    rows.push(`<div class="import-tt-line"><b>${escHtml(_imFieldLabel(k))}:</b> ${escHtml(String(v).slice(0, 200))}</div>`);
   }
   return rows.join('');
 }
@@ -5875,7 +5883,7 @@ function _imLinkedTooltipHtml(link) {
 function _imLinkedBadge(actionId, fieldKey, link, label) {
   const d = _imLinkedDisplay(link);
   if (!d) return '';
-  const maiden    = d.maiden    ? ` <span class="import-sdrop-maiden">geb. ${escHtml(d.maiden)}</span>` : '';
+  const maiden    = d.maiden    ? ` <span class="import-sdrop-maiden">${t('tooltip.born', { name: d.maiden })}</span>` : '';
   const year      = d.year      ? ` <span class="import-linked-year">*${d.year}</span>` : '';
   const deathYear = d.deathYear ? ` <span class="import-linked-year">&#x2020;${d.deathYear}</span>` : '';
   const tag       = d.tag       ? ` <span class="import-linked-tag">${escHtml(d.tag)}</span>` : '';
@@ -5884,8 +5892,8 @@ function _imLinkedBadge(actionId, fieldKey, link, label) {
     <label class="import-field-label">${escHtml(label)}</label>
     <div class="import-field-linked" tabindex="0">
       <span class="import-field-linked-name">${escHtml(d.name)}</span>${maiden}${year}${deathYear}${tag}
-      <button class="import-field-change-btn" onclick="_imChangeFieldLink('${actionId}','${fieldKey}')" title="Verknüpfung ändern">&#x21BB;</button>
-      <button class="import-field-unlink-btn" onclick="_imFieldUnlink('${actionId}','${fieldKey}')" title="Trennen">&#x2715;</button>
+      <button class="import-field-change-btn" onclick="_imChangeFieldLink('${actionId}','${fieldKey}')" title="${t('import.changeFieldLink')}">&#x21BB;</button>
+      <button class="import-field-unlink-btn" onclick="_imFieldUnlink('${actionId}','${fieldKey}')" title="${t('import.unlinkTitle')}">&#x2715;</button>
       <div class="import-linked-tip">${tipHtml}</div>
     </div>
   </div>`;
@@ -5901,7 +5909,7 @@ function _imPersonInputRow(action, label, fieldKey, val) {
              value="${escHtml(val||'')}"
              data-action="${action.id}" data-field="${fieldKey}"
              data-ac-person="true"
-             placeholder="(leer)" autocomplete="off">
+             placeholder="${t('import.emptyPlaceholder')}" autocomplete="off">
       <div class="import-name-drop" id="${dropId}"></div>
     </div>
   </div>`;
@@ -5918,10 +5926,10 @@ function _imChildrenRows(action) {
   const rows = action._childrenArr.map((name, idx) => {
     const key  = `Children:${idx}`;
     const link = action.fieldLinks[key];
-    if (link) return _imLinkedBadge(action.id, key, link, idx === 0 ? 'Children' : '');
+    if (link) return _imLinkedBadge(action.id, key, link, idx === 0 ? t('import.fieldChildren') : '');
     const dropId = _imDropId(action.id, key);
     const fid    = 'if-' + action.id + '-Children_' + idx;
-    const lbl    = idx === 0 ? 'Children' : '';
+    const lbl    = idx === 0 ? t('import.fieldChildren') : '';
     return `<div class="import-field-row import-child-row">
       <label class="import-field-label">${escHtml(lbl)}</label>
       <div class="import-name-ac-wrap" style="flex:1">
@@ -5929,7 +5937,7 @@ function _imChildrenRows(action) {
                value="${escHtml(name)}"
                data-action="${action.id}" data-field="${key}"
                data-ac-person="true"
-               placeholder="Kind" autocomplete="off">
+               placeholder="${t('import.childPlaceholder')}" autocomplete="off">
         <div class="import-name-drop" id="${dropId}"></div>
       </div>
       <button class="import-child-rm-btn" onclick="_imRemoveChild('${action.id}',${idx})">&#x2715;</button>
@@ -5938,22 +5946,23 @@ function _imChildrenRows(action) {
 
   const addBtn = `<div class="import-field-row import-child-row">
     <label class="import-field-label"></label>
-    <button class="import-child-add-btn" onclick="_imAddChild('${action.id}')">+ Kind</button>
+    <button class="import-child-add-btn" onclick="_imAddChild('${action.id}')">+ ${t('import.childPlaceholder')}</button>
   </div>`;
 
   return rows + addBtn;
 }
 
 function _renderImportCard(action) {
-  const kindLabel = action.kind === 'person' ? 'Person hinzufügen' : action.kind === 'update' ? 'Person ergänzen' : 'Ehe hinzufügen';
+  const kindLabel = action.kind === 'person' ? t('import.kindAddPerson') : action.kind === 'update' ? t('import.kindUpdate') : t('import.kindMarriage');
   const kindClass = action.kind === 'person' ? 'import-badge--person' : action.kind === 'update' ? 'import-badge--update' : 'import-badge--marriage';
   const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
-  const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
+  const stLbl = { pending:`&#x23F3; ${t('import.statusPending')}`, approved:`&#x2713; ${t('import.statusApproved')}`, skipped:`&#x2715; ${t('import.statusSkipped')}` }[action.status];
 
   action.fieldLinks = action.fieldLinks || {};
   const isPersonAction = action.kind === 'person' || action.kind === 'update';
 
   const fieldsHtml = Object.entries(action.fields).map(([label, val]) => {
+    const displayLabel = _imFieldLabel(label);
     const isPersonField = _IM_PERSON_FIELDS.has(label);
     const link = action.fieldLinks[label];
 
@@ -5961,46 +5970,46 @@ function _renderImportCard(action) {
     if (label === 'Children') return _imChildrenRows(action);
 
     // Person field that is linked → show badge
-    if (isPersonField && link) return _imLinkedBadge(action.id, label, link, label);
+    if (isPersonField && link) return _imLinkedBadge(action.id, label, link, displayLabel);
 
     // Name field when whole action is linked to existing person → show badge with unlink
     if (label === 'Name' && isPersonAction && action.existingId) {
       const linkObj = { type: 'existing', id: action.existingId };
       const d = _imLinkedDisplay(linkObj);
       const name   = d ? d.name   : val;
-      const maiden    = d?.maiden    ? ` <span class="import-sdrop-maiden">geb. ${escHtml(d.maiden)}</span>` : '';
+      const maiden    = d?.maiden    ? ` <span class="import-sdrop-maiden">${t('tooltip.born', { name: d.maiden })}</span>` : '';
       const year      = d?.year      ? ` <span class="import-linked-year">*${d.year}</span>` : '';
       const deathYear = d?.deathYear ? ` <span class="import-linked-year">&#x2020;${d.deathYear}</span>` : '';
       const tipHtml = _imLinkedTooltipHtml(linkObj);
       return `<div class="import-field-row">
-        <label class="import-field-label">Name</label>
+        <label class="import-field-label">${displayLabel}</label>
         <div class="import-field-linked" tabindex="0">
           <span class="import-field-linked-name">${escHtml(name)}</span>${maiden}${year}${deathYear}
-          <button class="import-btn-change" onclick="_imChangeMainLink('${action.id}')" title="Andere Person wählen">&#x21BB; Ändern</button>
-          <button class="import-btn-unlink" onclick="_imUnlink('${action.id}')" title="Trennen">&#x2715; Trennen</button>
+          <button class="import-btn-change" onclick="_imChangeMainLink('${action.id}')" title="${t('import.changeLinkTitle')}">&#x21BB; ${t('import.changeLink')}</button>
+          <button class="import-btn-unlink" onclick="_imUnlink('${action.id}')" title="${t('import.unlinkTitle')}">&#x2715; ${t('import.unlink')}</button>
           <div class="import-linked-tip">${tipHtml}</div>
         </div>
       </div>`;
     }
 
     // Person field with autocomplete input
-    if (isPersonField) return _imPersonInputRow(action, label, label, val);
+    if (isPersonField) return _imPersonInputRow(action, displayLabel, label, val);
 
     // Regular non-person field
     const wideClass = ''; // children handled above
     const fid = `if-${action.id}-${label.replace(/\s+/g,'_')}`;
     return `<div class="import-field-row${wideClass}">
-      <label class="import-field-label" for="${fid}">${escHtml(label)}</label>
+      <label class="import-field-label" for="${fid}">${escHtml(displayLabel)}</label>
       <input class="import-field-input" id="${fid}" type="text"
              value="${escHtml(val||'')}"
              data-action="${action.id}" data-field="${label}"
-             placeholder="(leer)">
+             placeholder="${t('import.emptyPlaceholder')}">
     </div>`;
   }).join('');
 
   const srcHtml = action.source ? `
     <details class="import-source-details">
-      <summary>Quelltext</summary>
+      <summary>${t('import.sourceText')}</summary>
       <div class="import-source-text">${escHtml(action.source)}</div>
     </details>` : '';
 
@@ -6010,7 +6019,7 @@ function _renderImportCard(action) {
   // Manual-link button for new-person cards not yet linked to anyone
   const showLinkBtn = isPersonAction && !action.existingId;
   const linkBtnHtml = showLinkBtn
-    ? `<button class="import-btn import-btn--link" onclick="openMatchDialog('${action.id}')" title="Mit bestehender Person verknüpfen">&#x1F517; Verknüpfen</button>`
+    ? `<button class="import-btn import-btn--link" onclick="openMatchDialog('${action.id}')" title="${t('import.linkTitle')}">&#x1F517; ${t('import.link')}</button>`
     : '';
 
   return `<div class="import-action-card import-action-card--${action.status}" data-action-id="${action.id}">
@@ -6022,8 +6031,8 @@ function _renderImportCard(action) {
     ${srcHtml}
     <div class="import-card-actions">
       ${linkBtnHtml}
-      <button class="import-btn import-btn--approve${appActive}" data-action="${action.id}" data-status="approved">&#x2713; Genehmigen</button>
-      <button class="import-btn import-btn--skip${skpActive}"    data-action="${action.id}" data-status="skipped">&#x2715; \xdcberspringen</button>
+      <button class="import-btn import-btn--approve${appActive}" data-action="${action.id}" data-status="approved">&#x2713; ${t('import.approve')}</button>
+      <button class="import-btn import-btn--skip${skpActive}"    data-action="${action.id}" data-status="skipped">&#x2715; ${t('import.skip')}</button>
     </div>
   </div>`;
 }
@@ -6081,7 +6090,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (card) {
       card.className = `import-action-card import-action-card--${action.status}`;
       const stCls = { pending:'import-status--pending', approved:'import-status--approved', skipped:'import-status--skipped' }[action.status];
-      const stLbl = { pending:'&#x23F3; Ausstehend', approved:'&#x2713; Genehmigt', skipped:'&#x2715; \xdcbersprungen' }[action.status];
+      const stLbl = { pending:`&#x23F3; ${t('import.statusPending')}`, approved:`&#x2713; ${t('import.statusApproved')}`, skipped:`&#x2715; ${t('import.statusSkipped')}` }[action.status];
       const badge = card.querySelector('.import-status');
       if (badge) { badge.className = `import-status ${stCls}`; badge.innerHTML = stLbl; }
       card.querySelectorAll('[data-status]').forEach(b => {
@@ -6135,7 +6144,7 @@ function backToInputImport() {
 function applyImport() {
   const approved = _importActions.filter(a => a.status === 'approved');
   if (approved.length === 0) {
-    alert('Keine Änderungen genehmigt.\nBitte mindestens eine Änderung genehmigen.');
+    alert(t('import.noApprovedChanges'));
     return;
   }
 
@@ -6157,7 +6166,7 @@ function applyImport() {
     done = next;
     const pct = Math.round((done / total) * 100);
     bar.style.width = pct + '%';
-    countEl.textContent = `${done} / ${total}`;
+    countEl.textContent = t('import.progressCount', { done, total });
 
     if (done < total) {
       setTimeout(tick, 0);
@@ -6165,7 +6174,7 @@ function applyImport() {
     }
 
     // All ticks done — now run the actual synchronous apply + rebuild
-    labelEl.textContent = 'Graph wird aktualisiert…';
+    labelEl.textContent = t('import.graphUpdate');
     bar.style.width = '100%';
     // Double rAF: first frame commits the DOM change, second frame runs after paint
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -6177,7 +6186,7 @@ function applyImport() {
       const nUpd  = report.filter(r => r.type === 'update').length;
       const nFam  = report.filter(r => r.type === 'fam').length;
       const nSkip = report.filter(r => r.type === 'skip').length;
-      alert(`Import abgeschlossen:\n• ${nAdd} Person${nAdd!==1?'en':''} hinzugef\xfcgt\n• ${nUpd} Person${nUpd!==1?'en':''} erg\u00e4nzt\n• ${nFam} Famili${nFam!==1?'en':'e'} erstellt\n• ${nSkip} bereits vorhanden`);
+      alert(t('import.importDone', { add: nAdd, update: nUpd, marriages: nFam, skipped: nSkip }));
     }));
   }
 
@@ -6217,10 +6226,10 @@ function openMatchDialog(actionId) {
   // Display current entry
   const currentHtml = `
     <div class="import-match-person">
-      <div class="import-match-name">${escHtml(action.fields['Name'] || 'Unnamed')}</div>
+      <div class="import-match-name">${escHtml(action.fields['Name'] || t('import.noName'))}</div>
       <div class="import-match-details">
-        ${action.fields['Birth Date'] ? `Geb: ${escHtml(action.fields['Birth Date'])}` : ''}
-        ${action.fields['Birth Place'] ? ` in ${escHtml(action.fields['Birth Place'])}` : ''}
+        ${action.fields['Birth Date'] ? `${t('import.fieldBirthDate')}: ${escHtml(action.fields['Birth Date'])}` : ''}
+        ${action.fields['Birth Place'] ? `${t('import.tooltipIn')}${escHtml(action.fields['Birth Place'])}` : ''}
       </div>
     </div>
   `;
@@ -6330,24 +6339,24 @@ function renderMatchCandidates(candidates) {
   const listEl = document.getElementById('import-match-list');
   
   if (candidates.length === 0) {
-    listEl.innerHTML = '<div class="import-match-empty">Keine Treffer gefunden.</div>';
+    listEl.innerHTML = `<div class="import-match-empty">${t('import.noMatchesFound')}</div>`;
     return;
   }
-  
+
   listEl.innerHTML = candidates.map((c, idx) => `
     <div class="import-match-candidate" onclick="selectMatchCandidate('${c.type}', '${c.type === 'existing' ? c.id : c.actionId}')">
       <div class="import-match-candidate-type ${c.type === 'existing' ? 'type-existing' : 'type-pending'}">
-        ${c.type === 'existing' ? 'GEDCOM' : 'NEU'}
+        ${c.type === 'existing' ? t('import.matchExisting') : t('import.matchPending')}
       </div>
       <div class="import-match-candidate-info">
         <div class="import-match-candidate-name">${escHtml(c.name)}</div>
         <div class="import-match-candidate-details">
-          ${c.birth ? `geb. ${escHtml(c.birth)}` : ''}
-          ${c.death ? ` - gest. ${escHtml(c.death)}` : ''}
+          ${c.birth ? `${t('import.bornShort')} ${escHtml(c.birth)}` : ''}
+          ${c.death ? ` - ${t('import.diedShort')} ${escHtml(c.death)}` : ''}
           [${c.sex}]
         </div>
       </div>
-      <div class="import-match-candidate-score">Score: ${c.score}</div>
+      <div class="import-match-candidate-score">${t('import.score')}: ${c.score}</div>
     </div>
   `).join('');
 }
@@ -6824,7 +6833,7 @@ function _aiSaveKey() {
   if (!k) return;
   localStorage.setItem('ai_api_key', k);
   const s = document.getElementById('ai-key-status');
-  if (s) { s.textContent = 'gespeichert'; setTimeout(() => s.textContent = '', 1500); }
+  if (s) { s.textContent = t('import.saved'); setTimeout(() => s.textContent = '', 1500); }
 }
 
 function _aiToggleKeyVisibility() {
@@ -6927,7 +6936,7 @@ List children only under the marriage they belong to. Each marriage is a separat
   console.log('[KI Import] response:', data);
 
   const toolBlock = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'record_persons');
-  if (!toolBlock) throw new Error(`Antwort ohne Tool-Aufruf. stop_reason=${data.stop_reason || '?'}`);
+  if (!toolBlock) throw new Error(t('errors.aiNoToolCall', { reason: data.stop_reason || '?' }));
 
   let persons = toolBlock.input?.persons;
   if (typeof persons === 'string') {
@@ -6935,7 +6944,7 @@ List children only under the marriage they belong to. Each marriage is a separat
     // emphasis like „Meieli" — that quote is unescaped and breaks JSON.parse. Repair.
     persons = JSON.parse(persons.replace(/„([^"„]*)"/g, '„$1”'));
   }
-  if (!Array.isArray(persons)) throw new Error(`persons ist kein Array. shape=${JSON.stringify(toolBlock.input).slice(0,200)}`);
+  if (!Array.isArray(persons)) throw new Error(t('errors.aiParseNotArray', { shape: JSON.stringify(toolBlock.input).slice(0,200) }));
   return _aiMapToPersons(persons);
 }
 
