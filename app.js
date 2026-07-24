@@ -52,7 +52,7 @@ let labelStyle = {
   fontSize: 32,      // 32 from screenshot
   fontWeight: 'normal',
   bgEnabled: false,
-  bgColor: '#1a1a2e',
+  bgColor: '#0a0a0a',
   bgOpacity: 0.7
 };
 
@@ -207,7 +207,7 @@ let _orbitTrackNodeId = null;  // node id whose live position the orbit target t
 
 // 3D appearance
 let _3dAppearance = {
-  bgColor:     '#04060f',
+  bgColor:     '#000000',
   nodeOpacity: 1.0,   // 1.00 from screenshot
   linkOpacity: 1.0,   // 1.00 from screenshot
   ambientLight: 0.6,  // 0.6 from screenshot
@@ -1362,7 +1362,7 @@ function onHover(evt, d) {
     if (i.deceased) {
       html += `<div class="tt-detail">† ${i.death.date ? escHtml(i.death.date) : t('tooltip.unknownDate')}</div>`;
     }
-    if (i.occu) html += `<div class="tt-detail" style="color:#7ac">${escHtml(i.occu)}</div>`;
+    if (i.occu) html += `<div class="tt-detail" style="color:#9f9f9f">${escHtml(i.occu)}</div>`;
     if (i.maidenName) html += `<div class="tt-detail" style="color:#888">${t('tooltip.born', { name: escHtml(i.maidenName) })}</div>`;
     else if (i.surn) html += `<div class="tt-detail" style="color:#888">${t('tooltip.familyName', { name: escHtml(i.surn) })}</div>`;
   } else {
@@ -1372,7 +1372,7 @@ function onHover(evt, d) {
     html = `<div class="tt-name">${t('tooltip.family')}</div>`;
     if (names) html += `<div class="tt-detail">${names}</div>`;
     if (f.marriages?.[0]?.date) html += `<div class="tt-detail">⚭ ${escHtml(f.marriages[0].date)}</div>`;
-    if (f.div) html += `<div class="tt-detail" style="color:#e74c3c">${t('tooltip.divorced', { date: f.divDate ? ' ' + escHtml(f.divDate) : '' })}</div>`;
+    if (f.div) html += `<div class="tt-detail" style="color:#787878">${t('tooltip.divorced', { date: f.divDate ? ' ' + escHtml(f.divDate) : '' })}</div>`;
     html += `<div class="tt-detail">${f.chil.length} ${f.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</div>`;
   }
   tt.innerHTML = html;
@@ -1468,7 +1468,7 @@ function showIndiDetail(id) {
         : (spId ? escHtml(spId) : `<em>${t('detail.unknownName')}</em>`);
       const m0 = fam.marriages?.[0];
       const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
-      const dInfo = fam.div ? ` <span style="color:#e74c3c">[${t('tooltip.divorced', { date: fam.divDate ? ' ' + escHtml(fam.divDate) : '' })}]</span>` : '';
+      const dInfo = fam.div ? ` <span style="color:#787878">[${t('tooltip.divorced', { date: fam.divDate ? ' ' + escHtml(fam.divDate) : '' })}]</span>` : '';
       const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</span>` : '';
       html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}">${spName}${mInfo}${dInfo}${kids}</div>`;
     }
@@ -1481,7 +1481,7 @@ function showIndiDetail(id) {
   }
 
   // Quick-add relative — one click from the read-only view, no need to enter edit mode
-  html += `<div class="detail-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+  html += `<div class="detail-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
     <div class="ef-rel-add-row">
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; ${t('detail.addParent')}</button>
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; ${t('detail.addSpouse')}</button>
@@ -1505,7 +1505,7 @@ function showIndiDetail(id) {
 const _QUICK_ADD_LABELS = { parent: 'detail.addParent', spouse: 'detail.addSpouse', child: 'detail.addChild' };
 
 function _quickAddFormHtml(type, personId) {
-  return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
+  return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
     <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t(_QUICK_ADD_LABELS[type]) })}</div>
     <div style="display:flex;gap:6px;margin-bottom:6px">
       <input class="edit-input" id="qa-${type}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
@@ -1547,7 +1547,7 @@ function confirmQuickAddRelative(personId, type) {
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
     const el = document.getElementById(`qa-${type}-givn`);
-    if (el) { el.style.borderColor = '#e74c3c'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
     return;
   }
 
@@ -1597,12 +1597,12 @@ function showFamDetail(id) {
   (fam.marriages || []).forEach((m, i) => {
     if (!m.date && !m.plac && !m.types?.length) return;
     let marrVal = fmtPlace(m.date, m.plac);
-    if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:#7ac;font-size:11px">${escHtml(m.types.join(', '))}</span>`;
+    if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:#9f9f9f;font-size:11px">${escHtml(m.types.join(', '))}</span>`;
     const label = (fam.marriages.length > 1) ? t('detail.marriageN', { n: i + 1 }) : t('detail.marriage');
     html += row(label, marrVal);
   });
   if (fam.div) {
-    const divTxt = `<span style="color:#e74c3c">${t('tooltip.divorced', { date: fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : '' })}</span>`;
+    const divTxt = `<span style="color:#787878">${t('tooltip.divorced', { date: fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : '' })}</span>`;
     html += row(t('detail.status'), divTxt);
   }
 
@@ -2318,7 +2318,7 @@ function addRelation() {
   const type = typeEl.value;
   const targetId = _resolvePersonInput(input.value);
   if (!targetId) {
-    input.style.borderColor = '#e74c3c';
+    input.style.borderColor = '#787878';
     setTimeout(() => { input.style.borderColor = ''; }, 1200);
     return;
   }
@@ -2352,7 +2352,7 @@ function confirmNewPersonRelation() {
 
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
-    document.getElementById('ef-np-givn').style.borderColor = '#e74c3c';
+    document.getElementById('ef-np-givn').style.borderColor = '#787878';
     setTimeout(() => { document.getElementById('ef-np-givn').style.borderColor = ''; }, 1200);
     return;
   }
@@ -2494,11 +2494,11 @@ function showIndiEditForm(id) {
       <div class="edit-label">${t('detail.note')}</div>
       <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
     </div>
-    <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+    <div class="edit-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
       <div class="edit-label">${t('detail.marriages')}</div>
       <div id="ef-fam-sections">${_buildFamEditSections(id)}</div>
     </div>
-    <div class="edit-section" style="border-top:1px solid #0f3460;padding-top:8px;margin-top:4px">
+    <div class="edit-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
       <div class="edit-label">${t('detail.relations')}</div>
       <div id="ef-existing-rel-list" style="margin-bottom:4px"></div>
       <div id="ef-rel-list" style="margin-bottom:6px">
@@ -2515,7 +2515,7 @@ function showIndiEditForm(id) {
         <button class="ef-rel-add-btn" onclick="addRelation()" title="${t('detail.addRelation')}">+</button>
       </div>
       <button class="ef-new-person-btn" onclick="toggleNewPersonSubform()">&#xff0b; ${t('detail.createNewPerson')}</button>
-      <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:#0d1b3e;border:1px solid #1a2a5e;border-radius:6px">
+      <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
         <div class="edit-label" style="margin-bottom:6px">${t('detail.newPerson')}</div>
         <div style="display:flex;gap:6px;margin-bottom:6px">
           <input class="edit-input" id="ef-np-givn" placeholder="${t('detail.firstName')}" style="flex:1">
@@ -2899,7 +2899,7 @@ function _famEditAddChild() {
   const val = inp.value.trim();
   if (!val) return;
   const id = _resolvePersonInput(val);
-  if (!id) { inp.style.borderColor = '#e74c3c'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
+  if (!id) { inp.style.borderColor = '#787878'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
   const f = families.get(_editingId);
   if (!f) return;
   if (f.chil.includes(id) && !_famEditRemovedChil.has(id)) return;
@@ -2924,7 +2924,7 @@ function _famEditCreateChild() {
   const sex  = document.getElementById('ef-fnc-sex')?.value || 'U';
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
-    document.getElementById('ef-fnc-givn').style.borderColor = '#e74c3c';
+    document.getElementById('ef-fnc-givn').style.borderColor = '#787878';
     setTimeout(() => { document.getElementById('ef-fnc-givn').style.borderColor = ''; }, 1200);
     return;
   }
@@ -3256,7 +3256,7 @@ function resize3D() {
 
 function compute3DNodeColor(n) {
   const hasHL = hlSet.size > 0;
-  if (hasHL && !hlSet.has(n.id)) return '#0d0d1a';
+  if (hasHL && !hlSet.has(n.id)) return '#0d0d0d';
   return nodeBaseColor(n);
 }
 
@@ -3308,7 +3308,7 @@ function initGraph3D() {
       const died = i.deceased
         ? (i.death.date ? ` †${i.death.date.match(/\d{4}/)?.[0] || ''}` : ' †')
         : '';
-      return `<span style="background:rgba(10,20,50,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}</span>`;
+      return `<span style="background:rgba(20,20,20,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}</span>`;
     })
     // ── Links ──
     .linkColor(l => linkColor(l))
@@ -3512,7 +3512,7 @@ function _compute3DLinkColor(l, hasHL) {
   if (!hasHL) return linkColor(l);
   const sid = typeof l.source === 'object' ? l.source.id : l.source;
   const tid = typeof l.target === 'object' ? l.target.id : l.target;
-  return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111122';
+  return (hlSet.has(sid) && hlSet.has(tid)) ? linkColor(l) : '#111111';
 }
 
 // ── Link color customization ──
@@ -3598,17 +3598,17 @@ function makeYearSprite(yr) {
   const LW = 88, LH = 28;
   const sprite = makeTextSprite3D((ctx, w, h) => {
     // Dark pill background
-    ctx.fillStyle = 'rgba(8, 16, 48, 0.88)';
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.88)';
     ctx.beginPath();
     ctx.roundRect(1, 1, w - 2, h - 2, 5);
     ctx.fill();
     // Bright border
-    ctx.strokeStyle = 'rgba(100, 160, 255, 0.6)';
+    ctx.strokeStyle = 'rgba(220, 220, 220, 0.6)';
     ctx.lineWidth = 1;
     ctx.stroke();
     // Year text
     ctx.font = 'bold 16px monospace';
-    ctx.fillStyle = '#c8e0ff';
+    ctx.fillStyle = '#e0e0e0';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(yr), w / 2, h / 2);
@@ -3835,7 +3835,7 @@ function export3DTopDown() {
     canvas.height = CH;
     const ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = _3dAppearance.bgColor || '#04060f';
+    ctx.fillStyle = _3dAppearance.bgColor || '#000000';
     ctx.fillRect(0, 0, CW, CH);
 
     // Draw links

@@ -27,7 +27,7 @@
   <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span data-i18n="topbar.center">Zentrieren</span></button>
   <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span data-i18n="topbar.centerPerson">Person</span></button>
   <button id="relation-tool-btn" onclick="openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen" disabled>&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
-  <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language" style="margin-left:auto;background:#0d1b3e;color:#e0e0e0;border:1px solid #1a2a5e;border-radius:4px;padding:2px 6px;font-size:12px">
+  <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language" style="margin-left:auto;background:#161616;color:#e0e0e0;border:1px solid #2e2e2e;border-radius:4px;padding:2px 6px;font-size:12px">
     <option value="de" data-i18n="language.de">Deutsch</option>
     <option value="en" data-i18n="language.en">English</option>
   </select>
@@ -67,7 +67,7 @@
           <span id="time-spread-val">500</span>
         </div>
         <input type="range" id="time-spread-slider" min="0" max="1200" step="10" value="500"
-               style="width:100%;accent-color:#4a7abf;cursor:pointer">
+               style="width:100%;accent-color:#f2f2f2;cursor:pointer">
       </div>
       <label class="sidebar-toggle" id="show-names-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="show-names-3d-toggle" checked>
@@ -129,7 +129,7 @@
         <span class="phys-label" data-i18n="nodeColors.famNodeSize">Familien-Knoten Größe</span>
         <span id="fam-node-size-val">7</span>
       </div>
-      <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:#4a7abf;cursor:pointer;margin-bottom:4px">
+      <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:#f2f2f2;cursor:pointer;margin-bottom:4px">
       <button id="node-colors-reset" onclick="resetNodeColors()" data-i18n="nodeColors.reset">Zurücksetzen</button>
     </details>
 
@@ -137,7 +137,7 @@
     <details id="appearance-panel">
       <summary data-i18n="appearance.title">3D Darstellung</summary>
       <div class="link-color-row">
-        <input type="color" id="ap-bg-color" value="#04060f">
+        <input type="color" id="ap-bg-color" value="#000000">
         <span data-i18n="appearance.background">Hintergrund</span>
       </div>
       <div class="phys-row" style="padding:4px 0">
