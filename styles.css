@@ -188,6 +188,14 @@ body {
 .surname-label { flex: 1; color: #cccccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .surname-count { color: #666666; font-size: 11px; flex-shrink: 0; }
 
+#surname-shown-count {
+  font-size: 11px;
+  color: #8a8a8a;
+  padding: 4px 2px;
+  border-top: 1px solid #2e2e2e;
+  flex-shrink: 0;
+}
+
 #sidebar-buttons {
   display: flex;
   flex-direction: column;

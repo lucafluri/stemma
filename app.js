@@ -369,6 +369,11 @@ function _fullRebuildGraph() {
     update3DNames();
     console.timeEnd('[rebuild] 3d data push');
   }
+  // renderGraph() rebuilds all DOM/3D nodes from scratch, dropping highlight
+  // opacity and orbit target — restore them so editing a person/family
+  // doesn't visually clear the selection the user was looking at.
+  applyHighlight();
+  if (currentView === '3d' && selectedIndiId) _setOrbitTarget3D(selectedIndiId);
   console.timeEnd('[rebuild] total');
 }
 
@@ -787,6 +792,24 @@ function computeActiveData() {
       }
     }
   }
+
+  updateSurnameShownCount();
+}
+
+// ── Sidebar count: how many people are on screen under the current surname filter ──
+function updateSurnameShownCount() {
+  const el = document.getElementById('surname-shown-count');
+  if (!el) return;
+  const allEnabled = [...surnameEnabled.values()].every(v => v !== false);
+  if (allEnabled) {
+    el.style.display = 'none';
+    return;
+  }
+  const shown = nodes.filter(n => n.type === 'INDI');
+  const withSpouses = shown.length;
+  const direct = shown.filter(n => hasEnabledFamilyName(n.data)).length;
+  el.textContent = t('sidebar.shownCount', { direct, withSpouses });
+  el.style.display = '';
 }
 
 // ── Lightweight re-render: update colors/styles without rebuilding simulation ──
@@ -2135,7 +2158,7 @@ function _buildFamEditSections(personId) {
       </div>
       <div class="edit-section">
         <div class="edit-label">${t('detail.marriagePlace')}</div>
-        <input class="edit-input" id="ef-fam-${sid}-mplac" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
+        <input class="edit-input" id="ef-fam-${sid}-mplac" list="ef-place-dl" autocomplete="off" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
       </div>
       <label class="edit-checkbox-row">
         <input type="checkbox" id="ef-fam-${sid}-div"${fam.div ? ' checked' : ''}>
@@ -2258,6 +2281,7 @@ let _removedRelations = [];   // [{ targetId, type, famId }]
 let _famEditRemovedChil = new Set(); // child IDs removed during fam edit
 let _famEditPendingChil = [];        // [{id, name, isNew}] children added during fam edit
 let _famEditMarriages   = [];        // working copy of marriages during fam edit
+let _famEditNewPartner  = { husb: null, wife: null }; // stub person ids created inline for the partner slots
 
 function _buildPersonDatalist(excludeId) {
   let opts = '';
@@ -2269,6 +2293,18 @@ function _buildPersonDatalist(excludeId) {
     opts += `<option value="${escAttr(display)}" data-id="${escAttr(pid)}">`;
   }
   return opts;
+}
+
+function _buildPlaceDatalist() {
+  const places = new Set();
+  for (const i of individuals.values()) {
+    if (i.birth?.plac) places.add(i.birth.plac);
+    if (i.death?.plac) places.add(i.death.plac);
+  }
+  for (const f of families.values()) {
+    for (const m of f.marriages || []) if (m.plac) places.add(m.plac);
+  }
+  return [...places].sort().map(p => `<option value="${escAttr(p)}">`).join('');
 }
 
 function _resolvePersonInput(val) {
@@ -2440,6 +2476,7 @@ function showIndiEditForm(id) {
   document.getElementById('detail-buttons').style.display = 'none';
 
   const datalistHtml = _buildPersonDatalist(id);
+  const placeDatalistHtml = _buildPlaceDatalist();
 
   document.getElementById('detail-content').innerHTML = `
     <div class="edit-section">
@@ -2468,23 +2505,25 @@ function showIndiEditForm(id) {
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.birthPlace')}</div>
-      <input class="edit-input" id="ef-bplac" value="${escAttr(i.birth.plac)}">
+      <input class="edit-input" id="ef-bplac" list="ef-place-dl" autocomplete="off" value="${escAttr(i.birth.plac)}">
     </div>
     <label class="edit-checkbox-row">
-      <input type="checkbox" id="ef-dead"${i.deceased?' checked':''}>
+      <input type="checkbox" id="ef-dead"${i.deceased?' checked':''} onchange="_toggleDeathFields(this.checked)">
       ${t('detail.deceased')}
     </label>
-    <div class="edit-section">
-      <div class="edit-label">${t('detail.deathDate')}</div>
-      ${_gedcomDateWidget('ef-ddate', i.death.date)}
-    </div>
-    <div class="edit-section">
-      <div class="edit-label">${t('detail.deathPlace')}</div>
-      <input class="edit-input" id="ef-dplac" value="${escAttr(i.death.plac)}">
-    </div>
-    <div class="edit-section">
-      <div class="edit-label">${t('detail.causeOfDeath')}</div>
-      <input class="edit-input" id="ef-dcaus" value="${escAttr(i.death.caus)}">
+    <div id="ef-death-fields" style="display:${i.deceased ? 'block' : 'none'}">
+      <div class="edit-section">
+        <div class="edit-label">${t('detail.deathDate')}</div>
+        ${_gedcomDateWidget('ef-ddate', i.death.date)}
+      </div>
+      <div class="edit-section">
+        <div class="edit-label">${t('detail.deathPlace')}</div>
+        <input class="edit-input" id="ef-dplac" list="ef-place-dl" autocomplete="off" value="${escAttr(i.death.plac)}">
+      </div>
+      <div class="edit-section">
+        <div class="edit-label">${t('detail.causeOfDeath')}</div>
+        <input class="edit-input" id="ef-dcaus" value="${escAttr(i.death.caus)}">
+      </div>
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.occupation')}</div>
@@ -2507,6 +2546,7 @@ function showIndiEditForm(id) {
       <div class="ef-rel-add-row">
         <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <datalist id="ef-rel-datalist">${datalistHtml}</datalist>
+        <datalist id="ef-place-dl">${placeDatalistHtml}</datalist>
         <select class="edit-select" id="ef-rel-type" style="width:auto;min-width:100px">
           <option value="child">${t('detail.relationChild')}</option>
           <option value="parent">${t('detail.relationParent')}</option>
@@ -2546,6 +2586,11 @@ function showIndiEditForm(id) {
 
   _renderExistingRelations(id);
   _acAttachEditForm();
+}
+
+function _toggleDeathFields(checked) {
+  const el = document.getElementById('ef-death-fields');
+  if (el) el.style.display = checked ? 'block' : 'none';
 }
 
 function commitIndiEdit() {
@@ -2731,11 +2776,13 @@ function showFamEditForm(id) {
 
   _famEditRemovedChil = new Set();
   _famEditPendingChil = [];
+  _famEditNewPartner  = { husb: null, wife: null };
 
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
 
   const dl = _buildPersonDatalist(null);
+  const placeDl = _buildPlaceDatalist();
   const husbName = f.husb ? (individuals.get(f.husb)?.name || f.husb) : '';
   const wifeName = f.wife ? (individuals.get(f.wife)?.name || f.wife) : '';
 
@@ -2751,6 +2798,7 @@ function showFamEditForm(id) {
         <datalist id="ef-husb-dl">${dl}</datalist>
         <button class="ef-rel-remove" onclick="document.getElementById('ef-husb').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
+      ${_famEditNewPartnerFormHtml('husb')}
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.partner2')}</div>
@@ -2759,9 +2807,11 @@ function showFamEditForm(id) {
         <datalist id="ef-wife-dl">${dl}</datalist>
         <button class="ef-rel-remove" onclick="document.getElementById('ef-wife').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
+      ${_famEditNewPartnerFormHtml('wife')}
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.ceremonies')}</div>
+      <datalist id="ef-place-dl">${placeDl}</datalist>
       <div id="ef-fam-marr-list"></div>
       <button class="ef-toggle-new-btn" onclick="_famEditAddMarr()" style="margin-top:4px">&#x2795; ${t('detail.addCeremony')}</button>
     </div>
@@ -2808,12 +2858,71 @@ function showFamEditForm(id) {
   _famEditRenderChildren(f);
 }
 
+const _FAM_PARTNER_PREFIX = { husb: 'nh', wife: 'nw' };
+
+function _famEditNewPartnerFormHtml(slot) {
+  const p = _FAM_PARTNER_PREFIX[slot];
+  return `<button class="ef-toggle-new-btn" onclick="_famEditToggleNewPartner('${slot}')" style="margin-top:4px">&#x2795; ${t('detail.newPerson')}</button>
+    <div id="ef-new-${slot}-form" style="display:none;margin-top:6px">
+      <div class="ef-rel-add-row">
+        <input class="edit-input" id="ef-${p}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+        <input class="edit-input" id="ef-${p}-surn" placeholder="${t('detail.familyName')}" style="flex:1">
+      </div>
+      <div class="ef-rel-add-row" style="margin-top:4px">
+        <select class="edit-select" id="ef-${p}-sex" style="flex:1">
+          <option value="U">${t('detail.sexSelect')}</option>
+          <option value="M">${t('detail.maleCap')}</option>
+          <option value="F">${t('detail.femaleCap')}</option>
+        </select>
+        <button class="ef-rel-add-btn" onclick="_famEditCreatePartner('${slot}')" title="${t('detail.add')}" style="width:auto;padding:0 10px">${t('detail.add')}</button>
+      </div>
+    </div>`;
+}
+
+function _famEditToggleNewPartner(slot) {
+  const sf = document.getElementById(`ef-new-${slot}-form`);
+  if (!sf) return;
+  const showing = sf.style.display !== 'none';
+  sf.style.display = showing ? 'none' : 'block';
+  if (!showing) document.getElementById(`ef-${_FAM_PARTNER_PREFIX[slot]}-givn`)?.focus();
+}
+
+function _famEditCreatePartner(slot) {
+  const p = _FAM_PARTNER_PREFIX[slot];
+  const givn = document.getElementById(`ef-${p}-givn`)?.value.trim() || '';
+  const surn = document.getElementById(`ef-${p}-surn`)?.value.trim() || '';
+  const sex  = document.getElementById(`ef-${p}-sex`)?.value || 'U';
+  const fullName = (givn + ' ' + surn).trim();
+  if (!fullName) {
+    const el = document.getElementById(`ef-${p}-givn`);
+    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    return;
+  }
+  // Discard a stub from a previous "new person" click on this slot that never got saved
+  if (_famEditNewPartner[slot]) individuals.delete(_famEditNewPartner[slot]);
+
+  const newId = getNextIndiId();
+  individuals.set(newId, {
+    id: newId, name: fullName, givn, surn, maidenName: '', sex,
+    birth: { date: '', plac: '' }, death: { date: '', plac: '', caus: '' },
+    deceased: false, birthYear: null, famc: [], fams: [], occu: '', note: '',
+    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
+  });
+  _famEditNewPartner[slot] = newId;
+
+  document.getElementById(slot === 'husb' ? 'ef-husb' : 'ef-wife').value = fullName;
+  document.getElementById(`ef-${p}-givn`).value = '';
+  document.getElementById(`ef-${p}-surn`).value = '';
+  document.getElementById(`ef-${p}-sex`).value  = 'U';
+  document.getElementById(`ef-new-${slot}-form`).style.display = 'none';
+}
+
 function _famEditRenderMarriages() {
   const el = document.getElementById('ef-fam-marr-list');
   if (!el) return;
   el.innerHTML = _famEditMarriages.map((m, i) => {
-    const typesHtml = _FAM_MARR_TYPES.map(t =>
-      `<label class="fam-type-check"><input type="checkbox" data-marr-idx="${i}" data-marr-type="${escAttr(t.val)}"${m.types.includes(t.val) ? ' checked' : ''}> ${escHtml(t(t.label))}</label>`
+    const typesHtml = _FAM_MARR_TYPES.map(mt =>
+      `<label class="fam-type-check"><input type="checkbox" data-marr-idx="${i}" data-marr-type="${escAttr(mt.val)}"${m.types.includes(mt.val) ? ' checked' : ''}> ${escHtml(t(mt.label))}</label>`
     ).join('');
     const canRemove = _famEditMarriages.length > 1;
     return `<div class="fam-marr-block">
@@ -2825,7 +2934,7 @@ function _famEditRenderMarriages() {
       <div class="edit-label" style="font-size:11px">${t('detail.date')}</div>
       ${_gedcomDateWidget('ef-marr-' + i + '-date', m.date)}
       <div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.place')}</div>
-      <input class="edit-input" id="ef-marr-${i}-plac" value="${escAttr(m.plac)}" placeholder="${t('detail.place')}">
+      <input class="edit-input" id="ef-marr-${i}-plac" list="ef-place-dl" autocomplete="off" value="${escAttr(m.plac)}" placeholder="${t('detail.place')}">
     </div>`;
   }).join('');
 }
@@ -2963,8 +3072,25 @@ function commitFamEdit() {
   const oldWife = f.wife;
   const husbVal = document.getElementById('ef-husb').value.trim();
   const wifeVal = document.getElementById('ef-wife').value.trim();
-  f.husb = husbVal ? (_resolvePersonInput(husbVal) || f.husb) : null;
-  f.wife = wifeVal ? (_resolvePersonInput(wifeVal) || f.wife) : null;
+  // Only re-resolve a slot from its text when it actually changed. Otherwise
+  // a same-named person elsewhere in the tree ("+ New Person" stub, or just a
+  // duplicate name) would win the fuzzy text search and silently bump the
+  // untouched original spouse out of the family.
+  const resolveSlot = (slot, val, oldId) => {
+    const stubId = _famEditNewPartner[slot];
+    if (stubId && individuals.get(stubId)?.name === val) return stubId;
+    if (oldId && individuals.get(oldId)?.name === val) return oldId;
+    return _resolvePersonInput(val);
+  };
+  f.husb = husbVal ? (resolveSlot('husb', husbVal, oldHusb) || f.husb) : null;
+  f.wife = wifeVal ? (resolveSlot('wife', wifeVal, oldWife) || f.wife) : null;
+
+  // Discard inline-created partner stubs that ended up unused (field was cleared/retyped)
+  for (const slot of ['husb', 'wife']) {
+    const stubId = _famEditNewPartner[slot];
+    if (stubId && stubId !== f.husb && stubId !== f.wife) individuals.delete(stubId);
+  }
+  _famEditNewPartner = { husb: null, wife: null };
 
   if (oldHusb !== f.husb) {
     if (oldHusb) { const p = individuals.get(oldHusb); if (p) p.fams = p.fams.filter(fid => fid !== _editingId); }
@@ -3012,6 +3138,10 @@ function cancelEdit() {
   _famEditPendingChil = [];
   _famEditRemovedChil = new Set();
   _famEditMarriages   = [];
+  for (const slot of ['husb', 'wife']) {
+    if (_famEditNewPartner[slot]) individuals.delete(_famEditNewPartner[slot]);
+  }
+  _famEditNewPartner = { husb: null, wife: null };
   if (_isNewRecord) {
     _isNewRecord = false;
     // Discard the stub record that was created for this cancelled new entry
@@ -3454,9 +3584,14 @@ function refresh3D() {
         if (hasHL) {
           child.material.opacity = inHL ? 1.0 : 0.06;
           child.material.transparent = true;
+          // Transparent meshes must not write depth, or whichever one
+          // happens to draw first this frame permanently occludes the
+          // others behind it — the "z-sorting" flicker when orbiting.
+          child.material.depthWrite = false;
         } else {
           child.material.opacity = 1.0;
           child.material.transparent = false;
+          child.material.depthWrite = true;
         }
       }
       // Dim/show sprite labels (name tags)
@@ -3491,9 +3626,11 @@ function refresh3D() {
         if (hasHL) {
           child.material.opacity = inHL ? 0.8 : 0.03;
           child.material.transparent = true;
+          child.material.depthWrite = false;
         } else {
           child.material.opacity = _3dAppearance.linkOpacity;
           child.material.transparent = _3dAppearance.linkOpacity < 1;
+          child.material.depthWrite = _3dAppearance.linkOpacity >= 1;
         }
       }
     });
@@ -3637,7 +3774,7 @@ function build3DTimeline() {
 
   // ── Vertical spine ──
   const spineGeo = new THREE.CylinderGeometry(0.6, 0.6, totalH, 8);
-  const spineMat = new THREE.MeshBasicMaterial({ color: 0x4466bb, transparent: true, opacity: 0.75,
+  const spineMat = new THREE.MeshBasicMaterial({ color: 0x4466bb, transparent: true, opacity: 0.75, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
   const spine = new THREE.Mesh(spineGeo, spineMat);
   spine.renderOrder = 0;
@@ -3647,7 +3784,7 @@ function build3DTimeline() {
   // ── Year ticks + labels ──
   const step = span > 200 ? 50 : span > 80 ? 25 : 10;
   const startYr = Math.ceil(minYr / step) * step;
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide,
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
 
   for (let yr = startYr; yr <= maxYr; yr += step) {
@@ -3681,7 +3818,7 @@ function makeNameSprite3D(n) {
   if (n.type !== 'INDI') return null;
   const indi = n.data;
   const name = indi.displayName || indi.name || n.id;
-  const maidenLine = indi.maidenName ? `geb. ${indi.maidenName}` : '';
+  const maidenLine = indi.maidenName ? t('tooltip.born', { name: indi.maidenName }) : '';
   let born = '';
   if (indi.birthYear) {
     born = `*${indi.birthYear}`;
@@ -3881,7 +4018,7 @@ function export3DTopDown() {
       if (p.n.type !== 'INDI') continue;
       const indi = p.n.data;
       const name = indi.displayName || indi.name || p.n.id;
-      const maidenLine = indi.maidenName ? `geb. ${indi.maidenName}` : '';
+      const maidenLine = indi.maidenName ? t('tooltip.born', { name: indi.maidenName }) : '';
       let born = indi.birthYear ? `*${indi.birthYear}` : '';
       if (!born && _estimatedYears?.has(p.n.id)) born = `~${_estimatedYears.get(p.n.id)}`;
       const died = indi.deceased ? '†' + (indi.death.date?.match(/\d{4}/)?.[0] ?? '') : '';
@@ -4601,6 +4738,7 @@ window.autoSettle        = autoSettle;
 window.resetPhysics      = resetPhysics;
 window.startEdit         = startEdit;
 window.commitIndiEdit    = commitIndiEdit;
+window._toggleDeathFields = _toggleDeathFields;
 window.commitFamEdit          = commitFamEdit;
 window.cancelEdit             = cancelEdit;
 window._famEditRemoveChild    = _famEditRemoveChild;
@@ -4611,6 +4749,8 @@ window._famEditCreateChild    = _famEditCreateChild;
 window._famEditAddMarr        = _famEditAddMarr;
 window._famEditRemoveMarr     = _famEditRemoveMarr;
 window._famEditToggleDivDate  = _famEditToggleDivDate;
+window._famEditToggleNewPartner = _famEditToggleNewPartner;
+window._famEditCreatePartner    = _famEditCreatePartner;
 window.savePreset        = savePreset;
 window.deletePreset      = deletePreset;
 window.applyPreset       = applyPreset;
@@ -6539,7 +6679,7 @@ function _imPersonSearch(inp, actionId, fieldKey) {
       const { id, indi } = r;
       const bYear  = indi.birth?.date?.match(/\b(\d{4})\b/)?.[1] || '';
       const dYear  = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || '';
-      const maiden = indi.maidenName ? ` <span class="import-sdrop-maiden">geb. ${escHtml(indi.maidenName)}</span>` : '';
+      const maiden = indi.maidenName ? ` <span class="import-sdrop-maiden">${t('tooltip.born', { name: escHtml(indi.maidenName) })}</span>` : '';
       const bPlace = indi.birth?.plac || '';
       const parts  = [];
       if (bYear || bPlace) parts.push((bYear ? '*' + bYear : '') + (bPlace ? (bYear ? ' ' : '') + bPlace : ''));
@@ -6774,7 +6914,7 @@ function _acNames() {
     .sort((a, b) => b[1].count - a[1].count)
     .map(([name, { maidenName }]) => ({
       value:      name,
-      label:      maidenName ? `${name} (geb. ${maidenName})` : name,
+      label:      maidenName ? `${name} (${t('tooltip.born', { name: maidenName })})` : name,
       searchText: (name + ' ' + maidenName).toLowerCase(),
     }));
 }
