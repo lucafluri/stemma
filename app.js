@@ -13,6 +13,11 @@ let nodes = [];      // currently active (filtered) nodes passed to simulation
 let links = [];      // currently active (filtered) links passed to simulation
 let _firstLoad = true;  // controls auto-fit + auto-open on first load only
 
+// id -> graph node object, reused across buildGraphData() calls so an edit that
+// doesn't touch a person leaves their {x,y,vx,vy,fx,fy} simulation state intact
+// instead of every node restarting from scratch on every save.
+let _nodeObjCache = new Map();
+
 let simulation  = null;
 let svgSel      = null;   // d3 selection of <svg>
 let gMain       = null;   // d3 selection of main <g>
@@ -180,7 +185,7 @@ const PHYSICS_DEFAULTS = {
   collideRadius:  50,
   yStrength:      0.00,
   centerStrength: 0.000,
-  velocityDecay:  0.05,
+  velocityDecay:  0.20,
   alphaDecay:     0.005,
 };
 
@@ -199,7 +204,7 @@ let showTimeline3D = true;   // show the visual timeline axis (spine + rings)
 let show3DNames    = true;   // render name+year labels above nodes in 3D
 let _nodeDragEnabled = false; // node dragging disabled by default
 let _timeline3DObj    = null;   // THREE.Group holding timeline meshes in the 3D scene
-let _3dYHalfSpan      = 500;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
+let _3dYHalfSpan      = 750;   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
 let _3dFontSize       = 18;    // name label font size in 3D view
 let _orbitControls3d  = null;  // OrbitControls instance (replaces TrackballControls)
 let _orbitTargetAnim  = null;  // { from, to, start, duration } for smooth orbit target transition
@@ -337,9 +342,17 @@ function parseGEDCOM(raw) {
 
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-// Full in-memory rebuild — call after any structural change
+// Full in-memory rebuild — call after any structural change.
+// Pass { warm: true } for a single add/edit/delete: reuses node identity
+// (already the default via _nodeObjCache) and the running simulation with a
+// gentle reheat instead of a fresh alpha=1 restart, and skips the
+// auto-zoomToFit — so one edit doesn't jitter or re-frame the whole tree.
+// Omit warm (default false) for dataset-level changes (load/import/replace),
+// which legitimately want a fresh layout and an auto-fit.
 // ═══════════════════════════════════════════════════════════════
-function _fullRebuildGraph() {
+function _fullRebuildGraph(opts = {}) {
+  const warm = !!opts.warm;
+  if (!warm) _nodeObjCache = new Map(); // dataset-level change: don't reuse positions from a possibly-unrelated previous dataset
   _setDirty(true);
   console.time('[rebuild] total');
   console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
@@ -351,8 +364,8 @@ function _fullRebuildGraph() {
     t('topbar.status', { persons: individuals.size, personsPlural: individuals.size !== 1 ? 'en' : '', families: families.size });
   _genDepthsCache = null;  // invalidate depth cache before rebuild
   _estimatedYears = null;
-  _firstLoad = true;
-  console.time('[rebuild] simulation');      buildAndRunSimulation();                 console.timeEnd('[rebuild] simulation');
+  if (!warm) _firstLoad = true;
+  console.time('[rebuild] simulation');      buildAndRunSimulation({ warm });         console.timeEnd('[rebuild] simulation');
   // For 3D: push data directly instead of calling applyFilter() which would
   // run buildAndRunSimulation() a second time (doubles the sim cost).
   if (currentView === '3d' && graph3d) {
@@ -377,21 +390,45 @@ function _fullRebuildGraph() {
   console.timeEnd('[rebuild] total');
 }
 
+const DECEASED_AGE_THRESHOLD = 110;
+
+// Genealogical convention: presume death once someone would be implausibly
+// old, even without a recorded death date. Never un-marks (one-way flip).
+function _autoMarkDeceasedByAge() {
+  const cutoffYear = new Date().getFullYear() - DECEASED_AGE_THRESHOLD;
+  for (const indi of individuals.values()) {
+    if (!indi.deceased && indi.birthYear && indi.birthYear <= cutoffYear) indi.deceased = true;
+  }
+}
+
 // 2. GRAPH DATA BUILDER  (bipartite INDI + FAM nodes)
 // ═══════════════════════════════════════════════════════════════
 function buildGraphData() {
+  _autoMarkDeceasedByAge();
   allNodes = [];
   allLinks = [];
   const nodeById = new Map();
+  const nextCache = new Map();
+
+  // Reuse the existing node object for an id if we have one, so its
+  // {x,y,vx,vy,fx,fy} simulation state survives this rebuild untouched.
+  // Ids that no longer exist are simply not copied into nextCache and drop out.
+  const getNode = (id, type, data) => {
+    let n = _nodeObjCache.get(id);
+    if (n) n.data = data;
+    else n = { id, type, data };
+    nextCache.set(id, n);
+    return n;
+  };
 
   for (const [id, indi] of individuals) {
-    const n = { id, type: 'INDI', data: indi };
+    const n = getNode(id, 'INDI', indi);
     allNodes.push(n);
     nodeById.set(id, n);
   }
 
   for (const [id, fam] of families) {
-    const n = { id, type: 'FAM', data: fam };
+    const n = getNode(id, 'FAM', fam);
     allNodes.push(n);
     nodeById.set(id, n);
 
@@ -404,6 +441,8 @@ function buildGraphData() {
         allLinks.push({ _src: id, _tgt: cid, ltype: 'parent' });
     }
   }
+
+  _nodeObjCache = nextCache;
 
   computeActiveData();  // initialise nodes/links from current filter state
 }
@@ -1081,7 +1120,11 @@ function updateLabels() {
 // ═══════════════════════════════════════════════════════════════
 // 6. FORCE SIMULATION
 // ═══════════════════════════════════════════════════════════════
-function buildAndRunSimulation() {
+// opts.warm: reuse the existing simulation object + node positions and apply
+// a gentle reheat, instead of building a brand-new simulation at alpha=1.
+// Used for single edits so only the changed node(s) actually move.
+function buildAndRunSimulation(opts = {}) {
+  const warm = !!opts.warm && !!simulation;
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth  || 1100;
   const H = svgEl.clientHeight || 700;
@@ -1126,33 +1169,45 @@ function buildAndRunSimulation() {
 
   const nodeTargetY = n => n.type === 'INDI' ? genToY(genDepths.get(n.id) ?? 0) : famGenY(n.data);
 
-  // Pre-position new nodes so the simulation converges faster
+  // Pre-position brand-new nodes near their settle spot so they need less
+  // travel; nodes that already have a position (identity preserved by
+  // _nodeObjCache in buildGraphData) are left exactly where they are.
   nodes.forEach(n => {
-    if (!n.x) {
+    if (n.x == null) {
       n.y = nodeTargetY(n);
       n.x = W * 0.2 + Math.random() * W * 0.6;
     }
   });
 
-  if (simulation) simulation.stop();
-
   const p = physicsParams;
 
-  simulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(links)
-      .id(d => d.id)
-      .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
-      .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength)
-    )
-    .force('charge', d3.forceManyBody()
-      .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
-      .distanceMax(p.chargeDistMax)
-    )
-    .force('center', d3.forceCenter(W / 2, H / 2).strength(p.centerStrength))
-    .force('collide', d3.forceCollide(d => d.type === 'FAM' ? 9 : p.collideRadius).strength(0.7))
-    .force('fy', d3.forceY(d => nodeTargetY(d)).strength(p.yStrength))
-    .alphaDecay(p.alphaDecay)
-    .velocityDecay(p.velocityDecay);
+  if (warm) {
+    // Same forces, same node/link objects where possible — just tell the
+    // running simulation about the new node/link set and nudge it awake.
+    simulation.nodes(nodes);
+    simulation.force('link').links(links);
+    simulation.force('fy').y(d => nodeTargetY(d));
+    simulation.alphaDecay(p.alphaDecay).velocityDecay(p.velocityDecay);
+    simulation.alpha(Math.max(simulation.alpha(), 0.3));
+  } else {
+    if (simulation) simulation.stop();
+    simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links)
+        .id(d => d.id)
+        .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+        .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength)
+      )
+      .force('charge', d3.forceManyBody()
+        .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
+        .distanceMax(p.chargeDistMax)
+      )
+      .force('center', d3.forceCenter(W / 2, H / 2).strength(p.centerStrength))
+      .force('collide', d3.forceCollide(d => d.type === 'FAM' ? 9 : p.collideRadius).strength(0.7))
+      .force('fy', d3.forceY(d => nodeTargetY(d)).strength(p.yStrength))
+      .alpha(1)
+      .alphaDecay(p.alphaDecay)
+      .velocityDecay(p.velocityDecay);
+  }
 
   // For large graphs run the simulation headlessly (no per-tick DOM writes)
   // then paint once at the end — avoids hundreds of synchronous reflows.
@@ -1172,6 +1227,7 @@ function buildAndRunSimulation() {
   } else {
     simulation.on('tick', tick);
     simulation.on('end', onSimEnd);
+    simulation.restart();
   }
 }
 
@@ -1505,6 +1561,7 @@ function showIndiDetail(id) {
 
   // Quick-add relative — one click from the read-only view, no need to enter edit mode
   html += `<div class="detail-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
+    <datalist id="ef-place-dl">${_buildPlaceDatalist()}</datalist>
     <div class="ef-rel-add-row">
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; ${t('detail.addParent')}</button>
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; ${t('detail.addSpouse')}</button>
@@ -1528,11 +1585,13 @@ function showIndiDetail(id) {
 const _QUICK_ADD_LABELS = { parent: 'detail.addParent', spouse: 'detail.addSpouse', child: 'detail.addChild' };
 
 function _quickAddFormHtml(type, personId) {
+  if (type === 'parent') return _quickAddParentFormHtml(personId);
+  const defaultSurn = type === 'child' ? (individuals.get(personId)?.surn || '') : '';
   return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
     <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t(_QUICK_ADD_LABELS[type]) })}</div>
     <div style="display:flex;gap:6px;margin-bottom:6px">
       <input class="edit-input" id="qa-${type}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
-      <input class="edit-input" id="qa-${type}-surn" placeholder="${t('detail.familyName')}" style="flex:1">
+      <input class="edit-input" id="qa-${type}-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr(defaultSurn)}">
     </div>
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <select class="edit-select" id="qa-${type}-sex">
@@ -1541,11 +1600,79 @@ function _quickAddFormHtml(type, personId) {
         <option value="F">${t('detail.female')}</option>
       </select>
     </div>
-    <div style="display:flex;gap:6px">
+    ${type === 'child' ? _personVitalsHtml('qa-child') + _inlineSpouseFormHtml('qa-child') : ''}
+    <div style="display:flex;gap:6px;margin-top:8px">
       <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; ${t('detail.add')}</button>
       <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('${type}')">${t('detail.cancel')}</button>
     </div>
   </div>`;
+}
+
+// Two-parent quick-add: entering both father and mother creates ONE family for
+// both, instead of one click per parent fragmenting the person into two famc families.
+function _quickAddParentFormHtml(personId) {
+  const i = individuals.get(personId);
+  const fam = i?.famc?.length ? families.get(i.famc[0]) : null;
+  const husb = fam?.husb ? individuals.get(fam.husb) : null;
+  const wife = fam?.wife ? individuals.get(fam.wife) : null;
+
+  if (husb && wife) {
+    return `<div id="qa-parent-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
+      <div style="color:#888;font-size:11px">${t('detail.bothParentsSet')}</div>
+    </div>`;
+  }
+
+  const slotHtml = (slot, label, existing, defaultSurn) => existing
+    ? `<div class="edit-label" style="margin-top:6px">${label}</div>
+       <div style="color:#888;font-size:11px;padding:4px 0">${escHtml(existing.name || existing.id)} ${t('detail.parentAlreadySet')}</div>`
+    : `<div class="edit-label" style="margin-top:6px">${label}</div>
+       <div style="display:flex;gap:6px;margin-bottom:4px">
+         <input class="edit-input" id="qa-parent-${slot}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+         <input class="edit-input" id="qa-parent-${slot}-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr(defaultSurn)}">
+       </div>
+       ${_gedcomDateWidget('qa-parent-' + slot + '-bdate', '')}`;
+
+  return `<div id="qa-parent-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
+    <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t('detail.addParent') })}</div>
+    ${slotHtml('father', t('detail.relationVater'), husb, i?.surn || '')}
+    ${slotHtml('mother', t('detail.relationMutter'), wife, '')}
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddParents('${escJs(personId)}')">&#x2713; ${t('detail.add')}</button>
+      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('parent')">${t('detail.cancel')}</button>
+    </div>
+  </div>`;
+}
+
+function confirmQuickAddParents(personId) {
+  const readSlot = slot => {
+    if (!document.getElementById(`qa-parent-${slot}-givn`)) return null; // slot already filled, no inputs rendered
+    const givn = document.getElementById(`qa-parent-${slot}-givn`)?.value.trim() || '';
+    const surn = document.getElementById(`qa-parent-${slot}-surn`)?.value.trim() || '';
+    if (!givn && !surn) return null;
+    return { givn, surn, birthDate: _gedcomDateValue(`qa-parent-${slot}-bdate`) };
+  };
+  const father = readSlot('father');
+  const mother = readSlot('mother');
+  if (!father && !mother) {
+    const el = document.getElementById('qa-parent-father-givn') || document.getElementById('qa-parent-mother-givn');
+    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    return;
+  }
+
+  const fam = _findOrCreateFamAsChild(personId);
+  let lastNewId = null;
+  if (father && !fam.husb) {
+    lastNewId = fam.husb = _makeNewIndi(father.givn, father.surn, 'M', { birthDate: father.birthDate });
+    individuals.get(fam.husb).fams.push(fam.id);
+  }
+  if (mother && !fam.wife) {
+    lastNewId = fam.wife = _makeNewIndi(mother.givn, mother.surn, 'F', { birthDate: mother.birthDate });
+    individuals.get(fam.wife).fams.push(fam.id);
+  }
+
+  _fullRebuildGraph({ warm: true });
+  showIndiDetail(personId);
+  if (lastNewId) flashNode(lastNewId);
 }
 
 function toggleQuickAdd(type) {
@@ -1574,27 +1701,19 @@ function confirmQuickAddRelative(personId, type) {
     return;
   }
 
-  const newId = getNextIndiId();
-  const displayName = fullName.length > 24
-    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : fullName.slice(0, 22) + '…')
-    : fullName;
+  const extra = type === 'child' ? _readPersonVitals('qa-child') : {};
+  const newId = _makeNewIndi(givn, surn, sex, extra);
 
-  individuals.set(newId, {
-    id: newId, name: fullName, givn, surn, maidenName: '', sex,
-    birth: { date: '', plac: '' },
-    death: { date: '', plac: '', caus: '' },
-    deceased: false, birthYear: null,
-    famc: [], fams: [], occu: '', note: '', displayName,
-  });
-
-  // The UI is phrased from the viewed person's perspective ("add a parent/spouse/child
-  // to this person"), but _applyRelation's `type` describes personId's relation TO the
-  // target — so "add a parent" means personId is the CHILD of the new person, and
-  // "add a child" means personId is the PARENT of the new person. Spouse is symmetric.
-  const relType = type === 'parent' ? 'child' : type === 'child' ? 'parent' : 'spouse';
+  // The UI is phrased from the viewed person's perspective ("add a spouse/child to
+  // this person"), but _applyRelation's `type` describes personId's relation TO the
+  // target — so "add a child" means personId is the PARENT of the new person.
+  // ("Add parent" is handled separately by confirmQuickAddParents.)
+  const relType = type === 'child' ? 'parent' : 'spouse';
   _applyRelation(personId, { targetId: newId, type: relType });
 
-  _fullRebuildGraph();
+  if (type === 'child') _attachInlineSpouse(newId, _readInlineSpouse('qa-child'));
+
+  _fullRebuildGraph({ warm: true });
   selectedIndiId = newId;
   _editingId    = newId;
   _editingType  = 'INDI';
@@ -2040,6 +2159,7 @@ function _loadDatasetFile(file) {
   const reader = new FileReader();
   reader.onload = evt => {
     try {
+      _nodeObjCache = new Map(); // fresh dataset: don't reuse positions from a possibly-unrelated previous one
       const ext = file.name.toLowerCase();
       if (ext.endsWith('.json')) {
         const result = GEDCOMModule.importJSON(evt.target.result);
@@ -2689,7 +2809,7 @@ function commitIndiEdit() {
     document.getElementById('relation-tool-btn').disabled = false;
     document.getElementById('view-toggle-btn').disabled = false;
   }
-  _fullRebuildGraph();
+  _fullRebuildGraph({ warm: true });
   showIndiDetail(id);
 }
 
@@ -2761,6 +2881,155 @@ function _findOrCreateFamAsParent(personId) {
   families.set(famId, fam);
   if (person && !person.fams.includes(famId)) person.fams.push(famId);
   return fam;
+}
+
+// Helper: find the family where personId is a child, or create one
+function _findOrCreateFamAsChild(personId) {
+  const person = individuals.get(personId);
+  for (const fid of (person?.famc || [])) {
+    const f = families.get(fid);
+    if (f) return f;
+  }
+  const famId = getNextFamId();
+  const fam = {
+    id: famId, husb: null, wife: null, chil: [personId],
+    marriages: [{ date: '', plac: '', types: [] }], div: false, divDate: ''
+  };
+  families.set(famId, fam);
+  if (person && !person.famc.includes(famId)) person.famc.push(famId);
+  return fam;
+}
+
+// Creates and registers a new INDI record; shared by every "create person inline" form.
+function _makeNewIndi(givn, surn, sex, extra = {}) {
+  const fullName = (givn + ' ' + surn).trim();
+  const newId = getNextIndiId();
+  const birthDate = extra.birthDate || '';
+  // Same year-extraction as commitIndiEdit — without it birthYear stays null and
+  // the graph label/position silently fall back to an *estimated* year instead
+  // of the one just entered.
+  const ym = birthDate.match(/\b(\d{4})\b/);
+  individuals.set(newId, {
+    id: newId, name: fullName, givn, surn, maidenName: '', sex,
+    birth: { date: birthDate, plac: extra.birthPlac || '' },
+    death: { date: extra.deathDate || '', plac: extra.deathPlac || '', caus: '' },
+    deceased: !!extra.deceased, birthYear: ym ? +ym[1] : null, famc: [], fams: [], occu: '', note: '',
+    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
+  });
+  return newId;
+}
+
+// First/family name + sex fields, shared by every "create person inline" form.
+function _personNameSexHtml(prefix, defaultSurn = '') {
+  return `<div style="display:flex;gap:6px;margin-bottom:4px">
+      <input class="edit-input" id="${prefix}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
+      <input class="edit-input" id="${prefix}-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr(defaultSurn)}">
+    </div>
+    <select class="edit-select" id="${prefix}-sex" style="width:100%;margin-bottom:4px">
+      <option value="U">${t('detail.sexSelect')}</option>
+      <option value="M">${t('detail.maleCap')}</option>
+      <option value="F">${t('detail.femaleCap')}</option>
+    </select>`;
+}
+
+// Birth/death date+place fields, shared by every "create person inline" form.
+// Requires a #ef-place-dl <datalist> to already be present in the surrounding form.
+function _personVitalsHtml(prefix) {
+  return `<div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.birthDate')}</div>
+    ${_gedcomDateWidget(prefix + '-bdate', '')}
+    <input class="edit-input" id="${prefix}-bplac" list="ef-place-dl" autocomplete="off" placeholder="${t('detail.birthPlace')}" style="margin-top:4px">
+    <label class="edit-checkbox-row" style="margin-top:6px">
+      <input type="checkbox" id="${prefix}-dead" onchange="document.getElementById('${prefix}-death-fields').style.display=this.checked?'block':'none'">
+      ${t('detail.deceased')}
+    </label>
+    <div id="${prefix}-death-fields" style="display:none;margin-top:4px">
+      <div class="edit-label" style="font-size:11px">${t('detail.deathDate')}</div>
+      ${_gedcomDateWidget(prefix + '-ddate', '')}
+      <input class="edit-input" id="${prefix}-dplac" list="ef-place-dl" autocomplete="off" placeholder="${t('detail.deathPlace')}" style="margin-top:4px">
+    </div>`;
+}
+function _readPersonVitals(prefix) {
+  const extra = {
+    birthDate: _gedcomDateValue(prefix + '-bdate'),
+    birthPlac: (document.getElementById(`${prefix}-bplac`)?.value || '').trim(),
+  };
+  if (document.getElementById(`${prefix}-dead`)?.checked) {
+    extra.deceased = true;
+    extra.deathDate = _gedcomDateValue(prefix + '-ddate');
+    extra.deathPlac = (document.getElementById(`${prefix}-dplac`)?.value || '').trim();
+  }
+  return extra;
+}
+
+// Optional collapsible "+ Add spouse" block for a person being created inline
+// (e.g. a new child) — lets a whole couple be entered in one form instead of
+// creating the child, then switching to their detail view to add a partner.
+function _inlineSpouseFormHtml(prefix) {
+  return `<button type="button" class="ef-toggle-new-btn" onclick="_toggleInlineSpouseForm('${prefix}')" style="margin-top:8px">&#x2795; ${t('detail.addSpouse')}</button>
+    <div id="${prefix}-sp-form" style="display:none;margin-top:6px;padding:8px;background:#161616;border:1px solid #2b2b2b;border-radius:6px">
+      ${_personNameSexHtml(prefix + '-sp')}
+      ${_personVitalsHtml(prefix + '-sp')}
+      <div class="edit-label" style="font-size:11px;margin-top:8px">${t('detail.marriageDate')}</div>
+      ${_gedcomDateWidget(prefix + '-sp-mdate', '')}
+    </div>`;
+}
+function _toggleInlineSpouseForm(prefix) {
+  const el = document.getElementById(`${prefix}-sp-form`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function _readInlineSpouse(prefix) {
+  const givn = document.getElementById(`${prefix}-sp-givn`)?.value.trim() || '';
+  const surn = document.getElementById(`${prefix}-sp-surn`)?.value.trim() || '';
+  if (!givn && !surn) return null;
+  const sex = document.getElementById(`${prefix}-sp-sex`)?.value || 'U';
+  const marriageDate = _gedcomDateValue(`${prefix}-sp-mdate`);
+  return { givn, surn, sex, marriageDate, ..._readPersonVitals(prefix + '-sp') };
+}
+function _resetGedcomDateWidget(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  const p = el.querySelector('.gd-prefix'); if (p) p.value = '';
+  const d = el.querySelector('.gd-day');    if (d) d.value = '';
+  const m = el.querySelector('.gd-month');  if (m) m.value = '';
+  const y = el.querySelector('.gd-year');   if (y) y.value = '';
+}
+
+// Clears a _personNameSexHtml/_personVitalsHtml block's inputs back to blank,
+// so a form that stays open (e.g. family edit) is ready for the next entry.
+// Without this, a leftover birth/death date from the previous person would
+// silently carry over onto the next one added in the same session.
+function _resetPersonFormFields(prefix) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set(`${prefix}-givn`, '');
+  set(`${prefix}-surn`, '');
+  set(`${prefix}-sex`, 'U');
+  set(`${prefix}-bplac`, '');
+  set(`${prefix}-dplac`, '');
+  _resetGedcomDateWidget(`${prefix}-bdate`);
+  _resetGedcomDateWidget(`${prefix}-ddate`);
+  _resetGedcomDateWidget(`${prefix}-mdate`); // no-op unless prefix is a spouse block
+  const dead = document.getElementById(`${prefix}-dead`);
+  if (dead) dead.checked = false;
+  const df = document.getElementById(`${prefix}-death-fields`);
+  if (df) df.style.display = 'none';
+}
+
+// Creates the spouse and a new FAM linking them to personId as a couple.
+function _attachInlineSpouse(personId, spouse) {
+  if (!spouse) return null;
+  const spouseId = _makeNewIndi(spouse.givn, spouse.surn, spouse.sex, spouse);
+  const person = individuals.get(personId);
+  const famId = getNextFamId();
+  const fam = { id: famId, husb: null, wife: null, chil: [], marriages: [{ date: spouse.marriageDate || '', plac: '', types: [] }], div: false, divDate: '' };
+  if (person.sex === 'M') { fam.husb = personId; fam.wife = spouseId; }
+  else if (person.sex === 'F') { fam.wife = personId; fam.husb = spouseId; }
+  else if (spouse.sex === 'M') { fam.husb = spouseId; fam.wife = personId; }
+  else if (spouse.sex === 'F') { fam.wife = spouseId; fam.husb = personId; }
+  else { fam.husb = personId; fam.wife = spouseId; }
+  families.set(famId, fam);
+  person.fams.push(famId);
+  individuals.get(spouseId).fams.push(famId);
+  return spouseId;
 }
 
 const _FAM_MARR_TYPES = [
@@ -2837,7 +3106,7 @@ function showFamEditForm(id) {
       <div id="ef-fam-new-child-form" style="display:none;margin-top:6px">
         <div class="ef-rel-add-row">
           <input class="edit-input" id="ef-fnc-givn" placeholder="${t('detail.firstName')}" style="flex:1">
-          <input class="edit-input" id="ef-fnc-surn" placeholder="${t('detail.familyName')}" style="flex:1">
+          <input class="edit-input" id="ef-fnc-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr((f.husb && individuals.get(f.husb)?.surn) || (f.wife && individuals.get(f.wife)?.surn) || '')}">
         </div>
         <div class="ef-rel-add-row" style="margin-top:4px">
           <select class="edit-select" id="ef-fnc-sex" style="flex:1">
@@ -2845,8 +3114,10 @@ function showFamEditForm(id) {
             <option value="M">${t('detail.maleCap')}</option>
             <option value="F">${t('detail.femaleCap')}</option>
           </select>
-          <button class="ef-rel-add-btn" onclick="_famEditCreateChild()" title="${t('detail.addChildTitle')}" style="width:auto;padding:0 10px">${t('detail.add')}</button>
         </div>
+        ${_personVitalsHtml('ef-fnc')}
+        ${_inlineSpouseFormHtml('ef-fnc')}
+        <button class="ef-rel-add-btn" onclick="_famEditCreateChild()" title="${t('detail.addChildTitle')}" style="width:100%;padding:5px;margin-top:6px">${t('detail.add')}</button>
       </div>
     </div>
     <div class="edit-form-buttons">
@@ -2901,14 +3172,7 @@ function _famEditCreatePartner(slot) {
   // Discard a stub from a previous "new person" click on this slot that never got saved
   if (_famEditNewPartner[slot]) individuals.delete(_famEditNewPartner[slot]);
 
-  const newId = getNextIndiId();
-  individuals.set(newId, {
-    id: newId, name: fullName, givn, surn, maidenName: '', sex,
-    birth: { date: '', plac: '' }, death: { date: '', plac: '', caus: '' },
-    deceased: false, birthYear: null, famc: [], fams: [], occu: '', note: '',
-    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
-  });
-  _famEditNewPartner[slot] = newId;
+  _famEditNewPartner[slot] = _makeNewIndi(givn, surn, sex);
 
   document.getElementById(slot === 'husb' ? 'ef-husb' : 'ef-wife').value = fullName;
   document.getElementById(`ef-${p}-givn`).value = '';
@@ -3037,17 +3301,12 @@ function _famEditCreateChild() {
     setTimeout(() => { document.getElementById('ef-fnc-givn').style.borderColor = ''; }, 1200);
     return;
   }
-  const newId = getNextIndiId();
-  individuals.set(newId, {
-    id: newId, name: fullName, givn, surn, maidenName: '', sex,
-    birth: { date: '', plac: '' }, death: { date: '', plac: '', caus: '' },
-    deceased: false, birthYear: null, famc: [], fams: [], occu: '', note: '',
-    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
-  });
+  const newId = _makeNewIndi(givn, surn, sex, _readPersonVitals('ef-fnc'));
+  _attachInlineSpouse(newId, _readInlineSpouse('ef-fnc'));
   _famEditPendingChil.push({ id: newId, name: fullName, isNew: true });
-  document.getElementById('ef-fnc-givn').value = '';
-  document.getElementById('ef-fnc-surn').value = '';
-  document.getElementById('ef-fnc-sex').value  = 'U';
+  _resetPersonFormFields('ef-fnc');
+  _resetPersonFormFields('ef-fnc-sp');
+  document.getElementById('ef-fnc-sp-form').style.display = 'none';
   document.getElementById('ef-fam-new-child-form').style.display = 'none';
   const f = families.get(_editingId);
   if (f) _famEditRenderChildren(f);
@@ -3120,7 +3379,7 @@ function commitFamEdit() {
 
   const id = _editingId;
   _editingId = null; _editingType = null;
-  _fullRebuildGraph();
+  _fullRebuildGraph({ warm: true });
   showFamDetail(id);
 }
 
@@ -3218,7 +3477,7 @@ function confirmDeleteRecord() {
   }
 
   closeDetailPanel();
-  _fullRebuildGraph();
+  _fullRebuildGraph({ warm: true });
 }
 
 function startEdit() {
@@ -4778,6 +5037,8 @@ window.toggleNewPersonSubform   = toggleNewPersonSubform;
 window.confirmNewPersonRelation = confirmNewPersonRelation;
 window.toggleQuickAdd           = toggleQuickAdd;
 window.confirmQuickAddRelative  = confirmQuickAddRelative;
+window.confirmQuickAddParents   = confirmQuickAddParents;
+window._toggleInlineSpouseForm  = _toggleInlineSpouseForm;
 window.deleteCurrentRecord   = deleteCurrentRecord;
 window.confirmDeleteRecord   = confirmDeleteRecord;
 window.cancelDeleteRecord    = cancelDeleteRecord;
