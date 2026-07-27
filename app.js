@@ -54,7 +54,7 @@ colorBySurname = localStorage.getItem('colorBySurname') !== 'false'; // default 
 let labelStyle = {
   textColor: '#cccccc',
   textOpacity: 1.0,  // Fully opaque
-  fontSize: 32,      // 32 from screenshot
+  fontSize: 13,      // screen px — updateLabels divides by the zoom to keep it constant
   fontWeight: 'normal',
   bgEnabled: false,
   bgColor: '#0a0a0a',
@@ -193,7 +193,16 @@ let physicsParams = { ...PHYSICS_DEFAULTS };
 
 // 3D state
 let graph3d        = null;
-let currentView    = '3d';   // '2d' | '3d'
+let currentView    = localStorage.getItem('viewMode') === '2d' ? '2d' : '3d';   // '2d' | '3d'
+
+// 2D focus: the 2D view is laid out around one target person and only keeps
+// the `focusLimit` people closest to them in the relationship graph.
+let focusRootId = null;
+let focusLimit  = parseInt(localStorage.getItem('focusLimit')) || 120;
+// Classical ancestry chart (layered rows) instead of the force layout.
+let treeLayout  = localStorage.getItem('treeLayout') !== '0';
+let _lineageGen = null;   // id -> chart row, filled by computeLineageSet()
+let _treeBusY   = null;   // FAM id -> y of its child connectors' horizontal run
 let _birthYearRange = null;  // { min, max } saved for 3D stratification
 let _3dMousePos    = { x: 0, y: 0 };
 
@@ -353,6 +362,7 @@ function parseGEDCOM(raw) {
 function _fullRebuildGraph(opts = {}) {
   const warm = !!opts.warm;
   if (!warm) _nodeObjCache = new Map(); // dataset-level change: don't reuse positions from a possibly-unrelated previous dataset
+  if (focusRootId && !individuals.has(focusRootId)) focusRootId = null;  // focus person was deleted
   _setDirty(true);
   console.time('[rebuild] total');
   console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
@@ -370,13 +380,7 @@ function _fullRebuildGraph(opts = {}) {
   // run buildAndRunSimulation() a second time (doubles the sim cost).
   if (currentView === '3d' && graph3d) {
     console.time('[rebuild] 3d data push');
-    const gNodes = nodes.map(n => ({ id: n.id, type: n.type, data: n.data }));
-    const gLinks = links.map(l => ({
-      source: typeof l.source === 'object' ? l.source.id : l.source,
-      target: typeof l.target === 'object' ? l.target.id : l.target,
-      ltype: l.ltype,
-    }));
-    graph3d.graphData({ nodes: gNodes, links: gLinks });
+    _push3DData();
     apply3DPhysics();
     build3DTimeline();
     update3DNames();
@@ -387,6 +391,7 @@ function _fullRebuildGraph(opts = {}) {
   // doesn't visually clear the selection the user was looking at.
   applyHighlight();
   if (currentView === '3d' && selectedIndiId) _setOrbitTarget3D(selectedIndiId);
+  updateFocusUI();
   console.timeEnd('[rebuild] total');
 }
 
@@ -608,33 +613,554 @@ function isNodeVisible(n) {
   return n.type === 'INDI' ? isIndiVisible(n.id) : isFamVisible(n.id);
 }
 
-// ── Generation depth: iterates until every child is strictly deeper than its parents ──
-function computeGenerationDepths() {
-  if (_genDepthsCache) return _genDepthsCache;
-  const depth = new Map();
-  for (const [id] of individuals) depth.set(id, 0);
+// ── 2D focus: keep only the people closest to the focus person ──
+// BFS out from the focus person over the INDI↔FAM graph, adding whole
+// relationship rings in distance order until the budget runs out. What gets
+// dropped is therefore always the *least* related — a ring that only partly
+// fits is filled to the budget and the rest is cut.
+// Returns a Set of node ids (INDI + FAM), or null when focus is off.
+// The classical chart shows a *lineage*, not a neighbourhood: direct ancestors
+// above, descendants below, each with their spouses. The BFS ball below is
+// right for the force view but wrong here — it drags in cousins, in-laws and
+// their unrelated lines, every one of which becomes its own leaf column and
+// stretches the chart sideways without telling you anything about the subject.
+// Generations are taken whole, nearest first, until the budget runs out.
+function computeLineageSet() {
+  const people = new Set([focusRootId]);
+  const fams   = new Set();
+  const room   = () => people.size < focusLimit;
 
-  // Propagate: child depth = max(parent depths) + 1, repeat until stable
-  // Cap at individuals.size iterations to guard against cycles in malformed data
-  let changed = true;
-  let iters = 0;
-  const MAX_ITERS = individuals.size + 1;
-  while (changed && iters++ < MAX_ITERS) {
-    changed = false;
-    for (const [, fam] of families) {
-      const pd = Math.max(
-        ...[fam.husb, fam.wife].filter(Boolean).map(id => depth.get(id) ?? 0),
-        -1
-      );
-      if (pd < 0) continue;
-      for (const cid of fam.chil) {
-        if ((depth.get(cid) ?? 0) < pd + 1) {
-          depth.set(cid, pd + 1);
-          changed = true;
+  // The walk already knows everyone's generation: one step up is one row up,
+  // one step down is one row down, a spouse shares their partner's row. Taking
+  // the row straight from the walk keeps couples level and children exactly one
+  // row under their parents by construction. Deriving rows afterwards from
+  // ancestor depth cannot do that — spouses have unequal depths, and levelling
+  // them after the fact cascades into dozens of phantom generations.
+  _lineageGen = new Map([[focusRootId, 0]]);
+
+  // A couple is one unit on a chart — a spouse never counts as a generation.
+  const addSpouses = id => {
+    for (const famId of (individuals.get(id)?.fams || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      fams.add(famId);
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (sp && individuals.has(sp) && !people.has(sp) && room()) {
+        people.add(sp);
+        _lineageGen.set(sp, _lineageGen.get(id));
+      }
+    }
+  };
+  addSpouses(focusRootId);
+
+  let up = [focusRootId], down = [focusRootId];
+  while ((up.length || down.length) && room()) {
+    const nextUp = [];
+    for (const id of up) {
+      for (const famId of (individuals.get(id)?.famc || [])) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        fams.add(famId);
+        for (const p of [fam.husb, fam.wife]) {
+          if (!p || !individuals.has(p) || people.has(p)) continue;
+          if (!room()) break;
+          people.add(p);
+          _lineageGen.set(p, _lineageGen.get(id) - 1);
+          nextUp.push(p);
         }
       }
     }
+
+    const nextDown = [];
+    for (const id of down) {
+      for (const famId of (individuals.get(id)?.fams || [])) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        fams.add(famId);
+        for (const cid of fam.chil) {
+          if (!individuals.has(cid) || people.has(cid)) continue;
+          if (!room()) break;
+          people.add(cid);
+          _lineageGen.set(cid, _lineageGen.get(id) + 1);
+          nextDown.push(cid);
+          addSpouses(cid);
+        }
+      }
+    }
+
+    up = nextUp; down = nextDown;
   }
+
+  for (const famId of [...fams]) {
+    const fam = families.get(famId);
+    const kept = [fam.husb, fam.wife, ...fam.chil].filter(id => id && people.has(id));
+    if (kept.length < 2) fams.delete(famId);
+  }
+  return new Set([...people, ...fams]);
+}
+
+function computeFocusSet() {
+  if (!focusRootId || !individuals.has(focusRootId)) return null;
+  if (useTreeLayout()) return computeLineageSet();
+
+  const people = new Set([focusRootId]);
+  const fams   = new Set();
+  let frontier = [focusRootId];
+
+  while (frontier.length && people.size < focusLimit) {
+    // Collect the whole next ring before admitting any of it, then admit in
+    // kinship order: direct line (parents, spouse, children) ahead of siblings.
+    // Admitting family-by-family instead would let one large sibship eat the
+    // budget before that person's own spouse and children were even looked at.
+    const cand = new Map();   // id → priority (0 = direct line, 1 = sibling)
+    const offer = (id, prio) => {
+      if (!id || people.has(id) || !individuals.has(id)) return;
+      const seen = cand.get(id);
+      if (seen === undefined || prio < seen) cand.set(id, prio);
+    };
+
+    for (const pid of frontier) {
+      const indi = individuals.get(pid);
+      if (!indi) continue;
+      for (const famId of indi.fams) {          // own marriage: spouse + children
+        const fam = families.get(famId);
+        if (!fam) continue;
+        fams.add(famId);
+        offer(fam.husb === pid ? fam.wife : fam.husb, 0);
+        for (const cid of fam.chil) offer(cid, 0);
+      }
+      for (const famId of indi.famc) {          // parents' family: parents, then siblings
+        const fam = families.get(famId);
+        if (!fam) continue;
+        fams.add(famId);
+        offer(fam.husb, 0);
+        offer(fam.wife, 0);
+        for (const cid of fam.chil) offer(cid, 1);
+      }
+    }
+
+    const next = [];
+    for (const [id] of [...cand].sort((a, b) => a[1] - b[1])) {
+      if (people.size >= focusLimit) break;
+      people.add(id);
+      next.push(id);
+    }
+    frontier = next;
+  }
+
+  // A FAM node only earns its place if it still joins two kept people;
+  // otherwise it hangs off the edge of the cut as a dangling diamond.
+  for (const famId of [...fams]) {
+    const fam = families.get(famId);
+    const kept = [fam.husb, fam.wife, ...fam.chil].filter(id => id && people.has(id));
+    if (kept.length < 2) fams.delete(famId);
+  }
+
+  return new Set([...people, ...fams]);
+}
+
+// Best hub in the tree — most family memberships. A focused 2D view has to
+// start somewhere, and the most-connected person reveals the most of the tree.
+function _defaultFocusRoot() {
+  let best = null, bestN = -1;
+  for (const [id, indi] of individuals) {
+    const n = (indi.famc?.length || 0) + (indi.fams?.length || 0);
+    if (n > bestN) { bestN = n; best = id; }
+  }
+  return best;
+}
+
+// How many people the current focus is hiding (0 when focus is off/fits).
+function focusHiddenCount() {
+  if (!focusRootId) return 0;
+  return Math.max(0, individuals.size - nodes.filter(n => n.type === 'INDI').length);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLASSICAL TREE LAYOUT  (2D ancestry diagram)
+// ═══════════════════════════════════════════════════════════════
+// A deterministic layered chart instead of the force simulation:
+//   Y — generation row, straight from computeGenerationDepths(), so cousins
+//       and uncles line up with their peers rather than with their own
+//       recursion depth. The focus person's generation is row 0.
+//   X — tidy tree (Reingold–Tilford's first approximation): leaves take the
+//       next free column, every parent is centred over its children, spouses
+//       sit either side of that centre.
+// Genealogy is a graph, not a tree (remarriage, cousin marriage), so each
+// person is placed by whichever subtree reaches them first and memoised.
+// Non-overlap is enforced explicitly per row after the recursive pass, because
+// on real genealogy the recursion alone does not deliver it — see the overlap
+// removal step below.
+
+// Spacing is set by the name labels, not the dots: a column narrower than a
+// typical "Christian Siegenthaler" makes neighbouring names overlap at any
+// zoom that renders them readably.
+const TREE_ROW_H   = 150;   // vertical distance between generations
+const TREE_COL_W   = 180;   // horizontal slot width for one leaf
+const TREE_SPOUSE_DX = 155; // gap between the two halves of a couple
+const TREE_FAM_DY  = 0.42;  // FAM node sits this fraction of a row below its couple
+const TREE_FAM_GAP = 90;    // extra breathing room between two sibling blocks
+
+// Greedy interval colouring for the horizontal connector runs between two
+// rows. Sweeps left to right and gives each run the lowest lane whose previous
+// occupant has already finished, so runs that overlap in x are guaranteed
+// different lanes while only as many lanes are spent as the busiest point
+// needs. Mutates each item's `lane`; returns how many lanes were used.
+// Rotating through a fixed set of lanes instead puts two overlapping runs on
+// the same lane as soon as more than that many are in play.
+const TREE_BUS_CLEARANCE = 24;   // keep consecutive runs in a lane visibly apart
+
+function _assignBusLanes(items) {
+  items.sort((a, b) => a.x0 - b.x0);
+  const laneEnd = [];              // lane -> x where its last run finished
+  for (const it of items) {
+    let lane = laneEnd.findIndex(end => end + TREE_BUS_CLEARANCE < it.x0);
+    if (lane === -1) { lane = laneEnd.length; laneEnd.push(-Infinity); }
+    laneEnd[lane] = it.x1;
+    it.lane = lane;
+  }
+  return laneEnd.length;
+}
+
+function computeTreeLayout() {
+  if (!focusRootId || !individuals.has(focusRootId)) return null;
+
+  const visible = new Set(nodes.map(n => n.id));
+  if (!visible.has(focusRootId)) return null;
+
+  // Rows come from the lineage walk (see computeLineageSet), which assigns them
+  // by construction. Ancestor depth is the fallback for anyone it never reached.
+  const depths  = computeGenerationDepths();
+  const rootGen = depths.get(focusRootId) ?? 0;
+  const row     = id => _lineageGen?.get(id) ?? ((depths.get(id) ?? rootGen) - rootGen);
+  const genY    = id => row(id) * TREE_ROW_H;
+
+  const visFams = id => (individuals.get(id)?.fams || [])
+    .filter(f => visible.has(f) && families.has(f));
+  const visParents = id => {
+    const out = [];
+    for (const famId of (individuals.get(id)?.famc || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      for (const p of [fam.husb, fam.wife]) if (p && visible.has(p)) out.push(p);
+    }
+    return out;
+  };
+
+  const xs       = new Map();   // id -> x
+  const visiting = new Set();   // cycle guard for malformed / cousin-marriage data
+  let cursor     = 0;
+  const nextSlot = () => (cursor += TREE_COL_W) - TREE_COL_W;
+
+  // Place a person and everything descending from them; returns their x.
+  function place(id) {
+    if (xs.has(id)) return xs.get(id);
+    if (visiting.has(id)) return null;
+    visiting.add(id);
+
+    const kidXs = [];
+    for (const famId of visFams(id)) {
+      for (const cid of families.get(famId).chil) {
+        if (!visible.has(cid)) continue;
+        const cx = place(cid);
+        if (cx != null) kidXs.push(cx);
+      }
+    }
+    visiting.delete(id);
+
+    // Centre over the children's span, or take a fresh column as a leaf.
+    const centre = kidXs.length
+      ? (Math.min(...kidXs) + Math.max(...kidXs)) / 2
+      : nextSlot();
+
+    // A person with a visible spouse straddles that centre so the pair, not
+    // just one of them, sits above the children they share.
+    const spouses = [];
+    for (const famId of visFams(id)) {
+      const fam = families.get(famId);
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (sp && visible.has(sp) && !xs.has(sp) && sp !== id) spouses.push(sp);
+    }
+
+    xs.set(id, spouses.length ? centre - TREE_SPOUSE_DX / 2 : centre);
+    spouses.forEach((sp, i) => xs.set(sp, centre + TREE_SPOUSE_DX / 2 + i * TREE_SPOUSE_DX));
+    return xs.get(id);
+  }
+
+  // Start from the topmost people so whole branches lay out in one sweep;
+  // shallowest generation first, then oldest, for a stable left-to-right order.
+  const roots = [...visible]
+    .filter(id => individuals.has(id) && visParents(id).length === 0)
+    .sort((a, b) => (depths.get(a) ?? 0) - (depths.get(b) ?? 0) ||
+                    ((individuals.get(a).birthYear ?? 9999) - (individuals.get(b).birthYear ?? 9999)));
+  roots.forEach(place);
+  // Anyone left (reachable only through a cycle we broke) still needs a slot.
+  for (const id of visible) if (individuals.has(id)) place(id);
+
+  // ── Overlap removal ──
+  // The recursive pass cannot promise a clean chart on real genealogy: anyone
+  // reachable from two branches keeps the x the first branch gave them, and
+  // their parent then centres over children sitting somewhere else entirely,
+  // dropping whole subtrees on top of each other. Spouses were never allocated
+  // a column at all. So enforce the constraint that actually matters — within a
+  // row, no two people closer than one column — and alternate it with pulling
+  // parents back over their children so the result still reads as a tree.
+  const byRow = new Map();
+  for (const id of xs.keys()) {
+    const r = row(id);
+    if (!byRow.has(r)) byRow.set(r, []);
+    byRow.get(r).push(id);
+  }
+
+  // Sibling blocks: the children of one family, plus the spouses they marry in,
+  // belong together. Holding a gap between blocks is what keeps one family's
+  // child connectors from running through the middle of the family next door.
+  const block = new Map();
+  for (const id of visible) {
+    if (!families.has(id)) continue;
+    for (const cid of families.get(id).chil) {
+      if (xs.has(cid) && !block.has(cid)) block.set(cid, id);
+    }
+  }
+  for (const [cid, g] of [...block]) {
+    for (const famId of visFams(cid)) {
+      const fam = families.get(famId);
+      const sp = fam.husb === cid ? fam.wife : fam.husb;
+      if (sp && xs.has(sp) && !block.has(sp)) block.set(sp, g);
+    }
+  }
+  const blockOf = id => block.get(id) ?? ('solo:' + id);
+
+  // Push apart left to right, then slide the row back so its centre of mass
+  // stays put — without that every row creeps rightwards and the chart shears.
+  const separateRows = () => {
+    for (const ids of byRow.values()) {
+      ids.sort((a, b) => xs.get(a) - xs.get(b));
+      const before = ids.reduce((s, id) => s + xs.get(id), 0) / ids.length;
+      for (let i = 1; i < ids.length; i++) {
+        const gap = blockOf(ids[i - 1]) !== blockOf(ids[i]) ? TREE_FAM_GAP : 0;
+        const min = xs.get(ids[i - 1]) + TREE_COL_W + gap;
+        if (xs.get(ids[i]) < min) xs.set(ids[i], min);
+      }
+      const after = ids.reduce((s, id) => s + xs.get(id), 0) / ids.length;
+      const shift = before - after;
+      if (shift) for (const id of ids) xs.set(id, xs.get(id) + shift);
+    }
+  };
+
+  // Bottom-up: every parent wants to sit over the middle of their children.
+  const rowsDesc = [...byRow.keys()].sort((a, b) => b - a);
+  const recentreParents = () => {
+    for (const r of rowsDesc) {
+      for (const id of byRow.get(r)) {
+        const kidXs = [];
+        for (const famId of visFams(id)) {
+          for (const cid of families.get(famId).chil) {
+            if (xs.has(cid)) kidXs.push(xs.get(cid));
+          }
+        }
+        if (kidXs.length) xs.set(id, (Math.min(...kidXs) + Math.max(...kidXs)) / 2);
+      }
+    }
+  };
+
+  // Ends on a separation pass, so non-overlap holds whatever the recentring did.
+  separateRows();
+  for (let i = 0; i < 4; i++) { recentreParents(); separateRows(); }
+
+  const pos = new Map();
+  for (const [id, x] of xs) pos.set(id, { x, y: genY(id) });
+
+  // FAM nodes hang just below their couple, centred between them — that is
+  // what turns two spouse links plus N child links into the classic bracket.
+  for (const id of visible) {
+    if (!families.has(id)) continue;
+    const fam = families.get(id);
+    const par = [fam.husb, fam.wife].filter(p => p && pos.has(p));
+    const kids = fam.chil.filter(c => pos.has(c));
+    if (par.length) {
+      const px = par.reduce((s, p) => s + pos.get(p).x, 0) / par.length;
+      const py = Math.max(...par.map(p => pos.get(p).y));
+      pos.set(id, { x: px, y: py + TREE_ROW_H * TREE_FAM_DY });
+    } else if (kids.length) {
+      const cx = kids.reduce((s, c) => s + pos.get(c).x, 0) / kids.length;
+      const cy = Math.min(...kids.map(c => pos.get(c).y));
+      pos.set(id, { x: cx, y: cy - TREE_ROW_H * (1 - TREE_FAM_DY) });
+    }
+  }
+
+  // Every family's child connectors share one horizontal run. Left at the
+  // default mid-row height, all the families feeding one row put that run at
+  // the *same* y, so wherever their spans meet the lines lie on top of each
+  // other and you cannot tell which child belongs to which parents. Deal each
+  // family its own lane in the band between the FAM node and the child row,
+  // ordered left to right so neighbours never share a lane.
+  // This is interval-graph colouring, not a fixed set of lanes on rotation:
+  // cycling through N lanes still lands two overlapping families on the same
+  // one as soon as more than N of them are in play. Sweep left to right and
+  // give each family the lowest lane whose previous occupant has already
+  // finished, so overlapping runs are guaranteed different lanes and the chart
+  // only spends as many lanes as the busiest point actually needs.
+  _treeBusY = new Map();
+
+  // Spread the lanes across the band between the two rows.
+  const assignLanes = (items, yTop, yBottom) => {
+    const lanes = _assignBusLanes(items);
+    const band = yBottom - yTop;
+    for (const it of items) {
+      const t = lanes > 1 ? it.lane / (lanes - 1) : 0;
+      _treeBusY.set(it.key, yTop + band * (0.3 + 0.5 * t));
+    }
+  };
+
+  // Child connectors: one run per family, from the FAM marker out to its
+  // furthest child, in the band between the marker row and the children's row.
+  const famsByChildRow = new Map();
+  // Spouse connectors: one run per person→family, in the band above the marker.
+  // A remarriage reaches a long way sideways and would otherwise be drawn at
+  // the same height as every other couple in the row, straight through them.
+  const spousesByRow = new Map();
+
+  for (const id of visible) {
+    if (!families.has(id) || !pos.has(id)) continue;
+    const fam = families.get(id);
+    const famPos = pos.get(id);
+
+    const kids = fam.chil.filter(c => pos.has(c));
+    if (kids.length) {
+      const span = [famPos.x, ...kids.map(c => pos.get(c).x)];
+      const childY = Math.min(...kids.map(c => pos.get(c).y));
+      if (!famsByChildRow.has(childY)) famsByChildRow.set(childY, []);
+      famsByChildRow.get(childY).push({ key: id, x0: Math.min(...span), x1: Math.max(...span) });
+    }
+
+    for (const p of [fam.husb, fam.wife]) {
+      if (!p || !pos.has(p)) continue;
+      const py = pos.get(p).y;
+      if (!spousesByRow.has(py)) spousesByRow.set(py, []);
+      spousesByRow.get(py).push({
+        key: `${p}>${id}`,
+        x0: Math.min(pos.get(p).x, famPos.x),
+        x1: Math.max(pos.get(p).x, famPos.x),
+      });
+    }
+  }
+
+  for (const [childY, items] of famsByChildRow) {
+    assignLanes(items, childY - TREE_ROW_H * (1 - TREE_FAM_DY), childY);
+  }
+  for (const [rowY, items] of spousesByRow) {
+    assignLanes(items, rowY, rowY + TREE_ROW_H * TREE_FAM_DY);
+  }
+
+  // Centre the whole chart on the focus person. Read the offset out first —
+  // the focus person's own entry is in pos, so subtracting f.x live zeroes it
+  // on the first iteration and every later node then shifts by 0, stranding
+  // the subject alone at the origin on top of whoever was already there.
+  const f = pos.get(focusRootId);
+  if (f) {
+    const dx = f.x, dy = f.y;
+    for (const p of pos.values()) { p.x -= dx; p.y -= dy; }
+    for (const [id, y] of _treeBusY) _treeBusY.set(id, y - dy);
+  }
+
+  return pos;
+}
+
+// Tree layout only makes sense rooted at somebody, and only in 2D.
+function useTreeLayout() {
+  return treeLayout && currentView === '2d' && !!focusRootId;
+}
+
+// Pin every node to its computed slot and paint once — no simulation involved.
+function applyTreeLayout() {
+  const pos = computeTreeLayout();
+  if (!pos) return false;
+  if (simulation) simulation.stop();
+
+  // Without a running simulation nothing resolves link endpoints, so they are
+  // still the raw id strings computeActiveData() emitted. Do what forceLink
+  // would have done, or every path renders as M0,0L0,0.
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  for (const l of links) {
+    if (typeof l.source !== 'object') l.source = byId.get(l.source) ?? l.source;
+    if (typeof l.target !== 'object') l.target = byId.get(l.target) ?? l.target;
+  }
+
+  const svgEl = document.getElementById('graph-svg');
+  const cx = (svgEl?.clientWidth  || 1100) / 2;
+  const cy = (svgEl?.clientHeight || 700)  / 2;
+
+  for (const n of nodes) {
+    const p = pos.get(n.id);
+    if (!p) continue;
+    n.x = n.fx = cx + p.x;
+    n.y = n.fy = cy + p.y;
+    n._treePinned = true;
+  }
+  // Bus lanes come out of computeTreeLayout in chart space; move them into the
+  // same space as the nodes or _linkPath rejects every one of them as out of
+  // range and quietly falls back to the shared midpoint.
+  if (_treeBusY) for (const [id, y] of _treeBusY) _treeBusY.set(id, cy + y);
+
+  tick();
+  onSimEnd();
+  return true;
+}
+
+// Drop tree pins so the force layout can move nodes again.
+function releaseTreePins() {
+  for (const n of nodes) {
+    if (n._treePinned) { delete n.fx; delete n.fy; delete n._treePinned; }
+  }
+}
+
+function setTreeLayout(on) {
+  treeLayout = !!on;
+  localStorage.setItem('treeLayout', treeLayout ? '1' : '0');
+  // A classical chart is rooted at a person — pick one if none is set.
+  if (treeLayout && currentView === '2d' && !focusRootId) {
+    focusRootId = selectedIndiId || _defaultFocusRoot();
+  }
+  if (!treeLayout) releaseTreePins();
+  if (currentView === '2d') _refocus();
+  else updateFocusUI();
+}
+
+// ── Generation depth: iterates until every child is strictly deeper than its parents ──
+// Depth = longest chain of ancestors above a person, by memoised DFS.
+// The previous fixpoint relaxation only *bounded* cycles (at individuals.size
+// iterations) instead of breaking them, so data where somebody ends up their
+// own ancestor handed back depths in the thousands. That stayed invisible
+// while the only consumer was a force whose strength defaults to 0; the
+// classical tree layout reads these as row numbers, where it is fatal.
+// Here a back edge simply contributes nothing.
+function computeGenerationDepths() {
+  if (_genDepthsCache) return _genDepthsCache;
+  const depth = new Map();
+  const visiting = new Set();
+
+  const walk = id => {
+    const memo = depth.get(id);
+    if (memo !== undefined) return memo;
+    if (visiting.has(id)) return 0;      // cycle — treat as the top of its line
+    visiting.add(id);
+
+    let d = 0;
+    for (const famId of (individuals.get(id)?.famc || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      for (const p of [fam.husb, fam.wife]) {
+        if (p && individuals.has(p)) d = Math.max(d, walk(p) + 1);
+      }
+    }
+
+    visiting.delete(id);
+    depth.set(id, d);
+    return d;
+  };
+  for (const [id] of individuals) walk(id);
+
   _genDepthsCache = depth;
   return depth;
 }
@@ -800,6 +1326,10 @@ function linkWidth(l)       { return l.ltype === 'spouse' ? 1.5 : 1.0; }
 function computeActiveData() {
   const visIds = new Set(allNodes.filter(n => isNodeVisible(n)).map(n => n.id));
 
+  // Focus is a 2D-only concern — 3D has the room to show everything.
+  const focusIds = currentView === '2d' ? computeFocusSet() : null;
+  if (focusIds) for (const id of [...visIds]) if (!focusIds.has(id)) visIds.delete(id);
+
   if (showFamNodes) {
     // Bipartite mode: INDI + FAM nodes
     nodes = allNodes.filter(n => visIds.has(n.id));
@@ -864,19 +1394,15 @@ function applyFilter() {
   renderGraph();
   applyHighlight();          // re-apply any active ancestor/descendant highlight
   buildAndRunSimulation();   // restart physics on active nodes only
-  // Update 3D graph data if the 3D view is initialized
-  if (graph3d) {
-    const gNodes = nodes.map(n => ({ id: n.id, type: n.type, data: n.data }));
-    const gLinks = links.map(l => ({
-      source: typeof l.source === 'object' ? l.source.id : l.source,
-      target: typeof l.target === 'object' ? l.target.id : l.target,
-      ltype: l.ltype,
-    }));
-    graph3d.graphData({ nodes: gNodes, links: gLinks });
+  // Only push to 3D while 3D is on screen — in 2D, `nodes` is focus-filtered
+  // and would truncate the 3D graph. setView('3d') re-pushes on the way back.
+  if (graph3d && currentView === '3d') {
+    _push3DData();
     apply3DPhysics();  // calls applyTimelineYFix internally after graphData is set
     build3DTimeline();
     update3DNames();
   }
+  updateFocusUI();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -996,12 +1522,14 @@ function initSVG() {
 function renderGraph() {
   console.time('[rg] clear');       gMain.selectAll('*').remove();                    console.timeEnd('[rg] clear');
 
-  // Links layer
+  // Links layer — <path> so the tree layout can draw square elbows; the force
+  // layout just emits a straight two-point path through the same element.
   console.time('[rg] links');
   linkSel = gMain.append('g').attr('class', 'links-g')
-    .selectAll('line')
+    .selectAll('path')
     .data(links)
-    .join('line')
+    .join('path')
+    .attr('fill', 'none')
     .attr('stroke', d => linkColor(d))
     .attr('stroke-dasharray', d => linkDash(d))
     .attr('stroke-width', d => linkWidth(d))
@@ -1055,6 +1583,17 @@ function renderGraph() {
     .attr('stroke-width', 0.8)
     .attr('opacity', d => d.data.deceased ? 0.5 : 1);
 
+  // Ring the focus person — otherwise they're just another dot in the middle
+  // of the tree that was built around them.
+  indiSel.filter(d => d.id === focusRootId)
+    .append('circle')
+    .attr('class', 'focus-ring')
+    .attr('r', 15)
+    .attr('fill', 'none')
+    .attr('stroke', '#f2f2f2')
+    .attr('stroke-width', 1.5)
+    .attr('pointer-events', 'none');
+
   indiSel.filter(d => d.data.deceased)
     .append('text')
     .attr('dy', '4px')
@@ -1098,21 +1637,41 @@ function updateLabels() {
   const zoom = currentZoom;
   const hidden = zoom < 0.35;
   const brief  = zoom < 1.1;
+  // Labels live in the zoomed <g>, so a plain font-size would grow with the
+  // zoom — a focused view (few nodes, zoomed right in) turned into overlapping
+  // giant text. Dividing by the zoom keeps them a constant size on screen.
+  const fontSize = labelStyle.fontSize / zoom;
+  const dy       = -12 / zoom;
+
+  // In the chart a column is TREE_COL_W wide in graph units, but labels are a
+  // fixed size on screen — so at 0.5 zoom that column is only 90 screen px and
+  // "Katharina Baumgartner" runs straight over her neighbour. Budget characters
+  // by the screen width the column actually has. ~0.55em per character is close
+  // enough for a proportional font at these sizes.
+  const treeChars = useTreeLayout()
+    ? Math.max(6, Math.floor((TREE_COL_W * zoom) / (labelStyle.fontSize * 0.55)))
+    : null;
 
   labelSel.each(function(d) {
     // All visual properties as SVG presentation attributes — never CSS style(),
     // which would enter the CSS cascade and could override the fill attribute.
     this.setAttribute('fill',         labelColor(d));
     this.setAttribute('fill-opacity', labelStyle.textOpacity);
-    this.setAttribute('font-size',    labelStyle.fontSize + 'px');
+    this.setAttribute('font-size',    fontSize + 'px');
+    this.setAttribute('dy',           dy + 'px');
     this.setAttribute('font-weight',  labelStyle.fontWeight || 'normal');
 
     if (hidden) {
       this.style.display = 'none';
     } else {
       this.style.display = '';
-      const name = d.data.givn || d.data.displayName || '';
-      this.textContent = brief && name.length > 10 ? name.slice(0, 10) + '…' : d.data.displayName;
+      const full = d.data.displayName || '';
+      if (treeChars != null) {
+        this.textContent = full.length > treeChars ? full.slice(0, treeChars - 1) + '…' : full;
+      } else {
+        const name = d.data.givn || full;
+        this.textContent = brief && name.length > 10 ? name.slice(0, 10) + '…' : full;
+      }
     }
   });
 }
@@ -1124,6 +1683,12 @@ function updateLabels() {
 // a gentle reheat, instead of building a brand-new simulation at alpha=1.
 // Used for single edits so only the changed node(s) actually move.
 function buildAndRunSimulation(opts = {}) {
+  // Classical chart: positions are computed outright, so there is nothing to
+  // simulate. Everything below (forces, warm reheat, headless ticking) is the
+  // force layout's business only.
+  if (useTreeLayout() && applyTreeLayout()) return;
+  releaseTreePins();
+
   const warm = !!opts.warm && !!simulation;
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth  || 1100;
@@ -1179,6 +1744,20 @@ function buildAndRunSimulation(opts = {}) {
     }
   });
 
+  // Focus mode: pin the focus person dead centre so the layout literally
+  // grows around them instead of drifting off wherever the forces push it.
+  // The _focusPinned flag is what lets us release a *previous* focus person
+  // without touching pins the user made by dragging nodes.
+  nodes.forEach(n => {
+    if (n._focusPinned && n.id !== focusRootId) {
+      delete n.fx; delete n.fy; delete n._focusPinned;
+    }
+  });
+  if (focusRootId && currentView === '2d') {
+    const root = nodes.find(n => n.id === focusRootId);
+    if (root) { root.fx = W / 2; root.fy = H / 2; root._focusPinned = true; }
+  }
+
   const p = physicsParams;
 
   if (warm) {
@@ -1211,8 +1790,11 @@ function buildAndRunSimulation(opts = {}) {
 
   // For large graphs run the simulation headlessly (no per-tick DOM writes)
   // then paint once at the end — avoids hundreds of synchronous reflows.
+  // A focused set is small and wants to appear settled immediately — with the
+  // default alphaDecay the live path takes ~20s to converge, which is 20s
+  // before onSimEnd gets to frame it.
   const HEADLESS_THRESHOLD = 200;
-  if (nodes.length > HEADLESS_THRESHOLD) {
+  if (nodes.length > HEADLESS_THRESHOLD || (currentView === '2d' && focusRootId)) {
     // Use a faster decay for headless layout — generation-depth pre-positioning
     // already places nodes well, so we only need enough ticks to detangle.
     const HEADLESS_DECAY = 0.05;
@@ -1321,13 +1903,27 @@ function resetPhysics() {
   applyPhysicsParams();
 }
 
+// Square elbow: drop halfway, run across, drop again — the bracket shape every
+// printed family tree uses. Falls back to a straight segment within a row.
+function _linkPath(d) {
+  const sx = d.source.x ?? 0, sy = d.source.y ?? 0;
+  const tx = d.target.x ?? 0, ty = d.target.y ?? 0;
+  if (!useTreeLayout() || Math.abs(ty - sy) < 1) return `M${sx},${sy}L${tx},${ty}`;
+  // Child connectors share one lane per family — that shared run is the
+  // bracket. Spouse connectors get a lane each. Sharing a single height across
+  // families is what made neighbouring connectors merge into one another.
+  const sid = typeof d.source === 'object' ? d.source.id : d.source;
+  const tid = typeof d.target === 'object' ? d.target.id : d.target;
+  const bus = _treeBusY?.get(d.ltype === 'spouse' ? `${sid}>${tid}` : sid);
+  const my = bus != null && bus > Math.min(sy, ty) && bus < Math.max(sy, ty)
+    ? bus
+    : (sy + ty) / 2;
+  return `M${sx},${sy}V${my}H${tx}V${ty}`;
+}
+
 function tick() {
   if (!linkSel) return;
-  linkSel
-    .attr('x1', d => d.source.x)
-    .attr('y1', d => d.source.y)
-    .attr('x2', d => d.target.x)
-    .attr('y2', d => d.target.y);
+  linkSel.attr('d', _linkPath);
 
   nodeSel.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
   labelSel?.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
@@ -1338,9 +1934,43 @@ function onSimEnd() {
   if (_firstLoad) {
     _firstLoad = false;
     if (currentView === '2d') {
-      zoomToFit();
+      useTreeLayout() ? frameTreeChart() : zoomToFit();
     }
   }
+}
+
+// Minimum scale at which the 13px labels are still worth rendering.
+const TREE_MIN_LEGIBLE_SCALE = 0.5;
+
+// Framing for the classical chart. Fitting the whole thing is only right when
+// it fits legibly: one sibship of forty is genuinely wider than any screen, and
+// zoom-to-fit turns that into a row of dots. Below the legibility floor, open
+// on the subject at a readable scale and let the user pan — which is how a
+// printed chart is read anyway.
+function frameTreeChart() {
+  if (!nodes.length || !svgSel || !zoomBehavior) return;
+  const svgEl = document.getElementById('graph-svg');
+  const W = svgEl.clientWidth, H = svgEl.clientHeight;
+
+  const xs = nodes.map(n => n.x).filter(v => v != null);
+  const ys = nodes.map(n => n.y).filter(v => v != null);
+  if (!xs.length) return;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+
+  const fit = Math.min(W / ((x1 - x0) + 160), H / ((y1 - y0) + 160), 1.4);
+  const legible = fit >= TREE_MIN_LEGIBLE_SCALE;
+  const scale = legible ? fit : TREE_MIN_LEGIBLE_SCALE;
+
+  // Centre the whole chart when it fits, otherwise centre the subject.
+  const subject = nodes.find(n => n.id === focusRootId);
+  const cx = legible || !subject ? (x0 + x1) / 2 : subject.x;
+  const cy = legible || !subject ? (y0 + y1) / 2 : subject.y;
+
+  svgSel.transition().duration(600).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(W / 2 - scale * cx, H / 2 - scale * cy).scale(scale)
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2003,6 +2633,13 @@ function updateHLButtons() {
   btnD.textContent = '↓ ' + t('highlight.descendants');
   btnB.textContent = '↕ ' + t('highlight.both');
 
+  const btnF = document.getElementById('btn-focus-2d');
+  if (btnF) {
+    btnF.disabled = !hasSource;
+    btnF.textContent = '◎ ' + t('focus.btn');
+    btnF.classList.toggle('active', hasSource && focusRootId === selectedIndiId && currentView === '2d');
+  }
+
   // Apply counts and active class for current mode
   if (hlMode === 'ancestors') {
     btnA.textContent = `↑ ${t('highlight.ancestors')} (${_hlAncestorCount})`;
@@ -2160,6 +2797,7 @@ function _loadDatasetFile(file) {
   reader.onload = evt => {
     try {
       _nodeObjCache = new Map(); // fresh dataset: don't reuse positions from a possibly-unrelated previous one
+      focusRootId = null;        // and no focus person carries over
       const ext = file.name.toLowerCase();
       if (ext.endsWith('.json')) {
         const result = GEDCOMModule.importJSON(evt.target.result);
@@ -2201,15 +2839,16 @@ function _loadDatasetFile(file) {
       document.getElementById('center-person-btn').style.display = 'inline-block';
       document.getElementById('relation-tool-btn').style.display = 'inline-block';
       document.getElementById('relation-tool-btn').disabled = false;
+      document.getElementById('view-toggle-btn').disabled = false;
       window._gedcomFilename = file.name;
       _setDirty(false);
 
-      // Ensure we're in 3D view
-      currentView = '3d';
-      document.getElementById('graph-container').style.display = 'none';
-      document.getElementById('graph-3d-container').style.display = 'block';
-      initGraph3D();
-      setTimeout(autoSettle, 400); // let initGraph3D finish before annealing
+      updateViewToggleUI();
+      updateFocusUI();
+      if (currentView === '3d') {
+        initGraph3D();
+        setTimeout(autoSettle, 400); // let initGraph3D finish before annealing
+      }
 
     } catch (err) {
       document.getElementById('loading-overlay').style.display = 'none';
@@ -3604,36 +4243,170 @@ function renderPresetList() {
 // 3D VIEW
 // ═══════════════════════════════════════════════════════════════
 
-function toggleView() {
-  if (!nodes.length) return;
-  const btn = document.getElementById('view-toggle-btn');
-  const c2d = document.getElementById('graph-container');
-  const c3d = document.getElementById('graph-3d-container');
+function toggleView() { setView(currentView === '2d' ? '3d' : '2d'); }
 
-  if (currentView === '2d') {
-    currentView = '3d';
-    c2d.style.display = 'none';
-    c3d.style.display = 'block';
-    btn.textContent = '◨ ' + t('topbar.view2d'); btn.classList.add('active-3d');
-    document.getElementById('sort-time-3d-row').style.display = 'flex';
-    document.getElementById('time-spread-row').style.display = sortByTime3D ? 'block' : 'none';
-    document.getElementById('show-names-3d-row').style.display = 'flex';
-    if (!graph3d) initGraph3D();
-    else { graph3d.resumeAnimation(); resize3D(); }
-    // Orbit around selected person, or graph centroid
+// Single entry point for 2D↔3D. Both views read the same `nodes`/`links`, but
+// the 2D one is focus-filtered, so switching has to recompute the active data
+// and re-run whichever layout is now on screen.
+function setView(view) {
+  if (view !== '2d' && view !== '3d') return;
+  if (!allNodes.length) return;
+
+  const changed = view !== currentView;
+  currentView = view;
+  localStorage.setItem('viewMode', view);
+  updateViewToggleUI();               // swaps containers + 3D-only sidebar rows
+
+  if (view === '3d') {
+    if (changed) computeActiveData();   // focus filter no longer applies — restore full set
+    if (!graph3d) {
+      initGraph3D();
+    } else {
+      graph3d.resumeAnimation();
+      resize3D();
+      if (changed) {
+        _push3DData(); apply3DPhysics(); build3DTimeline(); update3DNames();
+        // Re-pushing restarts the 3D layout, so the old camera no longer frames
+        // anything — refit once it has had a moment to spread out.
+        setTimeout(() => graph3d?.zoomToFit(700, 80), 900);
+      }
+    }
     setTimeout(() => {
       if (selectedIndiId) _setOrbitTarget3D(selectedIndiId);
       else if (_orbitControls3d) _orbitControls3d.target.copy(_graphCentroid3D());
     }, 200);
   } else {
-    currentView = '2d';
-    c3d.style.display = 'none';
-    c2d.style.display = 'block';
-    btn.textContent = '◧ ' + t('topbar.view3d'); btn.classList.remove('active-3d');
-    document.getElementById('sort-time-3d-row').style.display = 'none';
-    document.getElementById('time-spread-row').style.display = 'none';
-    document.getElementById('show-names-3d-row').style.display = 'none';
     if (graph3d) graph3d.pauseAnimation();
+
+    // A 2D view of a big tree with no focus is an unreadable dust cloud, so
+    // never enter one: fall back to the selected person, else the best hub.
+    // Trees that fit inside the budget need no focus at all.
+    if (!focusRootId && individuals.size > focusLimit) {
+      focusRootId = selectedIndiId || _defaultFocusRoot();
+    }
+
+    if (changed) {
+      computeActiveData();
+      if (!svgSel) initSVG();
+      renderGraph();
+      applyHighlight();
+      _firstLoad = true;              // makes onSimEnd auto-fit the new layout
+      buildAndRunSimulation();
+    }
+  }
+
+  updateFocusUI();
+  updateHLButtons();
+}
+
+// These labels are built in JS, so data-i18n can't retranslate them.
+window._onLanguageChanged = () => {
+  updateViewToggleUI();
+  updateFocusUI();
+  updateHLButtons();
+};
+
+function _push3DData() {
+  if (!graph3d) return;
+  graph3d.graphData({
+    nodes: nodes.map(n => ({ id: n.id, type: n.type, data: n.data })),
+    links: links.map(l => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      ltype:  l.ltype,
+    })),
+  });
+}
+
+// Single place that makes the DOM agree with `currentView`: containers,
+// topbar button label, and the sidebar rows that only mean something in 3D.
+function updateViewToggleUI() {
+  const in3d = currentView === '3d';
+
+  const c2d = document.getElementById('graph-container');
+  const c3d = document.getElementById('graph-3d-container');
+  if (c2d) c2d.style.display = in3d ? 'none' : 'block';
+  if (c3d) c3d.style.display = in3d ? 'block' : 'none';
+
+  const rows = {
+    'sort-time-3d-row':  'flex',
+    'show-names-3d-row': 'flex',
+    'time-spread-row':   sortByTime3D ? 'block' : 'none',
+  };
+  for (const [id, shown] of Object.entries(rows)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = in3d ? shown : 'none';
+  }
+
+  const btn = document.getElementById('view-toggle-btn');
+  if (btn) {
+    // Label names the view you'd switch *to*.
+    btn.innerHTML = in3d ? '◧ <span>' + t('topbar.view2d') + '</span>'
+                         : '◨ <span>' + t('topbar.view3d') + '</span>';
+    btn.classList.toggle('active-3d', in3d);
+    btn.title = t('topbar.viewTitle');
+  }
+}
+
+// ── 2D focus controls ──
+
+// Rebuild the 2D view after a focus change. `_firstLoad` is the existing
+// "zoom to fit once the simulation settles" flag — a new focus set is a new
+// layout, so it deserves the same framing a freshly loaded file gets.
+function _refocus() {
+  _firstLoad = true;
+  applyFilter();
+  updateFocusUI();
+  updateHLButtons();
+}
+
+// Focus the 2D view on a person, switching to 2D if needed.
+function focusOnPerson(id) {
+  if (!id || !individuals.has(id)) return;
+  focusRootId = id;
+  if (currentView !== '2d') { setView('2d'); return; }   // setView rebuilds with the new focus
+  _refocus();
+}
+
+function clearFocus() {
+  if (!focusRootId) return;
+  focusRootId = null;
+  if (currentView === '2d') _refocus();
+  else { updateFocusUI(); updateHLButtons(); }
+}
+
+function setFocusLimit(v) {
+  focusLimit = Math.max(10, parseInt(v) || 120);
+  localStorage.setItem('focusLimit', focusLimit);
+  const out = document.getElementById('focus-limit-val');
+  if (out) out.textContent = focusLimit;
+  if (currentView === '2d' && focusRootId) _refocus();
+}
+
+function updateFocusUI() {
+  const panel = document.getElementById('focus-panel');
+  if (!panel) return;
+  panel.style.display = currentView === '3d' ? 'none' : '';
+
+  const nameEl   = document.getElementById('focus-current-name');
+  const hiddenEl = document.getElementById('focus-hidden-info');
+  const clearBtn = document.getElementById('focus-clear-btn');
+  if (!nameEl) return;
+
+  if (focusRootId && individuals.has(focusRootId)) {
+    nameEl.textContent = individuals.get(focusRootId).displayName || focusRootId;
+    nameEl.classList.remove('focus-none');
+    if (clearBtn) clearBtn.style.display = '';
+    const hidden = focusHiddenCount();
+    if (hiddenEl) {
+      hiddenEl.textContent = hidden ? t('focus.hidden', { n: hidden }) : t('focus.allShown');
+      hiddenEl.style.display = '';
+    }
+  } else {
+    nameEl.textContent = t('focus.none');
+    nameEl.classList.add('focus-none');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (hiddenEl) { hiddenEl.textContent = ''; hiddenEl.style.display = 'none'; }
   }
 }
 
@@ -4479,6 +5252,8 @@ document.addEventListener('keydown', e => {
     case 'p': case 'P': centerOnPerson();         break;
     case 'e': case 'E': startEdit();              break;
     case 'r': case 'R': resetHighlight();         break;
+    case 'v': case 'V': toggleView();             break;
+    case 'g': case 'G': if (selectedIndiId) focusOnPerson(selectedIndiId); break;
     case 'Escape':      closeDetailPanel();       break;
     case '+': case '=': if (currentView === '2d' && simulation) reheatSimulation(); break;
   }
@@ -4522,6 +5297,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Touch support
   _initPanelSwipe();
   _initTouchDragGuard();
+
+  // View + focus controls
+  const fls = document.getElementById('focus-limit-slider');
+  if (fls) {
+    fls.value = focusLimit;
+    document.getElementById('focus-limit-val').textContent = focusLimit;
+  }
+  const tlt = document.getElementById('tree-layout-toggle');
+  if (tlt) tlt.checked = treeLayout;
+  updateViewToggleUI();
+  updateFocusUI();
 
   for (const { sid, vid, key, fmt } of SLIDER_MAP) {
     const el = document.getElementById(sid);
