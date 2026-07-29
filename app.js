@@ -844,7 +844,11 @@ function computeLineageSet() {
 
 function computeFocusSet() {
   if (!focusRootId || !individuals.has(focusRootId)) return null;
-  if (useTreeLayout()) return computeLineageSet();
+  // Which relatives count is the reader's choice, not the renderer's: keyed to
+  // the chart setting rather than to whichever view happens to be on screen, so
+  // switching between 2D and 3D shows the same people. Keyed to the view, the
+  // two disagreed about who a focus even meant.
+  if (treeLayout) return computeLineageSet();
 
   const people = new Set([focusRootId]);
   const fams   = new Set();
@@ -958,6 +962,7 @@ const TREE_GROUP_GAP = 40;   // extra clearance between one family's children an
 const TREE_BUS_UP    = 48;   // sibling bar sits this far above the children's row
 const TREE_LANE_DY   = 20;   // and stacks up by this much when families must share a span
 const TREE_LANE_MIN  = 7;    // ...never less than this, however many lanes a row needs
+const TREE_MARR_STEP = 13;   // stacking step for a person's further marriages
 const TREE_CHIP_DX   = 22;   // "+N" chip offset from the junction it belongs to
 const TREE_CHIP_DY   = 13;
 const TREE_ORDER_PASSES = 6; // crossing-reduction sweeps
@@ -985,12 +990,16 @@ function _assignBusLanes(items) {
 }
 
 function computeTreeLayout() {
-  if (!focusRootId || !individuals.has(focusRootId)) return null;
-
   const visible = new Set(nodes.map(n => n.id));
-  if (!visible.has(focusRootId)) return null;
-
   const people = [...visible].filter(id => individuals.has(id));
+  if (!people.length) return null;
+
+  // The chart is built around somebody, but that somebody need not be a chosen
+  // subject — with no focus set it is whoever the chart would naturally read
+  // from. `subject` only decides ordering, balance and centring; everything
+  // about *who appears* was already settled by the filter.
+  const subject = (focusRootId && visible.has(focusRootId)) ? focusRootId
+                : (visible.has(treeAnchorId()) ? treeAnchorId() : people[0]);
   if (!people.length) return null;
 
   // Families that join at least two people on screen. Tested by membership
@@ -1021,7 +1030,7 @@ function computeTreeLayout() {
   // are the one thing the chart has to get right, so every overlap the layout
   // has to resolve is resolved sideways instead.
   const depths  = computeGenerationDepths();
-  const rootGen = depths.get(focusRootId) ?? 0;
+  const rootGen = depths.get(subject) ?? 0;
   const gen = new Map();
   for (const id of people) {
     gen.set(id, _lineageGen?.get(id) ?? ((depths.get(id) ?? rootGen) - rootGen));
@@ -1082,8 +1091,8 @@ function computeTreeLayout() {
   // chip on each is a row of markers saying nothing. What is worth marking is
   // where the *line* stops: collateral branches run back into the same
   // ancestors, so chipping those once, up on the line, covers them all.
-  const bloodLine = new Set([focusRootId]);
-  for (let frontier = [focusRootId]; frontier.length;) {
+  const bloodLine = new Set([subject]);
+  for (let frontier = [subject]; frontier.length;) {
     const next = [];
     for (const id of frontier) {
       for (const famId of (individuals.get(id)?.famc || [])) {
@@ -1195,22 +1204,22 @@ function computeTreeLayout() {
     for (const c of v.kids) if (c !== x) emitDesc(c);
   };
 
-  const subjFam = famcOf(focusRootId);
+  const subjFam = famcOf(subject);
   if (subjFam) {
     seenFam.add(subjFam);
     const v = visFam.get(subjFam);
     const fa = v.par.find(p => p === v.fam.husb) ?? null;
     const mo = v.par.find(p => p === v.fam.wife) ?? null;
-    const sibs = v.kids.filter(c => c !== focusRootId);
+    const sibs = v.kids.filter(c => c !== subject);
     const half = Math.floor(sibs.length / 2);
     if (fa) emitSide(fa);
     push(fa); push(subjFam); push(mo);
     sibs.slice(0, half).forEach(emitDesc);
-    emitDesc(focusRootId);
+    emitDesc(subject);
     sibs.slice(half).forEach(emitDesc);
     if (mo) emitSide(mo);
   } else {
-    emitDesc(focusRootId);
+    emitDesc(subject);
   }
 
   // Anyone the walk never reached — an unconnected fragment of the focus set.
@@ -1426,8 +1435,28 @@ function computeTreeLayout() {
 
   const pos = new Map();
   for (const id of people)    pos.set(id, { x: xs.get(id), y: gen.get(id) * TREE_ROW_H });
+  // A person can sit beside at most two of their spouses. A third marriage has
+  // to reach past somebody, and its marker then lands under an unrelated box —
+  // where it reads as *that* person's marriage, and its bar runs along the same
+  // line as everyone else's. Give each marriage that has to reach a level of
+  // its own, so they stack under the couple the way a drawn chart does, one bar
+  // clear of the next. A marriage whose partners are already side by side needs
+  // no level and stays where it was.
+  // Only as many levels as fit between the first marker and the sibling bar
+  // hanging below it — past that they would collide with the children.
+  const maxLevel = Math.max(0, Math.floor(
+    (TREE_ROW_H * (1 - TREE_FAM_DY) - TREE_BUS_UP - 14) / TREE_MARR_STEP));
+  const marrLevel = fid => {
+    const par = visFam.get(fid).par;
+    if (par.length < 2) return 0;
+    const reach = Math.round(Math.abs(xs.get(par[0]) - xs.get(par[1])) / TREE_COL_W) - 1;
+    return Math.max(0, Math.min(reach, maxLevel));
+  };
   for (const [fid] of visFam) {
-    pos.set(fid, { x: xs.get(fid), y: (famGen.get(fid) + TREE_FAM_DY) * TREE_ROW_H });
+    pos.set(fid, {
+      x: xs.get(fid),
+      y: (famGen.get(fid) + TREE_FAM_DY) * TREE_ROW_H + marrLevel(fid) * TREE_MARR_STEP,
+    });
   }
 
 
@@ -1472,8 +1501,7 @@ function computeTreeLayout() {
       // step per lane the top ones all hit that ceiling and collapse back onto
       // one height, overlapping after all. Share out the band that is actually
       // available instead, so every lane in a row keeps a height of its own.
-      const ceiling = Math.max(...it.parents.map(p => pos.get(p).y), childY - TREE_ROW_H)
-                      + TREE_ROW_H * TREE_FAM_DY + 14;
+      const ceiling = pos.get(it.key).y + 14;
       const bottom = childY - TREE_BUS_UP;
       // Give every lane at least a few pixels of its own even where the band is
       // too shallow to hold them all. A bar drawn a little high still reads;
@@ -1586,7 +1614,7 @@ function computeTreeLayout() {
   // the focus person's own entry is in pos, so subtracting f.x live zeroes it
   // on the first iteration and every later node then shifts by 0, stranding
   // the subject alone at the origin on top of whoever was already there.
-  const f = pos.get(focusRootId);
+  const f = pos.get(subject);
   if (f) {
     const dx = f.x, dy = f.y;
     for (const p of pos.values()) { p.x -= dx; p.y -= dy; }
@@ -1599,8 +1627,20 @@ function computeTreeLayout() {
 }
 
 // Tree layout only makes sense rooted at somebody, and only in 2D.
+// The chart is the 2D layout, focused or not. Without a subject it simply draws
+// everyone who is on screen; the tree is how this view reads, and falling back
+// to the force layout the moment focus is cleared made it look like a different
+// application.
 function useTreeLayout() {
-  return treeLayout && currentView === '2d' && !!focusRootId;
+  return treeLayout && currentView === '2d';
+}
+
+// Who the chart is built around. The subject when there is one, otherwise the
+// most-connected person, which is the reading a chart of everybody wants — it
+// only decides ordering and centring, never who is shown.
+function treeAnchorId() {
+  if (focusRootId && individuals.has(focusRootId)) return focusRootId;
+  return _defaultFocusRoot();
 }
 
 // Pin every node to its computed slot and paint once — no simulation involved.
@@ -1712,13 +1752,11 @@ function revealHidden(ids) {
 function setTreeLayout(on) {
   treeLayout = !!on;
   localStorage.setItem('treeLayout', treeLayout ? '1' : '0');
-  // A classical chart is rooted at a person — pick one if none is set.
-  if (treeLayout && currentView === '2d' && !focusRootId) {
-    focusRootId = selectedIndiId || _defaultFocusRoot();
-  }
+  // The chart no longer needs a subject to be picked for it — without one it
+  // draws everybody, anchored on the most-connected person. It also decides
+  // which relatives a focus means, so both views rebuild.
   if (!treeLayout) releaseTreePins();
-  if (currentView === '2d') _refocus();
-  else updateFocusUI();
+  _refocus();
 }
 
 // ── Generation depth: iterates until every child is strictly deeper than its parents ──
@@ -1920,8 +1958,11 @@ function linkWidth(l)       { return l.ltype === 'spouse' ? 1.5 : 1.0; }
 function computeActiveData() {
   const visIds = new Set(allNodes.filter(n => isNodeVisible(n)).map(n => n.id));
 
-  // Focus is a 2D-only concern — 3D has the room to show everything.
-  const focusIds = currentView === '2d' ? computeFocusSet() : null;
+  // Focus is a filter on the data, not a property of the renderer: pick a
+  // person and both views show that person's relatives. It used to be applied
+  // only in 2D, so switching to 3D silently threw the selection away and
+  // returned the whole file — the one thing a filter must not do.
+  const focusIds = computeFocusSet();
   if (focusIds) for (const id of [...visIds]) if (!focusIds.has(id)) visIds.delete(id);
 
   if (showFamNodes) {
@@ -1988,8 +2029,8 @@ function applyFilter() {
   renderGraph();
   applyHighlight();          // re-apply any active ancestor/descendant highlight
   buildAndRunSimulation();   // restart physics on active nodes only
-  // Only push to 3D while 3D is on screen — in 2D, `nodes` is focus-filtered
-  // and would truncate the 3D graph. setView('3d') re-pushes on the way back.
+  // Both views draw the same filtered set now, so this is only about not paying
+  // for a push while 3D is off screen; setView('3d') re-pushes on the way back.
   if (graph3d && currentView === '3d') {
     _push3DData();
     apply3DPhysics();  // calls applyTimelineYFix internally after graphData is set
@@ -3307,7 +3348,7 @@ function updateHLButtons() {
   if (btnF) {
     btnF.disabled = !hasSource;
     btnF.textContent = '◎ ' + t('focus.btn');
-    btnF.classList.toggle('active', hasSource && focusRootId === selectedIndiId && currentView === '2d');
+    btnF.classList.toggle('active', hasSource && focusRootId === selectedIndiId);
   }
 
   // Apply counts and active class for current mode
@@ -5031,11 +5072,12 @@ function _refocus() {
 }
 
 // Focus the 2D view on a person, switching to 2D if needed.
+// Focusing is filtering, so it applies wherever you are: no view switch, the
+// view you are in narrows to that person's relatives.
 function focusOnPerson(id) {
   if (!id || !individuals.has(id)) return;
   if (id !== focusRootId) _revealed.clear();   // expansions belonged to the old chart
   focusRootId = id;
-  if (currentView !== '2d') { setView('2d'); return; }   // setView rebuilds with the new focus
   _refocus();
 }
 
@@ -5043,8 +5085,7 @@ function clearFocus() {
   if (!focusRootId) return;
   focusRootId = null;
   _revealed.clear();
-  if (currentView === '2d') _refocus();
-  else { updateFocusUI(); updateHLButtons(); }
+  _refocus();
 }
 
 function setCousinDegree(v) {
@@ -5053,7 +5094,7 @@ function setCousinDegree(v) {
   localStorage.setItem('cousinDegree', cousinDegree);
   const out = document.getElementById('cousin-degree-val');
   if (out) out.textContent = t('focus.cousinLevel' + cousinDegree);
-  if (currentView === '2d' && focusRootId) _refocus();
+  if (focusRootId) _refocus();
 }
 
 function setFocusLimit(v) {
@@ -5061,13 +5102,16 @@ function setFocusLimit(v) {
   localStorage.setItem('focusLimit', focusLimit);
   const out = document.getElementById('focus-limit-val');
   if (out) out.textContent = focusLimit;
-  if (currentView === '2d' && focusRootId) _refocus();
+  if (focusRootId) _refocus();
 }
 
 function updateFocusUI() {
   const panel = document.getElementById('focus-panel');
   if (!panel) return;
-  panel.style.display = currentView === '3d' ? 'none' : '';
+  // The panel starts hidden in the markup and used to be revealed by the same
+  // line that hid it again in 3D. It belongs to both views now, so it is simply
+  // shown once there is a tree to focus within.
+  panel.style.display = individuals.size ? '' : 'none';
 
   const nameEl   = document.getElementById('focus-current-name');
   const hiddenEl = document.getElementById('focus-hidden-info');
@@ -7120,12 +7164,17 @@ function _tiApplyActions(actions) {
     if (action.status !== 'approved' || action.kind !== 'update') continue;
     const indi = individuals.get(action.existingId);
     if (!indi) continue;
-    if (action.fields['Birth Date'])  indi.birth.date = action.fields['Birth Date'];
-    if (action.fields['Birth Place']) indi.birth.plac = action.fields['Birth Place'];
-    if (action.fields['Death Date']) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
-    if (action.fields['Death Place']) indi.death.plac = action.fields['Death Place'];
-    if (action.fields['Sex'] && (!indi.sex || indi.sex === 'U')) indi.sex = action.fields['Sex'];
-    if (action.fields['Notes']) {
+    // Only the fields the reader left switched on. Where the card offered a
+    // choice between what the import says and what the tree already holds,
+    // this is that choice; an older card without the map keeps the previous
+    // behaviour of filling anything non-empty.
+    const use = f => action.fieldApply ? !!action.fieldApply[f] : !!action.fields[f];
+    if (use('Birth Date'))  indi.birth.date = action.fields['Birth Date'];
+    if (use('Birth Place')) indi.birth.plac = action.fields['Birth Place'];
+    if (use('Death Date')) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
+    if (use('Death Place')) indi.death.plac = action.fields['Death Place'];
+    if (use('Sex')) indi.sex = action.fields['Sex'];
+    if (use('Notes')) {
       indi.note = indi.note ? indi.note + '; ' + action.fields['Notes'] : action.fields['Notes'];
     }
     report.push({ type:'update', msg:`${indi.name} — updated` });
@@ -7893,6 +7942,26 @@ function _imLinkedBadge(actionId, fieldKey, link, label) {
   </div>`;
 }
 
+// Two sources disagree about one field. Show both, say which one will be
+// written, and make swapping a single click.
+function _imConflictRow(action, field, displayLabel, incoming, existing) {
+  const useImported = !!action.fieldApply[field];
+  const pick = (active, value, tag) => `
+    <div class="import-conflict-side${active ? ' import-conflict-side--on' : ''}">
+      <span class="import-conflict-tag">${tag}</span>
+      <span class="import-conflict-val">${escHtml(value)}</span>
+    </div>`;
+  return `<div class="import-field-row import-field-row--conflict">
+    <label class="import-field-label">${escHtml(displayLabel)}</label>
+    <div class="import-conflict" role="group"
+         onclick="_imToggleFieldApply('${action.id}','${escJs(field)}')"
+         title="${t('import.conflictTitle')}">
+      ${pick(!useImported, existing, t('import.inTree'))}
+      ${pick(useImported, incoming, t('import.fromImport'))}
+    </div>
+  </div>`;
+}
+
 function _imPersonInputRow(action, label, fieldKey, val) {
   const fid = 'if-' + action.id + '-' + fieldKey.replace(/[\s:]/g,'_');
   const dropId = _imDropId(action.id, fieldKey);
@@ -7988,6 +8057,26 @@ function _renderImportCard(action) {
 
     // Person field with autocomplete input
     if (isPersonField) return _imPersonInputRow(action, displayLabel, label, val);
+
+    // On a linked card, a field the tree already answers is a decision, not an
+    // input: show both answers and let the reader pick. Silently dropping the
+    // imported value — which is what this did — hides the disagreement and the
+    // choice along with it.
+    if (action.existingId && action.fieldApply && _IM_UPDATE_FIELDS.includes(label)) {
+      const indi = individuals.get(action.existingId);
+      const existing = indi ? _imExistingValue(indi, label).trim() : '';
+      const incoming = (val || '').trim();
+      if (existing && incoming && existing !== incoming) {
+        return _imConflictRow(action, label, displayLabel, incoming, existing);
+      }
+      if (existing && !incoming) {
+        return `<div class="import-field-row">
+          <label class="import-field-label">${escHtml(displayLabel)}</label>
+          <div class="import-field-kept">${escHtml(existing)}
+            <span class="import-field-kept-tag">${t('import.inTree')}</span></div>
+        </div>`;
+      }
+    }
 
     // Regular non-person field
     const wideClass = ''; // children handled above
@@ -8403,25 +8492,7 @@ function selectMatchCandidate(type, targetId) {
   if (!action) return;
   
   if (type === 'existing') {
-    // Link to existing GEDCOM person
-    const indi = individuals.get(targetId);
-    if (!indi) return;
-    
-    // Convert to update action
-    action.kind = 'update';
-    action.existingId = targetId;
-    action.status = 'approved';
-    
-    // Determine what fields to update
-    const missing = {};
-    if (!indi.birth?.date && action.fields['Birth Date']) missing['Birth Date'] = action.fields['Birth Date'];
-    if (!indi.birth?.plac && action.fields['Birth Place']) missing['Birth Place'] = action.fields['Birth Place'];
-    if (!indi.death?.date && action.fields['Death Date']) missing['Death Date'] = action.fields['Death Date'];
-    if (!indi.death?.plac && action.fields['Death Place']) missing['Death Place'] = action.fields['Death Place'];
-    if ((!indi.sex || indi.sex === 'U') && action.fields['Sex']) missing['Sex'] = action.fields['Sex'];
-    
-    // Keep name but update fields
-    action.fields = Object.assign({ 'Name': action.fields['Name'] }, missing);
+    if (!_imLinkExisting(action, targetId)) return;
     
   } else if (type === 'pending') {
     // Link to another pending action
@@ -8571,19 +8642,7 @@ function _imPersonSelect(actionId, fieldKey, type, targetId) {
 
   if (fieldKey === 'Name') {
     if (type !== 'existing') return;
-    const indi = individuals.get(targetId);
-    if (!indi) return;
-    action.kind       = 'update';
-    action.existingId = targetId;
-    action.status     = 'approved';
-    const missing = {};
-    if (!indi.birth?.date  && action.fields['Birth Date'])  missing['Birth Date']  = action.fields['Birth Date'];
-    if (!indi.birth?.plac  && action.fields['Birth Place']) missing['Birth Place'] = action.fields['Birth Place'];
-    if (!indi.death?.date  && action.fields['Death Date'])  missing['Death Date']  = action.fields['Death Date'];
-    if (!indi.death?.plac  && action.fields['Death Place']) missing['Death Place'] = action.fields['Death Place'];
-    if ((!indi.sex||indi.sex==='U') && action.fields['Sex']) missing['Sex'] = action.fields['Sex'];
-    if (action.fields['Notes'] && !(indi.note||'').includes(action.fields['Notes'])) missing['Notes'] = action.fields['Notes'];
-    action.fields = Object.assign({ 'Name': indi.name }, missing);
+    if (!_imLinkExisting(action, targetId)) return;
   } else if (fieldKey.startsWith('Children:')) {
     action.fieldLinks[fieldKey] = { type, id: targetId };
     const idx = parseInt(fieldKey.split(':')[1]);
@@ -8610,25 +8669,95 @@ function _imFieldUnlink(actionId, fieldKey) {
   _renderImportSummary();
 }
 
+// ── Linking an import card to somebody already in the tree ──
+// The fields an update can write, and where each one lives on a person.
+const _IM_UPDATE_FIELDS = ['Birth Date', 'Birth Place', 'Death Date', 'Death Place', 'Sex', 'Notes'];
+
+function _imExistingValue(indi, field) {
+  switch (field) {
+    case 'Birth Date':  return indi.birth?.date || '';
+    case 'Birth Place': return indi.birth?.plac || '';
+    case 'Death Date':  return indi.death?.date || '';
+    case 'Death Place': return indi.death?.plac || '';
+    case 'Sex':         return (indi.sex && indi.sex !== 'U') ? indi.sex : '';
+    case 'Notes':       return indi.note || '';
+    default:            return '';
+  }
+}
+
+// One way in and one way out, so the two are exact opposites.
+//
+// Linking used to throw away every imported value the tree already had, which
+// meant a disagreement between the two sources simply vanished — the reader was
+// never shown that the import said 1901 where the tree says 1902, let alone
+// asked which to keep. And unlinking rebuilt the card from the original parse,
+// so anything typed by hand before linking was lost. Both of those make a link
+// something you avoid touching rather than something you try.
+function _imLinkExisting(action, targetId) {
+  const indi = individuals.get(targetId);
+  if (!indi) return false;
+
+  // Remember the card as it stands — including manual edits — so unlink is
+  // genuinely an undo rather than a re-parse.
+  if (!action._preLink) {
+    action._preLink = { kind: action.kind, status: action.status, fields: { ...action.fields } };
+  }
+  action.kind       = 'update';
+  action.existingId = targetId;
+  action.status     = 'approved';
+  action.fields     = { ...action.fields, 'Name': indi.name };
+
+  // Keep every incoming value so the card can show what the two sources say.
+  // Fill a gap by default; never overwrite something already recorded without
+  // being asked — the tree is the thing being edited, the import is a proposal.
+  action.fieldApply = {};
+  for (const f of _IM_UPDATE_FIELDS) {
+    const incoming = (action.fields[f] || '').trim();
+    const existing = _imExistingValue(indi, f).trim();
+    action.fieldApply[f] = !!incoming && !existing;
+  }
+  return true;
+}
+
+// Which side of a disagreement wins, for one field.
+function _imToggleFieldApply(actionId, field) {
+  const action = _importActions.find(a => a.id === actionId);
+  if (!action || !action.fieldApply) return;
+  action.fieldApply[field] = !action.fieldApply[field];
+  const card = document.querySelector(`[data-action-id="${actionId}"]`);
+  if (card) card.outerHTML = _renderImportCard(action);
+}
+
 function _imUnlink(actionId) {
   const action = _importActions.find(a => a.id === actionId);
   if (!action) return;
-  const p = action._person;
-  action.kind       = 'person';
   action.existingId = undefined;
-  action.status     = 'pending';
-  if (p) {
-    action.fields = {
-      'Name':         p.fullName,
-      'Sex':          p.sex || '',
-      'Birth Date':   p.birthDate  || '',
-      'Birth Place':  p.birthPlace || '',
-      'Death Date':   p.deathDate  || '',
-      'Death Place':  p.deathPlace || '',
-      'Father':       p.fatherName || '',
-      'Mother':       p.motherName || '',
-      'Notes':        p.notes      || '',
-    };
+  action.fieldApply = undefined;
+
+  const pre = action._preLink;
+  if (pre) {
+    action.kind   = pre.kind;
+    action.status = pre.status;
+    action.fields = { ...pre.fields };
+    action._preLink = undefined;
+  } else {
+    // No snapshot: this card arrived already matched, so fall back to the parse.
+    const p = action._person;
+    action.kind   = 'person';
+    action.status = 'pending';
+    if (p) {
+      action.fields = {
+        'Name':         p.fullName,
+        'Sex':          p.sex || '',
+        'Birth Date':   p.birthDate  || '',
+        'Birth Place':  p.birthPlace || '',
+        'Death Date':   p.deathDate  || '',
+        'Death Place':  p.deathPlace || '',
+        'Father':       p.fatherName || '',
+        'Mother':       p.motherName || '',
+        'Notes':        p.notes      || '',
+      };
+    }
   }
   const card = document.querySelector(`[data-action-id="${actionId}"]`);
   if (card) card.outerHTML = _renderImportCard(action);
@@ -8664,6 +8793,7 @@ function _imRemoveChild(actionId, idx) {
 }
 
 window._imUnlink       = _imUnlink;
+window._imToggleFieldApply = _imToggleFieldApply;
 window._imFieldUnlink  = _imFieldUnlink;
 window._imChangeFieldLink = _imChangeFieldLink;
 window._imChangeMainLink  = _imChangeMainLink;

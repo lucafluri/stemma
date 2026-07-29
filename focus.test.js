@@ -37,9 +37,9 @@ const collateralSrc = lift('_collateralMaxDepth');
 // or the force view's BFS ball.
 function focusSet(individuals, families, focusRootId, focusLimit, tree = false) {
   return new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', '_revealed', 'cousinDegree',
+    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, focusRootId, focusLimit, () => tree, new Set(), COUSIN_DEGREE);
+  )(individuals, families, focusRootId, focusLimit, () => tree, tree, new Set(), COUSIN_DEGREE);
 }
 
 // ── Fixture: a 4-generation line plus a wide sibling ring ──
@@ -265,9 +265,9 @@ test('a wider setting reaches strictly further, never less', () => {
 test('turning the option up brings second cousins in', () => {
   const { individuals, families } = buildAncestryFixture();
   const at = degree => new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', '_revealed', 'cousinDegree',
+    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, 'I3', 100, () => true, new Set(), degree);
+  )(individuals, families, 'I3', 100, () => true, true, new Set(), degree);
 
   assert.ok(!at(1).has('GreatAuntUncle'), 'hidden at the default');
   assert.ok(at(2).has('GreatAuntUncle'), 'shown once second cousins are asked for');
@@ -408,11 +408,11 @@ test('survives an empty set', () => {
 });
 
 test('chart centring reads the offset before shifting', () => {
-  // The focus person's own entry lives in the same map being shifted. Reading
-  // f.x live inside the loop zeroes it on the first iteration, after which
-  // every other node shifts by 0 and the subject is stranded at the origin on
-  // top of whoever was there. Assert the source captures the offset first.
-  const centring = src.match(/const f = pos\.get\(focusRootId\);[\s\S]{0,320}?\n  \}/);
+  // The subject's own entry lives in the same map being shifted. Reading f.x
+  // live inside the loop zeroes it on the first iteration, after which every
+  // other node shifts by 0 and the subject is stranded at the origin on top of
+  // whoever was there. Assert the source captures the offset first.
+  const centring = src.match(/const f = pos\.get\(subject\);[\s\S]{0,320}?\n  \}/);
   assert(centring, 'chart centring block not found in app.js');
   assert.ok(
     /const dx = f\.x, dy = f\.y;/.test(centring[0]),
@@ -432,7 +432,7 @@ console.log('\ncomputeTreeLayout (layered layout)');
 
 const LAYOUT_CONSTS = ['TREE_ROW_H', 'TREE_COL_W', 'TREE_SPOUSE_DX', 'TREE_FAM_DY',
   'TREE_MARK_GAP', 'TREE_GROUP_GAP', 'TREE_ORDER_PASSES', 'TREE_COORD_PASSES',
-  'TREE_BUS_UP', 'TREE_LANE_DY', 'TREE_LANE_MIN', 'TREE_CHIP_DX', 'TREE_CHIP_DY', 'NODE_BOX_H', 'TREE_BUS_CLEARANCE'];
+  'TREE_BUS_UP', 'TREE_LANE_DY', 'TREE_LANE_MIN', 'TREE_MARR_STEP', 'TREE_CHIP_DX', 'TREE_CHIP_DY', 'NODE_BOX_H', 'TREE_BUS_CLEARANCE'];
 
 function layoutOf({ individuals, families, focusRootId, depths }) {
   // Everyone plus every family is on screen; FAM nodes are the bipartite mode.
@@ -444,7 +444,7 @@ function layoutOf({ individuals, families, focusRootId, depths }) {
   return new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
     'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, busY: _treeBusY };`
   )(...args);
@@ -514,6 +514,9 @@ function buildBlockFixture() {
   return { individuals, families, focusRootId: 'I3', depths };
 }
 
+// The people in a layout fixture, for tests that assert everybody got placed.
+const individualsOf = f => [...f.individuals.keys()];
+
 test('everyone of one generation lands on one row', () => {
   const f = buildBlockFixture();
   assertRowsLineUp(layoutOf(f).pos, f.depths, 'block fixture');
@@ -582,6 +585,91 @@ test('a remarried person is drawn between their spouses', () => {
       `${fid} marker is not between ${a} and ${b}`);
   }
   assert.notStrictEqual(pos.get('FA').x, pos.get('FB').x, 'the two marriages need distinct markers');
+});
+
+test('further marriages stack instead of piling onto one line', () => {
+  // A person can sit beside at most two of their spouses. The third marriage
+  // has to reach past somebody, and its marker then lands under an unrelated
+  // box — where it reads as that person's marriage, on the same line as
+  // everyone else's. Each marriage that has to reach gets a level of its own.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  p('H', [], ['F1', 'F2', 'F3']);
+  p('W1', [], ['F1']); p('W2', [], ['F2']); p('W3', [], ['F3']);
+  const depths = new Map([['H', 0], ['W1', 0], ['W2', 0], ['W3', 0]]);
+  [['F1', 'W1', ['A1']], ['F2', 'W2', ['B1']], ['F3', 'W3', ['C1']]].forEach(([fid, w, kids]) => {
+    f(fid, 'H', w, kids);
+    kids.forEach(k => { p(k, [fid]); depths.set(k, 1); });
+  });
+  const { pos } = layoutOf({ individuals, families, focusRootId: 'A1', depths });
+
+  const BOX_W = constOf('NODE_BOX_W'), ROW_H = constOf('TREE_ROW_H');
+  const rowY = pos.get('H').y;
+
+  for (const [fid, husb, wife] of [['F1', 'H', 'W1'], ['F2', 'H', 'W2'], ['F3', 'H', 'W3']]) {
+    const m = pos.get(fid);
+    // Still between the two it marries...
+    assert.ok(m.x >= Math.min(pos.get(husb).x, pos.get(wife).x) - 1e-6 &&
+              m.x <= Math.max(pos.get(husb).x, pos.get(wife).x) + 1e-6,
+      `${fid} marker is outside its couple`);
+    // ...and never left sitting on the base line under a stranger.
+    const strangerAbove = [...pos].some(([id, q]) =>
+      individuals.has(id) && id !== husb && id !== wife &&
+      Math.abs(q.y - rowY) < 1e-6 && Math.abs(q.x - m.x) < BOX_W / 2);
+    if (strangerAbove) {
+      assert.ok(m.y > rowY + constOf('TREE_FAM_DY') * ROW_H + 1e-6,
+        `${fid} sits under somebody else on the shared line — it needs a level of its own`);
+    }
+  }
+
+  // The three markers must not all be on one line.
+  const levels = new Set(['F1', 'F2', 'F3'].map(fid => Math.round(pos.get(fid).y)));
+  assert.ok(levels.size > 1, 'three marriages of one person all drew on the same line');
+});
+
+test('the chart lays out with no subject chosen at all', () => {
+  // Focus is a filter; the chart is the 2D view whether or not one is set. It
+  // used to fall back to the force layout the moment focus was cleared, which
+  // made clearing a filter look like switching to a different application.
+  const f = buildBlockFixture();
+  const { pos } = layoutOf({ ...f, focusRootId: null });
+  for (const id of individualsOf(f)) {
+    assert.ok(pos.has(id), `${id} must still be placed without a subject`);
+  }
+  assertRowsLineUp(pos, f.depths, 'unfocused');
+  assertNoOverlap(pos, id => id.startsWith('I'), 'unfocused');
+});
+
+test('with no subject the chart still anchors on somebody', () => {
+  // Something has to decide ordering and centring. Whoever it is, it must be a
+  // person actually on the chart — not a stale id, and not nobody.
+  const f = buildBlockFixture();
+  const { pos } = layoutOf({ ...f, focusRootId: null });
+  const xs = [...pos].filter(([id]) => id.startsWith('I')).map(([, p]) => p.x);
+  assert.ok(Math.min(...xs) < 0 && Math.max(...xs) > 0,
+    'the chart should be centred on somebody, so it must straddle the origin');
+});
+
+test('a subject who is filtered out does not break the chart', () => {
+  // The focus person can be off-screen — a surname filter, a stale selection.
+  // The chart must still draw rather than returning nothing.
+  const f = buildBlockFixture();
+  const { pos } = layoutOf({ ...f, focusRootId: 'I999' });
+  assert.ok(pos.size > 0, 'an unknown subject must not blank the chart');
+  assertRowsLineUp(pos, f.depths, 'stale subject');
+});
+
+test('a couple sitting side by side keeps the plain marker height', () => {
+  // Only marriages that have to reach get lifted; the ordinary case must not
+  // drift downward, or every chart gains a step it does not need.
+  const { pos } = layoutOf(buildBlockFixture());
+  const base = (constOf('TREE_FAM_DY')) * constOf('TREE_ROW_H');
+  for (const [fid, h, w] of [['F1', 'I1', 'I2'], ['F2', 'I3', 'I13'], ['F3', 'I4', 'I16']]) {
+    assert.ok(Math.abs(pos.get(fid).y - (pos.get(h).y + base)) < 1e-6,
+      `${fid} was lifted although ${h} and ${w} are already side by side`);
+  }
 });
 
 test('a sibling bar never rides above the marker it hangs from', () => {
@@ -823,9 +911,9 @@ console.log('\n_revealed (clicking a "+N" chip)');
 
 function revealSet(individuals, families, focusRootId, focusLimit, revealed) {
   return new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', '_revealed', 'cousinDegree',
+    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, focusRootId, focusLimit, () => true, revealed, COUSIN_DEGREE);
+  )(individuals, families, focusRootId, focusLimit, () => true, true, revealed, COUSIN_DEGREE);
 }
 
 test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
@@ -847,7 +935,7 @@ test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
   const r = new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
     'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: _treeOmitted };`
   )(individuals, families, 'Shown', nodes, () => depths, depths, null, null,
@@ -889,15 +977,15 @@ function buildDeepBranch() {
 // back the chips, so a test can click one the way the reader would.
 function chipsFor(individuals, families, focusRootId, focusLimit, revealed) {
   const set = new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', '_revealed', 'cousinDegree', '_lineageGen',
+    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree', '_lineageGen',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}
      const s = computeFocusSet(); return { s, gen: _lineageGen };`
-  )(individuals, families, focusRootId, focusLimit, () => true, revealed, COUSIN_DEGREE, null);
+  )(individuals, families, focusRootId, focusLimit, () => true, true, revealed, COUSIN_DEGREE, null);
 
   const r = new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
     'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: _treeOmitted };`
   )(individuals, families, focusRootId, [...set.s].map(id => ({ id })),
@@ -982,10 +1070,10 @@ test('a revealed person joins the chart, budget or no budget', () => {
 test('a revealed person gets a generation like everybody else', () => {
   const { individuals, families } = buildTree();
   const gen = new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', '_revealed', 'cousinDegree', '_lineageGen',
+    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree', '_lineageGen',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}
      computeFocusSet(); return _lineageGen;`
-  )(individuals, families, 'I3', 4, () => true, new Set(['I7']), COUSIN_DEGREE, null);
+  )(individuals, families, 'I3', 4, () => true, true, new Set(['I7']), COUSIN_DEGREE, null);
   assert.ok(gen.has('I7'), 'without a row the layout cannot place them');
   assert.strictEqual(gen.get('I7'), gen.get('I3'), 'a sibling shares the subject\'s row');
 });
