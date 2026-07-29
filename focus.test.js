@@ -432,18 +432,20 @@ console.log('\ncomputeTreeLayout (layered layout)');
 
 const LAYOUT_CONSTS = ['TREE_ROW_H', 'TREE_COL_W', 'TREE_SPOUSE_DX', 'TREE_FAM_DY',
   'TREE_MARK_GAP', 'TREE_GROUP_GAP', 'TREE_ORDER_PASSES', 'TREE_COORD_PASSES',
-  'TREE_BUS_UP', 'TREE_LANE_DY', 'TREE_LANE_MIN', 'TREE_MARR_STEP', 'TREE_CHIP_DX', 'TREE_CHIP_DY', 'NODE_BOX_H', 'TREE_BUS_CLEARANCE'];
+  'TREE_BUS_UP', 'TREE_LANE_DY', 'TREE_LANE_MIN', 'TREE_MARR_STEP', 'TREE_CHIP_DX', 'TREE_CHIP_DY', 'NODE_BOX_W', 'NODE_BOX_H', 'TREE_BUS_CLEARANCE'];
 
 function layoutOf({ individuals, families, focusRootId, depths }) {
   // Everyone plus every family is on screen; FAM nodes are the bipartite mode.
   const nodes = [...individuals.keys(), ...families.keys()].map(id => ({ id }));
   const args = [individuals, families, focusRootId, nodes,
-    () => depths, depths, null, null, ...LAYOUT_CONSTS.map(constOf)];
+    () => depths, depths, null, null, () => constOf('FAM_MARKER_MIN'),
+    ...LAYOUT_CONSTS.map(constOf)];
   // computeTreeLayout reassigns _treeBusY, so read it back after the call
   // rather than handing in a map and expecting it to have been filled.
   return new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
+    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
+    'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, busY: _treeBusY };`
@@ -545,6 +547,77 @@ test('a marriage marker sits between the couple and above their children', () =>
               m.x <= Math.max(pos.get(h).x, pos.get(w).x) + 1e-6,
       `${fid} marker is outside the couple it belongs to`);
     assert.ok(m.y > pos.get(h).y, `${fid} marker must hang below its couple`);
+  }
+});
+
+// A childless couple: nothing hangs under their marriage, so nothing should be
+// left dangling in the band under their row either.
+function buildChildlessFixture() {
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  p('P1', [], ['FP']); p('P2', [], ['FP']);
+  p('SUBJ', ['FP'], ['FS']); p('SP', [], ['FS']);
+  f('FP', 'P1', 'P2', ['SUBJ']);
+  f('FS', 'SUBJ', 'SP', []);
+  const depths = new Map([['P1', 0], ['P2', 0], ['SUBJ', 1], ['SP', 1]]);
+  return { individuals, families, focusRootId: 'SUBJ', depths };
+}
+
+test('a childless marriage sits between the couple, on their own row', () => {
+  const { pos } = layoutOf(buildChildlessFixture());
+  const m = pos.get('FS'), a = pos.get('SUBJ'), b = pos.get('SP');
+  assert.strictEqual(m.y, a.y, 'the marker dropped below a couple it has no children under');
+  assert.strictEqual(m.y, b.y);
+  assert.ok(m.x > Math.min(a.x, b.x) && m.x < Math.max(a.x, b.x),
+    'the marker must sit in the gap between the two, not beside them');
+  // And in the gap, not under a box.
+  const halfBox = constOf('NODE_BOX_W') / 2;
+  for (const q of [a, b]) {
+    assert.ok(Math.abs(m.x - q.x) >= halfBox,
+      `the marker at x=${m.x} is under the box at x=${q.x}`);
+  }
+});
+
+test('a marriage that does have children still hangs below the couple', () => {
+  // The other half of the rule: the band under the row is for the sibling bar,
+  // so a marriage with children on the chart still has to make room for it.
+  const { pos } = layoutOf(buildChildlessFixture());
+  assert.ok(pos.get('FP').y > pos.get('P1').y,
+    'FP has a child on the chart and must keep its place below the couple');
+  assert.ok(pos.get('FP').y < pos.get('SUBJ').y,
+    'and still above the row that child sits on');
+});
+
+test('a couple pushed apart keeps the marker below, not on top of a stranger', () => {
+  // The placement only holds while the two are side by side. A marriage that
+  // has to reach past somebody cannot put its marker on the row — that space
+  // belongs to whoever is sitting between them.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  // M marries A and B, so he sits between them and the A/B marriages reach.
+  p('M', [], ['FA', 'FB']); p('A', [], ['FA']); p('B', [], ['FB']);
+  p('KA', ['FA']);
+  f('FA', 'M', 'A', ['KA']);   // has a child, anchors the chart
+  f('FB', 'M', 'B', []);       // childless, but M is beside A too
+  const depths = new Map([['M', 0], ['A', 0], ['B', 0], ['KA', 1]]);
+  const { pos } = layoutOf({ individuals, families, focusRootId: 'M', depths });
+
+  const m = pos.get('FB');
+  const span = Math.abs(pos.get('M').x - pos.get('B').x);
+  if (span <= constOf('TREE_COL_W') * 1.2) {
+    assert.strictEqual(m.y, pos.get('M').y, 'side by side after all, so it belongs on the row');
+  } else {
+    assert.ok(m.y > pos.get('M').y, 'a marriage that reaches must stay below the row');
+  }
+  // Either way it never lands on somebody else's box.
+  for (const id of ['M', 'A', 'B']) {
+    if (Math.abs(m.y - pos.get(id).y) > 1e-9) continue;
+    assert.ok(Math.abs(m.x - pos.get(id).x) >= constOf('NODE_BOX_W') / 2,
+      `the FB marker is sitting on ${id}`);
   }
 });
 
@@ -934,12 +1007,13 @@ test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
   const nodes = ['H', 'W', 'Shown', 'F1'].map(id => ({ id }));
   const r = new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
+    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
+    'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: _treeOmitted };`
   )(individuals, families, 'Shown', nodes, () => depths, depths, null, null,
-    ...LAYOUT_CONSTS.map(constOf));
+    () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
 
   const chip = (r.omitted || []).find(o => o.kind === 'children');
   assert.ok(chip, 'a family with cut children must be marked');
@@ -984,12 +1058,14 @@ function chipsFor(individuals, families, focusRootId, focusLimit, revealed) {
 
   const r = new Function(
     'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted', ...LAYOUT_CONSTS,
+    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
+    'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: _treeOmitted };`
   )(individuals, families, focusRootId, [...set.s].map(id => ({ id })),
-    () => set.gen, set.gen, null, null, ...LAYOUT_CONSTS.map(constOf));
+    () => set.gen, set.gen, null, null,
+    () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
   return { shown: set.s, chips: r.omitted || [] };
 }
 
@@ -1076,6 +1152,207 @@ test('a revealed person gets a generation like everybody else', () => {
   )(individuals, families, 'I3', 4, () => true, true, new Set(['I7']), COUSIN_DEGREE, null);
   assert.ok(gen.has('I7'), 'without a row the layout cannot place them');
   assert.strictEqual(gen.get('I7'), gen.get('I3'), 'a sibling shares the subject\'s row');
+});
+
+// ── Generation depth ──
+// Depth counts the ancestors above a person, so anyone whose parents are not in
+// the file scores 0. For the oldest person on a line that is right; for someone
+// who married in it puts them at the top of the chart instead of beside their
+// partner.
+console.log('\ncomputeGenerationDepths (married-in people)');
+
+const depthsOf = (individuals, families) => new Function(
+  'individuals', 'families', '_genDepthsCache', 'GEN_GAP',
+  `${lift('computeGenerationDepths')}\nreturn computeGenerationDepths();`
+)(individuals, families, null, 28);
+
+// GG -> G -> P -> KID. Each generation marries somebody with no parents on file.
+function buildInLawFixture() {
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  p('GG', [], ['F1']);   p('GGw', [], ['F1']);       // root couple, neither has parents
+  p('G', ['F1'], ['F2']); p('Gw', [], ['F2']);       // Gw married in
+  p('P', ['F2'], ['F3']); p('Pw', [], ['F3']);       // Pw married in
+  p('KID', ['F3']);
+  f('F1', 'GG', 'GGw', ['G']);
+  f('F2', 'G', 'Gw', ['P']);
+  f('F3', 'P', 'Pw', ['KID']);
+  return { individuals, families };
+}
+
+test('a parent is always exactly one generation above their child', () => {
+  // Layering by longest ancestor chain gives every person the depth of the
+  // deepest route *to* them, which is not the same as their generation. A man
+  // whose own line is recorded two deep, married to a woman whose line runs
+  // twelve deep, gets pushed to her level — and his parents are then left ten
+  // generations above their own son. Generations follow the relations instead,
+  // so each link is worth exactly what it is.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+
+  // H's father is the whole of his recorded line; W's runs four deep.
+  p('HDad', [], ['FH']); p('H', ['FH'], ['M']);
+  p('W4', [], ['FW4']); p('W3', ['FW4'], ['FW3']); p('W2', ['FW3'], ['FW2']);
+  p('W1', ['FW2'], ['FW1']); p('W', ['FW1'], ['M']);
+  p('KID', ['M']);
+  f('FH', 'HDad', null, ['H']);
+  f('FW4', 'W4', null, ['W3']); f('FW3', 'W3', null, ['W2']);
+  f('FW2', 'W2', null, ['W1']); f('FW1', 'W1', null, ['W']);
+  f('M', 'H', 'W', ['KID']);
+
+  const d = depthsOf(individuals, families);
+  for (const [, fam] of families) {
+    for (const c of fam.chil) {
+      for (const q of [fam.husb, fam.wife].filter(Boolean)) {
+        assert.strictEqual(d.get(c) - d.get(q), 1,
+          `${q} (gen ${d.get(q)}) to ${c} (gen ${d.get(c)}) is ${d.get(c) - d.get(q)} generations`);
+      }
+    }
+  }
+  assert.strictEqual(d.get('H'), d.get('W'), 'and the couple is still level');
+});
+
+test('every relation is honoured when the data does not contradict itself', () => {
+  // The strong form of both rules at once. They can only ever both hold where
+  // the file is consistent — a real tree with cousins marrying can state that
+  // two people are both the same generation and one above the other, and then
+  // something has to give. Where nothing contradicts, nothing should give.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  // Four generations, two branches, every rung a couple, uneven recorded depth.
+  p('A', [], ['FA']); p('Aw', [], ['FA']);
+  p('B1', ['FA'], ['FB1']); p('B1w', [], ['FB1']);
+  p('B2', ['FA'], ['FB2']); p('B2w', [], ['FB2']);
+  p('C1', ['FB1'], ['FC1']); p('C1w', [], ['FC1']);
+  p('C2', ['FB2']);
+  p('D1', ['FC1']);
+  f('FA', 'A', 'Aw', ['B1', 'B2']);
+  f('FB1', 'B1', 'B1w', ['C1']);
+  f('FB2', 'B2', 'B2w', ['C2']);
+  f('FC1', 'C1', 'C1w', ['D1']);
+
+  const d = depthsOf(individuals, families);
+  let edges = 0, couples = 0;
+  for (const [, fam] of families) {
+    const par = [fam.husb, fam.wife].filter(x => x && individuals.has(x));
+    if (par.length === 2) {
+      couples++;
+      assert.strictEqual(d.get(par[0]), d.get(par[1]), `couple ${par} split`);
+    }
+    for (const c of fam.chil) {
+      for (const q of par) {
+        edges++;
+        assert.strictEqual(d.get(c) - d.get(q), 1, `${q} -> ${c} is not one generation`);
+      }
+    }
+  }
+  assert.ok(edges >= 6 && couples >= 4, 'the fixture must actually exercise both rules');
+  assert.strictEqual(Math.max(...d.values()), 3, 'four generations, numbered 0 to 3');
+});
+
+test('a couple is never split across generations', () => {
+  // Depth is the longest chain of ancestors above a person, so measured per
+  // person a husband whose line is recorded eight deep lands generations away
+  // from the wife whose line is recorded three deep. That says nothing about
+  // them and everything about how much of each family somebody wrote down.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+
+  // H's line is recorded three deep; W's only one deep. They are still a couple.
+  p('H3', [], ['FH3']); p('H2', ['FH3'], ['FH2']); p('H1', ['FH2'], ['FH1']);
+  p('H', ['FH1'], ['M']);
+  p('W1', [], ['FW1']); p('W', ['FW1'], ['M']);
+  p('KID', ['M']);
+  f('FH3', 'H3', null, ['H2']); f('FH2', 'H2', null, ['H1']); f('FH1', 'H1', null, ['H']);
+  f('FW1', 'W1', null, ['W']);
+  f('M', 'H', 'W', ['KID']);
+
+  const d = depthsOf(individuals, families);
+  assert.strictEqual(d.get('H'), d.get('W'),
+    `H is gen ${d.get('H')} and W gen ${d.get('W')} — a married couple shares a generation`);
+  assert.ok(d.get('KID') > d.get('H'), 'and their child is still below them');
+});
+
+test('couples stay level all the way up a line', () => {
+  // Every rung of the fixture is a couple, so a single leveling pass is not
+  // enough — the answer has to come out of how generations are measured.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  // Deep line on the husbands' side, nothing recorded on the wives' side.
+  let prev = null;
+  for (let i = 4; i >= 0; i--) {
+    p('H' + i, i === 4 ? [] : ['F' + (i + 1)], ['M' + i]);
+    p('W' + i, [], ['M' + i]);
+    f('M' + i, 'H' + i, 'W' + i, i ? ['H' + (i - 1)] : []);
+    if (prev !== null) f('F' + prev, 'H' + prev, 'W' + prev, ['H' + i]);
+    prev = i;
+  }
+  const d = depthsOf(individuals, families);
+  for (let i = 4; i >= 0; i--) {
+    assert.strictEqual(d.get('H' + i), d.get('W' + i),
+      `rung ${i}: H${i} gen ${d.get('H' + i)} vs W${i} gen ${d.get('W' + i)}`);
+  }
+});
+
+test('somebody who married in takes their partner\'s generation', () => {
+  const { individuals, families } = buildInLawFixture();
+  const d = depthsOf(individuals, families);
+  assert.strictEqual(d.get('Gw'), d.get('G'), 'Gw married G and belongs beside them');
+  assert.strictEqual(d.get('Pw'), d.get('P'), 'Pw married P and belongs beside them');
+  assert.ok(d.get('Pw') > d.get('Gw'), 'and the two in-laws are a generation apart');
+});
+
+test('a root couple with no parents on either side stays at the top', () => {
+  const { individuals, families } = buildInLawFixture();
+  const d = depthsOf(individuals, families);
+  assert.strictEqual(d.get('GG'), 0);
+  assert.strictEqual(d.get('GGw'), 0, 'nobody to defer to — this is a real root');
+});
+
+test('inferring a generation never lifts a parent past their own child', () => {
+  // The reason the inference is capped. A plain "match your spouse" rule
+  // cascades on a tree where cousins marry — the spouse rises, the children get
+  // pushed down, their spouses follow, and it comes back around. That inflated
+  // a 16-generation file to 37 and left hundreds of children above a parent.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  // X has no parents. One marriage reaches deep, the other is near the top —
+  // matching the deep spouse would drop X below their own child by the other.
+  p('A', [], ['FA']); p('A2', ['FA'], ['FB']); p('DEEP', ['FB'], ['FX']);
+  p('X', [], ['FX', 'FY']); p('SHALLOW', [], ['FY']); p('KID', ['FY']);
+  f('FA', 'A', null, ['A2']); f('FB', 'A2', null, ['DEEP']);
+  f('FX', 'DEEP', 'X', []); f('FY', 'SHALLOW', 'X', ['KID']);
+
+  const d = depthsOf(individuals, families);
+  for (const [, fam] of families) {
+    const par = [fam.husb, fam.wife].filter(q => q && individuals.has(q));
+    for (const c of fam.chil) {
+      if (!individuals.has(c)) continue;
+      for (const q of par) {
+        assert.ok(d.get(c) > d.get(q),
+          `${c} (gen ${d.get(c)}) must sit below its parent ${q} (gen ${d.get(q)})`);
+      }
+    }
+  }
+});
+
+test('the inference cannot add generations to the chart', () => {
+  // Runaway shows up as a taller chart than the ancestry actually justifies.
+  const { individuals, families } = buildInLawFixture();
+  const d = depthsOf(individuals, families);
+  assert.strictEqual(Math.max(...d.values()), 3, 'GG → G → P → KID is four levels');
 });
 
 // ── Connector routing ──
@@ -1222,6 +1499,131 @@ test('the box is tall enough for both lines', () => {
   // And the marriage marker must clear the bottom of the box it hangs under.
   assert.ok(constOf('TREE_ROW_H') * constOf('TREE_FAM_DY') > h / 2,
     'the FAM marker sits inside the couple box');
+});
+
+// ── Generation band (the two-handle slider) ──
+console.log('\ngenerationNumbers / inGenRange (generation band)');
+
+// Everything the band needs, lifted together: the numbering, the test, and the
+// setter. The setter reaches for the DOM and a redraw, so both are stubbed —
+// what is under test is which band it settles on, not what it repaints.
+const genBand = (individuals, families, genRange = null) => new Function(
+  'individuals', 'families', '_genDepthsCache', '_genNumbers', 'GEN_GAP', 'genRange',
+  `${lift('computeGenerationDepths')}
+   ${lift('generationNumbers')}
+   ${lift('generationCount')}
+   ${lift('inGenRange')}
+   ${lift('_genRangePair')}
+   const updateGenRangeUI = () => {}, applyFilter = () => {};
+   ${lift('setGenRange')}
+   ${lift('previewGenRange')}
+   const _paintGenRange = () => {};
+   return {
+     numbers: generationNumbers(),
+     count:   generationCount(),
+     inRange: id => inGenRange(id),
+     set:     (lo, hi) => { setGenRange(lo, hi); return genRange; },
+     // A drag must move the label without touching the band behind it.
+     drag:    (lo, hi) => { previewGenRange(lo, hi); return genRange; },
+   };`
+)(individuals, families, null, null, 28, genRange);
+
+// Four generations down one line, so the numbering has somewhere to count from.
+function buildLadder() {
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  p('A', [], ['FA']); p('B', ['FA'], ['FB']); p('C', ['FB'], ['FC']); p('D', ['FC']);
+  f('FA', 'A', null, ['B']); f('FB', 'B', null, ['C']); f('FC', 'C', null, ['D']);
+  return { individuals, families };
+}
+
+test('the derived caches are cleared where the data is read, not where one rebuild happens', () => {
+  // A structural check, because the bug it guards against is structural. The
+  // caches used to be cleared in _fullRebuildGraph(), and the file loader does
+  // not call it — it open-codes its own rebuild around buildGraphData(). So a
+  // file loaded that way was drawn with whatever depths were cached before it
+  // arrived: none, if the app was still empty. The generation slider then had
+  // no generations to offer and hid itself, and 3D generation mode had nothing
+  // to sort by. buildGraphData() is the one function every path goes through.
+  const body = src.match(/function buildGraphData\(\)[\s\S]*?\n\}/)[0];
+  for (const cache of ['_genDepthsCache', '_genNumbers', '_estimatedYears']) {
+    assert.ok(new RegExp(`${cache}\\s*=\\s*null`).test(body),
+      `buildGraphData() must clear ${cache} — a path that skips the clear draws stale generations`);
+  }
+});
+
+test('generations are numbered from the youngest, not from the oldest ancestor', () => {
+  // The reader counts back from themselves. Numbering from the oldest ancestor
+  // instead would renumber everybody the moment one more grandparent is found.
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families);
+  assert.strictEqual(g.numbers.get('D'), 0, 'the youngest generation is 0');
+  assert.strictEqual(g.numbers.get('C'), 1);
+  assert.strictEqual(g.numbers.get('B'), 2);
+  assert.strictEqual(g.numbers.get('A'), 3, 'and the oldest is the highest');
+  assert.strictEqual(g.count, 4);
+});
+
+test('a band keeps the generations inside it and drops the rest', () => {
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families, { min: 1, max: 2 });
+  assert.strictEqual(g.inRange('C'), true);
+  assert.strictEqual(g.inRange('B'), true);
+  assert.strictEqual(g.inRange('D'), false, 'below the band');
+  assert.strictEqual(g.inRange('A'), false, 'above the band');
+});
+
+test('no band means everybody', () => {
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families, null);
+  for (const id of ['A', 'B', 'C', 'D']) assert.strictEqual(g.inRange(id), true);
+});
+
+test('an id the numbering has never seen is never dropped by the band', () => {
+  // The visibility gate is called with whatever id it is handed, including ones
+  // that outlived the record behind them. A filter that cannot judge somebody
+  // must not be the thing that hides them — the checks after it decide.
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families, { min: 0, max: 0 });
+  assert.strictEqual(g.numbers.has('GHOST'), false, 'the fixture must not know this id');
+  assert.strictEqual(g.inRange('GHOST'), true);
+  // Everyone the numbering *does* know is still judged normally.
+  assert.strictEqual(g.inRange('A'), false);
+});
+
+test('dragging one handle past the other swaps them instead of collapsing', () => {
+  // Two stacked native sliders cannot stop each other, so the pair is sorted.
+  // Reading it the other way — clamping the dragged handle — pins the band shut
+  // the moment the reader drags through the middle.
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families);
+  assert.deepStrictEqual(g.set(3, 1), { min: 1, max: 3 });
+});
+
+test('the full span is stored as no band at all', () => {
+  // So that loading a deeper file is not silently filtered by the old top end.
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families);
+  assert.strictEqual(g.set(0, 3), null, 'a band covering everything is not a band');
+  assert.deepStrictEqual(g.set(0, 2), { min: 0, max: 2 });
+});
+
+test('dragging a handle does not refilter until it is let go', () => {
+  // Refiltering costs over a second on a large file in 3D, and `input` fires
+  // on every step of a drag. So the drag only repaints; `change` commits.
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families);
+  assert.strictEqual(g.drag(1, 2), null, 'a drag must leave the band alone');
+  assert.deepStrictEqual(g.set(1, 2), { min: 1, max: 2 }, 'and the release must apply it');
+});
+
+test('a band is clamped to the generations that exist', () => {
+  const { individuals, families } = buildLadder();
+  const g = genBand(individuals, families);
+  assert.deepStrictEqual(g.set(-5, 99), null, 'clamped to the full span, which is no band');
+  assert.deepStrictEqual(g.set(2, 99), { min: 2, max: 3 });
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

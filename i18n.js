@@ -40,9 +40,14 @@ const I18N = {
       colorModeSurname: 'Nachname',
       colorModeSex: 'Geschlecht',
       famNodes: 'Familien-Knoten anzeigen',
-      sortByTime3d: 'Nach Zeit sortieren (3D)',
-      showTimeline: 'Zeitachse anzeigen',
-      timeSpread: 'Zeitachsen-Spreizung',
+      stratify3d: 'Stapeln nach (3D)',
+      stratify3dTitle: 'Wonach sich die Höhe im 3D-Bild richtet. Nach Generation liegt ein Paar auf einer Ebene, auch bei grossem Altersunterschied, und Personen ohne Datum bekommen trotzdem einen Platz.',
+      stratifyTime: 'Zeit',
+      stratifyGen: 'Generation',
+      stratifyOff: 'nicht stapeln',
+      genLabel: 'Gen. ${n}',
+      showTimeline: 'Achse anzeigen',
+      timeSpread: 'Achsen-Spreizung',
       showNames3d: 'Namen anzeigen (3D)',
       dragOn: 'Ziehen an',
       dragOff: 'Ziehen aus',
@@ -85,6 +90,10 @@ const I18N = {
       cousinLevel2: 'bis 2. Grades',
       cousinLevel3: 'bis 3. Grades',
       cousinLevel4: 'bis 4. Grades',
+      genRange: 'Generationen',
+      genRangeTitle: 'Nur diese Generationen zeigen — 0 ist die jüngste, aufwärts in die Vergangenheit.',
+      genRangeFrom: 'Jüngste gezeigte Generation',
+      genRangeTo: 'Älteste gezeigte Generation',
       exportNeeds2D: 'Der Bild-Export gilt für die 2D-Ansicht. Bitte zuerst zu 2D wechseln.',
       exportEmpty: 'Nichts zu exportieren — das Diagramm ist leer.',
       exportFailed: 'Bild konnte nicht erzeugt werden.',
@@ -511,9 +520,14 @@ const I18N = {
       colorModeSurname: 'Surname',
       colorModeSex: 'Sex',
       famNodes: 'Show family nodes',
-      sortByTime3d: 'Sort by time (3D)',
-      showTimeline: 'Show timeline',
-      timeSpread: 'Timeline spread',
+      stratify3d: 'Stack by (3D)',
+      stratify3dTitle: 'What decides height in the 3D view. By generation a couple sits level however far apart their dates are, and people with no date still get a place.',
+      stratifyTime: 'Time',
+      stratifyGen: 'Generation',
+      stratifyOff: 'no stacking',
+      genLabel: 'Gen ${n}',
+      showTimeline: 'Show axis',
+      timeSpread: 'Axis spread',
       showNames3d: 'Show names (3D)',
       dragOn: 'Drag on',
       dragOff: 'Drag off',
@@ -556,6 +570,10 @@ const I18N = {
       cousinLevel2: 'up to second',
       cousinLevel3: 'up to third',
       cousinLevel4: 'up to fourth',
+      genRange: 'Generations',
+      genRangeTitle: 'Show only these generations — 0 is the youngest, counting up into the past.',
+      genRangeFrom: 'Youngest generation shown',
+      genRangeTo: 'Oldest generation shown',
       exportNeeds2D: 'Image export applies to the 2D view. Switch to 2D first.',
       exportEmpty: 'Nothing to export — the chart is empty.',
       exportFailed: 'Could not produce the image.',
@@ -993,6 +1011,13 @@ function applyTranslations() {
     const key = el.dataset.i18nTitle;
     const val = t(key);
     if (val !== key) el.title = val;
+  });
+  // A control whose only name is an aria-label needs that label translated too,
+  // or the screen reader keeps reading it out in the language the page left.
+  document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+    const key = el.dataset.i18nAria;
+    const val = t(key);
+    if (val !== key) el.setAttribute('aria-label', val);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
     const key = el.dataset.i18nPlaceholder;

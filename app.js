@@ -207,6 +207,13 @@ let focusLimit  = parseInt(localStorage.getItem('focusLimit')) || 120;
 // here and `|| 1` would silently turn it back on.
 let cousinDegree = parseInt(localStorage.getItem('cousinDegree'));
 if (!Number.isFinite(cousinDegree)) cousinDegree = 1;
+// Which generations to show, counted the way the reader sees them: 0 is the
+// youngest generation in the file. null means all of them.
+// Deliberately not persisted, unlike the sliders above it — generation numbers
+// only mean anything relative to the file that produced them, so restoring
+// "3 to 7" onto a different tree would hide a stranger's relatives at random.
+// Reset on every cold rebuild for the same reason.
+let genRange = null;   // { min, max } | null
 // Classical ancestry chart (layered rows) instead of the force layout.
 let treeLayout  = localStorage.getItem('treeLayout') !== '0';
 let _lineageGen = null;   // id -> chart row, filled by computeLineageSet()
@@ -217,11 +224,17 @@ let _treeOmitted = null;  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch marke
 // were about *that* chart.
 let _revealed = new Set();
 let _birthYearRange = null;  // { min, max } saved for 3D stratification
+let _genRange3D     = null;  // { min, max } generation depth, same purpose
 let _3dMousePos    = { x: 0, y: 0 };
 
 // Display mode flags
 let showFamNodes   = true;   // show FAM diamond nodes (vs direct parent-child links)
-let sortByTime3D   = true;   // Y-stratify 3D sim by birth year
+// How the 3D view stacks people on the vertical axis:
+//   'time'       — by birth year, estimated where a date is missing
+//   'generation' — by generation, so a couple sits level whatever their dates
+//                  say and an undated person still lands in the right band
+//   'off'        — no stratification, the force layout decides
+let stratify3D = localStorage.getItem('stratify3D') || 'time';
 let showTimeline3D = true;   // show the visual timeline axis (spine + rings)
 let show3DNames    = true;   // render name+year labels above nodes in 3D
 let _nodeDragEnabled = false; // node dragging disabled by default
@@ -408,6 +421,11 @@ function _fullRebuildGraph(opts = {}) {
   const warm = !!opts.warm;
   if (!warm) _nodeObjCache = new Map(); // dataset-level change: don't reuse positions from a possibly-unrelated previous dataset
   if (focusRootId && !individuals.has(focusRootId)) focusRootId = null;  // focus person was deleted
+  // Generation numbers are only meaningful for the file that produced them.
+  // (The caches they come from are cleared in buildGraphData(), which every
+  // path that changes the data goes through — including the file loader,
+  // which never calls this function.)
+  if (!warm) genRange = null;
   _setDirty(true);
   console.time('[rebuild] total');
   console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
@@ -417,8 +435,6 @@ function _fullRebuildGraph(opts = {}) {
   console.time('[rebuild] renderGraph');     renderGraph();                           console.timeEnd('[rebuild] renderGraph');
   document.getElementById('status').textContent =
     t('topbar.status', { persons: individuals.size, personsPlural: individuals.size !== 1 ? 'en' : '', families: families.size });
-  _genDepthsCache = null;  // invalidate depth cache before rebuild
-  _estimatedYears = null;
   if (!warm) _firstLoad = true;
   console.time('[rebuild] simulation');      buildAndRunSimulation({ warm });         console.timeEnd('[rebuild] simulation');
   // For 3D: push data directly instead of calling applyFilter() which would
@@ -454,6 +470,17 @@ function _autoMarkDeceasedByAge() {
 // 2. GRAPH DATA BUILDER  (bipartite INDI + FAM nodes)
 // ═══════════════════════════════════════════════════════════════
 function buildGraphData() {
+  // Everything derived from the shape of the tree is invalidated here, where
+  // the tree is read, rather than in _fullRebuildGraph() — the file loader
+  // does not go through that function, it open-codes its own rebuild and calls
+  // this one. Caches cleared only there survived a file load, so a chart built
+  // while the app was still empty left every generation depth at "none": the
+  // generation slider then had no generations to offer and hid itself, and 3D
+  // generation mode had nothing to sort by. Clearing them at the point the
+  // data is consumed cannot be skipped by a path that forgets to ask.
+  _genDepthsCache = null;
+  _genNumbers     = null;
+  _estimatedYears = null;
   _autoMarkDeceasedByAge();
   allNodes = [];
   allLinks = [];
@@ -649,8 +676,21 @@ function hasEnabledFamilyName(indi) {
   return [...names].some(name => surnameEnabled.get(name) !== false);
 }
 
+// Outside the chosen band of generations, nothing else can bring a person back:
+// the surname rule below is an "or" (a spouse's name is enough), and a person
+// held in by their spouse two generations away is exactly what the band is for
+// cutting. So this is checked first, and separately.
+function inGenRange(id) {
+  if (!genRange) return true;
+  const g = generationNumbers().get(id);
+  // Someone the layering never placed has no generation to judge, so the band
+  // does not get to drop them.
+  return g === undefined || (g >= genRange.min && g <= genRange.max);
+}
+
 function isIndiVisible(id) {
   const indi = individuals.get(id);
+  if (!inGenRange(id)) return false;
   if (!indi || hasEnabledFamilyName(indi)) return true;
   for (const [, fam] of families) {
     const spouseId = fam.husb === id ? fam.wife : fam.wife === id ? fam.husb : null;
@@ -1452,10 +1492,35 @@ function computeTreeLayout() {
     const reach = Math.round(Math.abs(xs.get(par[0]) - xs.get(par[1])) / TREE_COL_W) - 1;
     return Math.max(0, Math.min(reach, maxLevel));
   };
+  // A marriage hangs below its couple to leave room for the sibling bar and the
+  // children on it. A couple with no children on the chart has nothing hanging
+  // there, and dropping the marker anyway pushes it into the empty band between
+  // the generations, where it reads as a child of the couple rather than as
+  // their marriage. Put it in the gap between the two people instead — which is
+  // where a hand-drawn chart puts it.
+  // Only when it genuinely fits in that gap: the same span test the spouse
+  // connector uses, so the marker and the line agree about whether the couple
+  // is side by side, plus room for the marker itself between the two boxes.
+  // A couple that had to reach past somebody keeps the old placement, or the
+  // marker would land on top of whoever is sitting between them.
+  const marrSize = famMarkerSize();
+  const between = fid => {
+    const { par, kids } = visFam.get(fid);
+    if (kids.length || par.length < 2) return null;
+    const ax = xs.get(par[0]), bx = xs.get(par[1]);
+    const span = Math.abs(ax - bx);
+    if (span > TREE_COL_W * 1.2) return null;                 // reaches past someone
+    if (span - NODE_BOX_W < 2 * marrSize + 2) return null;    // no room between the boxes
+    return (ax + bx) / 2;
+  };
   for (const [fid] of visFam) {
-    pos.set(fid, {
+    const mid = between(fid);
+    pos.set(fid, mid === null ? {
       x: xs.get(fid),
       y: (famGen.get(fid) + TREE_FAM_DY) * TREE_ROW_H + marrLevel(fid) * TREE_MARR_STEP,
+    } : {
+      x: mid,
+      y: famGen.get(fid) * TREE_ROW_H,
     });
   }
 
@@ -1769,33 +1834,157 @@ function setTreeLayout(on) {
 // Here a back edge simply contributes nothing.
 function computeGenerationDepths() {
   if (_genDepthsCache) return _genDepthsCache;
-  const depth = new Map();
-  const visiting = new Set();
 
-  const walk = id => {
-    const memo = depth.get(id);
-    if (memo !== undefined) return memo;
-    if (visiting.has(id)) return 0;      // cycle — treat as the top of its line
-    visiting.add(id);
+  // Relations are offsets: a child is one generation below their parents, a
+  // spouse is level with them. Walk the relations and give each edge the length
+  // it actually has.
+  //
+  // The obvious alternative — layer everyone by their longest chain of
+  // ancestors — gives every person the depth of the deepest route *to* them,
+  // which is not the same thing. A man whose own line is recorded two deep,
+  // married to a woman whose line is recorded twelve deep, is pushed down to
+  // her level; his parents then sit ten generations above their own son. On
+  // this file that produced jumps of up to twenty-six generations across a
+  // single parent-child link, and even children drawn above their parents.
+  //
+  // Breadth-first also settles conflicts the right way round: where cousins
+  // marry, the relations genuinely disagree about who is a generation above
+  // whom, and the first assignment to reach a person wins — which is the one
+  // through their closest relation.
+  const gen = new Map();
 
-    let d = 0;
+  const parentsOf = id => {
+    const out = [];
     for (const famId of (individuals.get(id)?.famc || [])) {
       const fam = families.get(famId);
       if (!fam) continue;
-      for (const p of [fam.husb, fam.wife]) {
-        if (p && individuals.has(p)) d = Math.max(d, walk(p) + 1);
+      for (const p of [fam.husb, fam.wife]) if (p && individuals.has(p)) out.push(p);
+    }
+    return out;
+  };
+  const kidsAndSpouses = id => {
+    const kids = [], spouses = [];
+    for (const famId of (individuals.get(id)?.fams || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (sp && individuals.has(sp)) spouses.push(sp);
+      for (const c of fam.chil) if (individuals.has(c)) kids.push(c);
+    }
+    return { kids, spouses };
+  };
+
+  // Start each disconnected part at its best-connected person, so the walk
+  // begins somewhere central rather than at whichever id came first in the file.
+  const seeds = [...individuals.keys()].sort((a, b) => {
+    const w = id => (individuals.get(id).fams?.length || 0) + (individuals.get(id).famc?.length || 0);
+    return w(b) - w(a);
+  });
+
+  for (const seed of seeds) {
+    if (gen.has(seed)) continue;
+    gen.set(seed, 0);
+    let frontier = [seed];
+    while (frontier.length) {
+      // Settle marriages before stepping outward. A marriage costs nothing —
+      // the two are the same generation — so everyone reachable across marriages
+      // belongs to this step, not the next. Left to the ordinary queue a spouse
+      // could instead be reached by some longer route through the family and be
+      // given that route's generation, splitting the couple. Appending while
+      // iterating walks a chain of remarriages to its end.
+      for (let i = 0; i < frontier.length; i++) {
+        const g = gen.get(frontier[i]);
+        for (const sp of kidsAndSpouses(frontier[i]).spouses) {
+          if (!gen.has(sp)) { gen.set(sp, g); frontier.push(sp); }
+        }
+      }
+      const next = [];
+      for (const id of frontier) {
+        const g = gen.get(id);
+        for (const p of parentsOf(id)) {
+          if (!gen.has(p)) { gen.set(p, g - 1); next.push(p); }
+        }
+        for (const c of kidsAndSpouses(id).kids) {
+          if (!gen.has(c)) { gen.set(c, g + 1); next.push(c); }
+        }
+      }
+      frontier = next;
+    }
+  }
+
+  // ── Line up the separate trees ──
+  // A file often holds several families with no relation between them. Each is
+  // laid out from its own seed, so each starts at generation 0 — which stacks a
+  // family living in the 1500s onto one living in the 1900s and puts four
+  // centuries of people on a single layer. Nothing inside a tree can say where
+  // it belongs relative to another; only the dates can. Slide each tree so its
+  // generations agree with the rest on roughly when a generation happened.
+  // Shifting a whole tree cannot change any relation inside it, so this is free.
+  // Group from the family records themselves, not from each person's own list
+  // of families. GEDCOM links are not always written both ways — a family can
+  // name a child who does not name the family back — and a group built from one
+  // side then splits people the other side treats as related. Sliding such a
+  // "separate" tree would drag one end of a real parent-child link away from
+  // the other, which is precisely what this shift must never do.
+  const compOf = new Map();
+  {
+    const parent = new Map();
+    const find = x => {
+      while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); }
+      return x;
+    };
+    for (const [id] of individuals) parent.set(id, id);
+    for (const [, fam] of families) {
+      const members = [fam.husb, fam.wife, ...(fam.chil || [])].filter(m => m && individuals.has(m));
+      for (let i = 1; i < members.length; i++) {
+        const ra = find(members[0]), rb = find(members[i]);
+        if (ra !== rb) parent.set(ra, rb);
       }
     }
+    for (const [id] of individuals) compOf.set(id, find(id));
+  }
 
-    visiting.delete(id);
-    depth.set(id, d);
-    return d;
-  };
-  for (const [id] of individuals) walk(id);
+  const stats = new Map();   // component -> running mean of year and generation
+  for (const [id, indi] of individuals) {
+    const yr = indi.birthYear || (indi.birth?.date || '').match(/\d{4}/)?.[0];
+    if (!yr) continue;
+    const c = compOf.get(id);
+    if (!stats.has(c)) stats.set(c, { n: 0, year: 0, g: 0 });
+    const st = stats.get(c);
+    st.n++; st.year += +yr; st.g += gen.get(id);
+  }
+  const sizes = new Map();
+  for (const c of compOf.values()) sizes.set(c, (sizes.get(c) || 0) + 1);
+  // The biggest dated tree sets the reference; anything undated cannot be
+  // placed by date and simply keeps the generation the walk gave it.
+  let ref = null;
+  for (const [c, st] of stats) {
+    if (!ref || sizes.get(c) > sizes.get(ref)) ref = c;
+  }
+  const shift = new Map();
+  if (ref !== null) {
+    const r = stats.get(ref);
+    const refYearAtZero = r.year / r.n - GEN_GAP * (r.g / r.n);
+    for (const [c, st] of stats) {
+      const yearAtZero = st.year / st.n - GEN_GAP * (st.g / st.n);
+      shift.set(c, Math.round((yearAtZero - refYearAtZero) / GEN_GAP));
+    }
+  }
+
+  for (const [id, g] of gen) gen.set(id, g + (shift.get(compOf.get(id)) || 0));
+
+  // Shift so the earliest generation is 0 — everything downstream reads these
+  // as depths counting down from the top of the chart.
+  let min = 0;
+  for (const g of gen.values()) if (g < min) min = g;
+  const depth = new Map();
+  for (const [id, g] of gen) depth.set(id, g - min);
 
   _genDepthsCache = depth;
   return depth;
 }
+
+
 
 // ── Family average birth year (used by both 2D sim and 3D forceY) ──
 function famAvgYear(fam) {
@@ -1815,10 +2004,61 @@ function yearTo3DY(yr) {
   return _3dYHalfSpan - frac * 2 * _3dYHalfSpan;
 }
 
+// Generation depth → Y, the same way round as the year axis: earlier at the
+// top. Sorting by generation puts a couple on one level however far apart their
+// birth dates are, and gives a person with no date a place rather than leaving
+// them floating — which is the whole reason to want it.
+function genTo3DY(g) {
+  if (g == null || !_genRange3D) return null;
+  const { min, max } = _genRange3D;
+  const frac = (g - min) / Math.max(max - min, 1);
+  return _3dYHalfSpan - frac * 2 * _3dYHalfSpan;
+}
+
+// Where a node belongs on the vertical axis under the current mode.
+function nodeStratY(n) {
+  if (stratify3D === 'time') return yearTo3DY(estimateBirthYear(n));
+  if (stratify3D !== 'generation') return null;
+  const depths = computeGenerationDepths();
+  if (n.type === 'INDI') return genTo3DY(depths.get(n.id));
+  // A marriage sits between the couple's row and their children's — but a
+  // childless couple has no children's row to sit above, and half a generation
+  // down just floats it away from the only two people it relates to.
+  const fam = n.data;
+  const par = [fam.husb, fam.wife].filter(x => x && depths.has(x));
+  if (par.length) {
+    const row = Math.max(...par.map(x => depths.get(x)));
+    return genTo3DY((fam.chil || []).some(c => depths.has(c)) ? row + 0.5 : row);
+  }
+  const kids = (fam.chil || []).filter(c => depths.has(c));
+  return kids.length ? genTo3DY(Math.min(...kids.map(c => depths.get(c))) - 0.5) : null;
+}
+
 // ── Estimated birth year cache (rebuilt by computeEstimatedYears) ──
 let _estimatedYears = null;  // Map<id, number>
 let _genDepthsCache = null;   // Map<id, number> — cleared by _fullRebuildGraph
+let _genNumbers     = null;   // Map<id, number> — the same thing counted the other way
 const GEN_GAP = 28;  // average generation gap in years
+
+// Generations as the reader counts them: 0 is the youngest generation in the
+// file, rising into the past. The stored depth runs the other way, from the
+// oldest ancestor down, which is the wrong end to number from — the youngest
+// generation is the only one that stays put as a tree grows backwards.
+// This is what the 3D axis labels and the generation slider both speak in.
+function generationNumbers() {
+  if (_genNumbers) return _genNumbers;
+  const depths = computeGenerationDepths();
+  const max = depths.size ? Math.max(...depths.values()) : 0;
+  _genNumbers = new Map();
+  for (const [id, d] of depths) _genNumbers.set(id, max - d);
+  return _genNumbers;
+}
+
+// How many generations the loaded file spans (0 when there is nothing to show).
+function generationCount() {
+  const g = generationNumbers();
+  return g.size ? Math.max(...g.values()) + 1 : 0;
+}
 
 // Build estimated birth years for every individual using a multi-pass BFS:
 //  1. Seed with known birthYears
@@ -1935,11 +2175,10 @@ function estimateBirthYear(n) {
 function applyTimelineYFix() {
   if (!graph3d) return;
   const gd = graph3d.graphData();
-  if (sortByTime3D && _birthYearRange) {
+  if (stratify3D !== 'off') {
     gd.nodes.forEach(n => {
-      const yr = estimateBirthYear(n);
-      const y = yearTo3DY(yr);
-      n.fy = (y !== null) ? y : undefined; // pin if we have a year, float otherwise
+      const y = nodeStratY(n);
+      n.fy = (y !== null) ? y : undefined; // pin where we can place them, float otherwise
     });
   } else {
     gd.nodes.forEach(n => { n.fy = undefined; });
@@ -2383,6 +2622,11 @@ function buildAndRunSimulation(opts = {}) {
   const minBY = birthYears.length ? Math.min(...birthYears) : 1750;
   const maxBY = birthYears.length ? Math.max(...birthYears) : 2025;
   _birthYearRange = { min: minBY, max: maxBY };
+
+  // ...and the generation range, for the other way of stacking them.
+  const gd = computeGenerationDepths();
+  const gs = nodes.filter(n => n.type === 'INDI' && gd.has(n.id)).map(n => gd.get(n.id));
+  _genRange3D = gs.length ? { min: Math.min(...gs), max: Math.max(...gs) } : null;
 
   // Compute estimated birth years for persons without one (uses generation & relation info)
   console.time('[sim] computeEstimatedYears'); computeEstimatedYears(); console.timeEnd('[sim] computeEstimatedYears');
@@ -3509,6 +3753,7 @@ function _loadDatasetFile(file) {
     try {
       _nodeObjCache = new Map(); // fresh dataset: don't reuse positions from a possibly-unrelated previous one
       focusRootId = null;        // and no focus person carries over
+      genRange = null;           // nor a band of generations this file may not have
       const ext = file.name.toLowerCase();
       if (ext.endsWith('.json')) {
         const result = GEDCOMModule.importJSON(evt.target.result);
@@ -5015,6 +5260,10 @@ window._onLanguageChanged = () => {
   updateViewToggleUI();
   updateFocusUI();
   updateHLButtons();
+  // The axis labels are drawn into textures, not DOM, so applyTranslations
+  // cannot reach them — "Gen 1" would stay in the old language until something
+  // else happened to rebuild the axis.
+  if (graph3d && stratify3D === 'generation') build3DTimeline();
 };
 
 function _push3DData() {
@@ -5040,9 +5289,9 @@ function updateViewToggleUI() {
   if (c3d) c3d.style.display = in3d ? 'block' : 'none';
 
   const rows = {
-    'sort-time-3d-row':  'flex',
+    'sort-time-3d-row':  'block',
     'show-names-3d-row': 'flex',
-    'time-spread-row':   sortByTime3D ? 'block' : 'none',
+    'time-spread-row':   stratify3D !== 'off' ? 'block' : 'none',
   };
   for (const [id, shown] of Object.entries(rows)) {
     const el = document.getElementById(id);
@@ -5105,9 +5354,90 @@ function setFocusLimit(v) {
   if (focusRootId) _refocus();
 }
 
+// The two thumbs are two native range inputs stacked on top of each other, so
+// either one can be dragged past the other. Rather than fighting that, take
+// whichever pair of values comes back and sort it — dragging "min" past "max"
+// then reads as the reader grabbing the other end, which is what they meant.
+function _genRangePair(min, max) {
+  const last = generationCount() - 1;
+  if (last < 0) return null;
+  let lo = Math.max(0, Math.min(last, parseInt(min)));
+  let hi = Math.max(0, Math.min(last, parseInt(max)));
+  if (lo > hi) [lo, hi] = [hi, lo];
+  return { lo, hi, last };
+}
+
+// Dragging fires `input` for every step, and refiltering costs well over a
+// second on a large file in 3D — so a drag only repaints the label and the
+// track it is sliding along. The filter runs on `change`, which the browser
+// fires once, when the handle is let go.
+function previewGenRange(min, max) {
+  const p = _genRangePair(min, max);
+  if (p) _paintGenRange(p.lo, p.hi, p.last);
+}
+
+function setGenRange(min, max) {
+  const p = _genRangePair(min, max);
+  if (!p) return;
+  genRange = (p.lo === 0 && p.hi === p.last) ? null : { min: p.lo, max: p.hi };
+  updateGenRangeUI();
+  applyFilter();
+}
+
+// The label and the shaded span between the handles — the only two things a
+// drag is allowed to touch.
+function _paintGenRange(lo, hi, last) {
+  const out = document.getElementById('gen-range-val');
+  const box = document.getElementById('gen-range');
+  if (out) out.textContent = lo === hi ? lo : `${lo} – ${hi}`;
+  if (box && last > 0) {
+    box.style.setProperty('--gen-lo', (lo / last) * 100 + '%');
+    box.style.setProperty('--gen-hi', (hi / last) * 100 + '%');
+  }
+}
+
+// Slider bounds and tick labels come from the file, so they are rebuilt with it.
+function updateGenRangeUI() {
+  const row  = document.getElementById('gen-range-row');
+  const box  = document.getElementById('gen-range');
+  const lo   = document.getElementById('gen-range-min');
+  const hi   = document.getElementById('gen-range-max');
+  const tick = document.getElementById('gen-range-ticks');
+  if (!row || !box || !lo || !hi) return;
+
+  const last = generationCount() - 1;
+  // One generation is not a range, and no generations is not a control.
+  const show = last > 0 ? '' : 'none';
+  row.style.display = box.style.display = show;
+  if (tick) tick.style.display = show;
+  if (last <= 0) return;
+
+  const sel = genRange || { min: 0, max: last };
+  for (const el of [lo, hi]) { el.min = 0; el.max = last; }
+  lo.value = sel.min;
+  hi.value = sel.max;
+
+  // Ticks are the datalist, rendered as its own flex row of labels. Past a
+  // handful of generations every label would not fit, so thin them out and
+  // keep the two ends — those are the ones the reader is aiming at.
+  if (tick && tick.childElementCount !== last + 1) {
+    const step = Math.ceil((last + 1) / 12);
+    tick.innerHTML = '';
+    for (let g = 0; g <= last; g++) {
+      const o = document.createElement('option');
+      o.value = g;
+      o.label = (g % step === 0 || g === last) ? g : '';
+      tick.appendChild(o);
+    }
+  }
+
+  _paintGenRange(sel.min, sel.max, last);
+}
+
 function updateFocusUI() {
   const panel = document.getElementById('focus-panel');
   if (!panel) return;
+  updateGenRangeUI();
   // The panel starts hidden in the markup and used to be revealed by the same
   // line that hid it again in 3D. It belongs to both views now, so it is simply
   // shown once there is a tree to focus within.
@@ -5518,13 +5848,18 @@ function build3DTimeline() {
     graph3d.scene().remove(_timeline3DObj);
     _timeline3DObj = null;
   }
-  if (!sortByTime3D || !_birthYearRange || !showTimeline3D) return;
+  if (stratify3D === 'off' || !showTimeline3D) return;
+  const byGen = stratify3D === 'generation';
+  if (byGen ? !_genRange3D : !_birthYearRange) return;
 
-  const { min: minYr, max: maxYr } = _birthYearRange;
-  const span = Math.max(maxYr - minYr, 1);
-  // topY/botY derived from the SAME yearTo3DY function — exact match with forceY targets
-  const topY = yearTo3DY(minYr); // oldest → positive Y
-  const botY = yearTo3DY(maxYr); // newest → negative Y
+  // One axis, two scales. The ticks come from whichever range is in play and
+  // the ends from the same mapping the nodes were pinned with, so the rings sit
+  // exactly at node level rather than approximately.
+  const { min: minTick, max: maxTick } = byGen ? _genRange3D : _birthYearRange;
+  const toY = byGen ? genTo3DY : yearTo3DY;
+  const span = Math.max(maxTick - minTick, 1);
+  const topY = toY(minTick); // earliest → positive Y
+  const botY = toY(maxTick); // latest   → negative Y
   const totalH = topY - botY;    // = 2 * _3dYHalfSpan
 
   const group = new THREE.Group();
@@ -5538,14 +5873,16 @@ function build3DTimeline() {
   spine.position.set(0, (topY + botY) / 2, 0);
   group.add(spine);
 
-  // ── Year ticks + labels ──
-  const step = span > 200 ? 50 : span > 80 ? 25 : 10;
-  const startYr = Math.ceil(minYr / step) * step;
+  // ── Ticks + labels ──
+  // Every generation gets a ring; years get a round step so the axis is not a
+  // wall of labels.
+  const step = byGen ? 1 : span > 200 ? 50 : span > 80 ? 25 : 10;
+  const startYr = byGen ? minTick : Math.ceil(minTick / step) * step;
   const ringMat = new THREE.MeshBasicMaterial({ color: 0x5588cc, transparent: true, opacity: 0.70, side: THREE.DoubleSide, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
 
-  for (let yr = startYr; yr <= maxYr; yr += step) {
-    const y = yearTo3DY(yr); // exact same function → rings sit at node level
+  for (let yr = startYr; yr <= maxTick; yr += step) {
+    const y = toY(yr); // exact same function → rings sit at node level
 
     // Horizontal ring (torus lying flat)
     const ringGeo = new THREE.TorusGeometry(14, 0.5, 8, 40);
@@ -5555,8 +5892,13 @@ function build3DTimeline() {
     ring.position.set(0, y, 0);
     group.add(ring);
 
-    // Year label sprite — placed just outside the ring
-    const sprite = makeYearSprite(yr);
+    // Label sprite — placed just outside the ring.
+    // Generations are numbered from the bottom up: the youngest people on the
+    // chart are generation 0 and the count rises going back in time, so the
+    // number reads as "how many generations back from the present" and does not
+    // shift when an older branch is added above. Depth runs the other way —
+    // it counts ancestors above a person — hence the subtraction.
+    const sprite = makeYearSprite(byGen ? t('sidebar.genLabel', { n: maxTick - yr }) : yr);
     sprite.position.set(22, y, 0);
     group.add(sprite);
   }
@@ -6197,21 +6539,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 3D: sort by time + show timeline
-  document.getElementById('sort-time-3d-toggle').addEventListener('change', function () {
-    sortByTime3D = this.checked;
-    document.getElementById('time-spread-row').style.display = sortByTime3D ? 'block' : 'none';
-    if (graph3d) {
-      applyTimelineYFix();        // pin/unpin Y positions immediately
-      graph3d.d3ReheatSimulation(); // let X/Z settle
-      build3DTimeline();
-    }
-  });
+  const stratSel = document.getElementById('stratify-3d-select');
+  if (stratSel) {
+    stratSel.value = stratify3D;
+    document.getElementById('time-spread-row').style.display =
+      stratify3D !== 'off' ? 'block' : 'none';
+    stratSel.addEventListener('change', function () {
+      stratify3D = this.value;
+      localStorage.setItem('stratify3D', stratify3D);
+      document.getElementById('time-spread-row').style.display =
+        stratify3D !== 'off' ? 'block' : 'none';
+      if (graph3d) {
+        applyTimelineYFix();          // pin/unpin Y positions immediately
+        graph3d.d3ReheatSimulation(); // let X/Z settle
+        build3DTimeline();
+      }
+    });
+  }
 
   // 3D: time axis spread slider
   document.getElementById('time-spread-slider').addEventListener('input', function () {
     _3dYHalfSpan = +this.value;
     document.getElementById('time-spread-val').textContent = this.value;
-    if (graph3d && sortByTime3D) {
+    if (graph3d && stratify3D !== 'off') {
       applyTimelineYFix();          // recalculate Y pins with new halfSpan
       graph3d.d3ReheatSimulation();
       build3DTimeline();            // rebuild rings at new positions

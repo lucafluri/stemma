@@ -75,6 +75,22 @@
         <option value="2" label="2"></option><option value="3" label="3"></option>
         <option value="4" label="4"></option>
       </datalist>
+      <div class="focus-limit-row" id="gen-range-row" data-i18n-title="focus.genRangeTitle"
+           title="Nur diese Generationen zeigen — 0 ist die jüngste." style="display:none">
+        <span data-i18n="focus.genRange">Generationen</span>
+        <span id="gen-range-val">0</span>
+      </div>
+      <div class="dual-range" id="gen-range" style="display:none">
+        <input type="range" id="gen-range-min" min="0" max="0" step="1" value="0"
+               data-i18n-aria="focus.genRangeFrom" aria-label="Jüngste gezeigte Generation"
+               oninput="previewGenRange(this.value, document.getElementById('gen-range-max').value)"
+               onchange="setGenRange(this.value, document.getElementById('gen-range-max').value)">
+        <input type="range" id="gen-range-max" min="0" max="0" step="1" value="0"
+               data-i18n-aria="focus.genRangeTo" aria-label="Älteste gezeigte Generation"
+               oninput="previewGenRange(document.getElementById('gen-range-min').value, this.value)"
+               onchange="setGenRange(document.getElementById('gen-range-min').value, this.value)">
+      </div>
+      <datalist id="gen-range-ticks" style="display:none"></datalist>
       <div id="focus-hidden-info" style="display:none"></div>
       <button class="sidebar-btn" onclick="export2DImage()" style="margin-top:6px"
               data-i18n-title="focus.exportPNGTitle" title="Das ganze Diagramm als PNG speichern, unabhängig vom Zoom">&#x1F4E5;
@@ -92,14 +108,20 @@
         <input type="checkbox" id="fam-nodes-toggle" checked>
         <span data-i18n="sidebar.famNodes">Familien-Knoten anzeigen</span>
       </label>
-      <label class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px">
-        <input type="checkbox" id="sort-time-3d-toggle" checked>
-        <span data-i18n="sidebar.sortByTime3d">Nach Zeit sortieren (3D)</span>
-      </label>
+      <div class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px;display:block">
+        <div style="font-size:11px;color:#888;margin-bottom:3px" data-i18n="sidebar.stratify3d">Stapeln nach (3D)</div>
+        <select id="stratify-3d-select" class="sidebar-select"
+                data-i18n-title="sidebar.stratify3dTitle"
+                title="Wonach sich die Höhe im 3D-Bild richtet.">
+          <option value="time" data-i18n="sidebar.stratifyTime">Zeit</option>
+          <option value="generation" data-i18n="sidebar.stratifyGen">Generation</option>
+          <option value="off" data-i18n="sidebar.stratifyOff">nicht stapeln</option>
+        </select>
+      </div>
       <div id="time-spread-row" style="padding:4px 2px 2px 2px;border-top:none">
         <label class="sidebar-toggle" style="border-top:none;padding-top:0;margin-bottom:4px">
           <input type="checkbox" id="show-timeline-toggle" checked>
-          <span data-i18n="sidebar.showTimeline">Zeitachse anzeigen</span>
+          <span data-i18n="sidebar.showTimeline">Achse anzeigen</span>
         </label>
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
           <span data-i18n="sidebar.timeSpread">Zeitachsen-Spreizung</span>

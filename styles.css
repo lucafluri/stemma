@@ -160,6 +160,17 @@ body {
 /* Takes the spare room on a tall window and scrolls within itself on a short
    one, but never below a height you can actually use. `min-height: 0` let it
    collapse to nothing the moment the panels above grew. */
+.sidebar-select {
+  width: 100%;
+  background: #2e2e2e;
+  color: #e0e0e0;
+  border: 1px solid #484848;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 #surname-list {
   overflow-y: auto;
   font-size: 12px;
@@ -269,7 +280,65 @@ body {
   margin-bottom: 3px;
 }
 .focus-limit-row #focus-limit-val,
+.focus-limit-row #gen-range-val,
 .focus-limit-row #cousin-degree-val { color: #d2d2d2; font-variant-numeric: tabular-nums; }
+
+/* Two-handle range. There is no native one, and two separate sliders read as
+   two settings rather than as one span — so stack two native inputs in the
+   same box and let each contribute nothing but its thumb. The track is drawn
+   once, by the container, which is also the only way to shade the part of it
+   that lies between the handles. */
+.dual-range {
+  position: relative;
+  height: 18px;
+  --gen-lo: 0%;
+  --gen-hi: 100%;
+}
+.dual-range::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: linear-gradient(to right,
+    #3a3a3a 0, #3a3a3a var(--gen-lo),
+    #f2f2f2 var(--gen-lo), #f2f2f2 var(--gen-hi),
+    #3a3a3a var(--gen-hi), #3a3a3a 100%);
+}
+.dual-range input[type="range"] {
+  position: absolute;
+  left: 0; top: 0;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  /* Only the thumbs take the mouse; anywhere else the click reaches the input
+     underneath, so the handle nearer the pointer is always the one grabbed. */
+  pointer-events: none;
+}
+.dual-range input[type="range"]::-webkit-slider-runnable-track { background: none; height: 18px; }
+.dual-range input[type="range"]::-moz-range-track { background: none; height: 18px; }
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  cursor: pointer;
+  width: 12px; height: 12px;
+  margin-top: 3px;              /* webkit will not centre a thumb on its track */
+  border-radius: 50%;
+  background: #f2f2f2;
+  border: 1px solid #1a1a1a;
+}
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  cursor: pointer;
+  width: 12px; height: 12px;
+  border: 1px solid #1a1a1a;
+  border-radius: 50%;
+  background: #f2f2f2;
+}
 
 #focus-limit-slider,
 #cousin-degree-slider {
@@ -281,7 +350,8 @@ body {
 /* Tick marks come from the <datalist>. Browsers render them, but the default
    labels sit in the page's text colour, which is unreadable on this panel. */
 #cousin-degree-slider { margin-bottom: 0; }
-#cousin-degree-ticks {
+#cousin-degree-ticks,
+#gen-range-ticks {
   display: flex;
   justify-content: space-between;
   width: 100%;
@@ -290,7 +360,8 @@ body {
   color: #6a6a6a;
   font-variant-numeric: tabular-nums;
 }
-#cousin-degree-ticks option { padding: 0; }
+#cousin-degree-ticks option,
+#gen-range-ticks option { padding: 0; }
 
 #focus-hidden-info {
   font-size: 11px;
