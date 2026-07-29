@@ -257,13 +257,29 @@ body {
   color: #888888;
   margin-bottom: 3px;
 }
-.focus-limit-row #focus-limit-val { color: #d2d2d2; font-variant-numeric: tabular-nums; }
+.focus-limit-row #focus-limit-val,
+.focus-limit-row #cousin-degree-val { color: #d2d2d2; font-variant-numeric: tabular-nums; }
 
-#focus-limit-slider {
+#focus-limit-slider,
+#cousin-degree-slider {
   width: 100%;
   accent-color: #f2f2f2;
   cursor: pointer;
 }
+
+/* Tick marks come from the <datalist>. Browsers render them, but the default
+   labels sit in the page's text colour, which is unreadable on this panel. */
+#cousin-degree-slider { margin-bottom: 0; }
+#cousin-degree-ticks {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 2px;
+  font-size: 9px;
+  color: #6a6a6a;
+  font-variant-numeric: tabular-nums;
+}
+#cousin-degree-ticks option { padding: 0; }
 
 #focus-hidden-info {
   font-size: 11px;

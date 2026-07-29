@@ -26,6 +26,7 @@ let zoomBehavior = null;  // d3.zoom() instance
 let linkSel     = null;
 let nodeSel     = null;
 let labelSel    = null;
+let yearSel     = null;   // the birth–death line under each name
 
 let currentZoom  = 1;
 let selectedIndiId = null;    // currently shown in detail panel
@@ -199,10 +200,22 @@ let currentView    = localStorage.getItem('viewMode') === '2d' ? '2d' : '3d';   
 // the `focusLimit` people closest to them in the relationship graph.
 let focusRootId = null;
 let focusLimit  = parseInt(localStorage.getItem('focusLimit')) || 120;
+// How far out the chart follows collateral branches, as a cousin degree: 1 is
+// first cousins, 2 second cousins, 0 no cousins at all. Anything past first
+// cousins is a lot of people who are barely related, so it is off by default
+// and opted into. Parsed explicitly rather than with `||` — 0 is a real choice
+// here and `|| 1` would silently turn it back on.
+let cousinDegree = parseInt(localStorage.getItem('cousinDegree'));
+if (!Number.isFinite(cousinDegree)) cousinDegree = 1;
 // Classical ancestry chart (layered rows) instead of the force layout.
 let treeLayout  = localStorage.getItem('treeLayout') !== '0';
 let _lineageGen = null;   // id -> chart row, filled by computeLineageSet()
-let _treeBusY   = null;   // FAM id -> y of its child connectors' horizontal run
+let _treeBusY   = null;   // FAM id (and "parent~child") -> y of the sibling bar
+let _treeOmitted = null;  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch markers
+// People pulled back in by clicking a "+N" chip. They survive re-focusing on
+// the same person, and are dropped when the subject changes — the expansions
+// were about *that* chart.
+let _revealed = new Set();
 let _birthYearRange = null;  // { min, max } saved for 3D stratification
 let _3dMousePos    = { x: 0, y: 0 };
 
@@ -253,6 +266,38 @@ const NODE_COLOR_DEFAULTS = {
 let nodeColors = { ...NODE_COLOR_DEFAULTS };
 
 let famNodeSize = parseInt(localStorage.getItem('famNodeSize')) || 1;
+
+// In the classical chart the marriage marker is structural, not decoration:
+// every marriage line ends on it and every child line starts from it. At the
+// force view's default of 1px it is invisible, so all of those connectors look
+// like they stop in mid-air. Give the chart a floor; above it the user's own
+// setting still applies.
+const FAM_MARKER_MIN = 4;
+function famMarkerSize() {
+  return useTreeLayout() ? Math.max(FAM_MARKER_MIN, famNodeSize) : famNodeSize;
+}
+
+// INDI nodes render as filled rounded-rect "chips" with the name inside —
+// the compact box style of mobile family-tree apps — rather than a dot with
+// a label floating above it. Fixed in graph units, so the boxes scale with
+// zoom exactly like the connectors they sit on.
+const NODE_BOX_W  = 92;
+const NODE_BOX_H  = 30;   // two lines: name, then the years under it
+const NODE_BOX_RX = 5;
+const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, not the screen
+const NODE_YEAR_FONT = 8;
+
+// Dates the way a printed chart writes them under a name: a span when both
+// ends are known, otherwise the one that is, marked with which it is. Death
+// years are not parsed onto the individual, so read them off the record here.
+function nodeYears(indi) {
+  const b = indi.birthYear || null;
+  const d = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || null;
+  if (b && d) return `${b}–${d}`;
+  if (b) return `*${b}`;
+  if (d) return `†${d}`;
+  return '';
+}
 
 // ═══════════════════════════════════════════════════════════════
 // MOBILE SIDEBAR TOGGLE
@@ -586,6 +631,17 @@ function labelColor(n) {
   return indiColor(n.data);
 }
 
+// The name now sits inside a filled box rather than floating beside a dot,
+// so its color has to answer to that fill's brightness or pastel surname
+// hues (and the light "unknown" grey) render invisible white-on-white text.
+function contrastTextColor(hex) {
+  const c = (hex || '').replace('#', '');
+  if (c.length !== 6) return '#ffffff';
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 140 ? '#1a1a1a' : '#ffffff';
+}
+
 // ── Visibility helpers (surname filter) ──
 function hasEnabledFamilyName(indi) {
   const names = new Set([indi.surn, indi.maidenName].filter(Boolean));
@@ -619,43 +675,55 @@ function isNodeVisible(n) {
 // dropped is therefore always the *least* related — a ring that only partly
 // fits is filled to the budget and the rest is cut.
 // Returns a Set of node ids (INDI + FAM), or null when focus is off.
-// The classical chart shows a *lineage*, not a neighbourhood: direct ancestors
-// above, descendants below, each with their spouses. The BFS ball below is
-// right for the force view but wrong here — it drags in cousins, in-laws and
-// their unrelated lines, every one of which becomes its own leaf column and
-// stretches the chart sideways without telling you anything about the subject.
-// Generations are taken whole, nearest first, until the budget runs out.
+// The classical chart shows a *blood* relationship, not a neighbourhood: the
+// subject's ancestors and descendants, plus siblings and first cousins (an
+// ancestor's children and grandchildren) — but nothing more distant. A married-in
+// person is still shown right beside the blood relative they married (one hop,
+// e.g. an uncle's wife), just never a doorway to their own side of the family.
+// Rings are taken whole, nearest first, until the budget runs out.
+
+// How far sideways an ancestor's own descendants may fan out before they stop
+// counting as "close" collateral relatives. Ancestor generation 1 (parents) may
+// fan 1 row down — their other children are the subject's siblings. Generation 2
+// (grandparents) may fan 2 rows down — children then grandchildren are aunts/
+// uncles then first cousins. Anything further up contributes only itself to the
+// direct line, no collateral branch at all.
+// Nth cousins share an ancestor n+1 generations up and sit n+1 steps back down
+// from them, so the degree the reader asks for maps straight onto how far each
+// ancestor's branch may fan out. Beyond that an ancestor contributes only
+// themselves to the direct line.
+//
+// The parents' branch is the exception and is always walked two steps: that is
+// siblings and their children, which nobody thinks of as distant relatives.
+function _collateralMaxDepth(ancestorGen, degree) {
+  if (ancestorGen === 1) return 2;
+  if (ancestorGen <= degree + 1) return ancestorGen;
+  return 0;
+}
+
 function computeLineageSet() {
   const people = new Set([focusRootId]);
   const fams   = new Set();
   const room   = () => people.size < focusLimit;
 
   // The walk already knows everyone's generation: one step up is one row up,
-  // one step down is one row down, a spouse shares their partner's row. Taking
-  // the row straight from the walk keeps couples level and children exactly one
-  // row under their parents by construction. Deriving rows afterwards from
-  // ancestor depth cannot do that — spouses have unequal depths, and levelling
-  // them after the fact cascades into dozens of phantom generations.
+  // one step down is one row down. Taking the row straight from the walk keeps
+  // couples level and children exactly one row under their parents by
+  // construction. Deriving rows afterwards from ancestor depth cannot do that —
+  // parents have unequal depths, and levelling them after the fact cascades
+  // into dozens of phantom generations.
   _lineageGen = new Map([[focusRootId, 0]]);
 
-  // A couple is one unit on a chart — a spouse never counts as a generation.
-  const addSpouses = id => {
-    for (const famId of (individuals.get(id)?.fams || [])) {
-      const fam = families.get(famId);
-      if (!fam) continue;
-      fams.add(famId);
-      const sp = fam.husb === id ? fam.wife : fam.husb;
-      if (sp && individuals.has(sp) && !people.has(sp) && room()) {
-        people.add(sp);
-        _lineageGen.set(sp, _lineageGen.get(id));
-      }
-    }
-  };
-  addSpouses(focusRootId);
+  // Tracks, for people reached through the sideways "down" walk, which
+  // ancestor's collateral branch they belong to and how many rows below that
+  // ancestor they sit — the two numbers _collateralMaxDepth() caps. `anc: null`
+  // marks the focus person's own direct descendant line, which is never capped.
+  const downMeta = new Map([[focusRootId, { anc: null, depth: 0 }]]);
 
   let up = [focusRootId], down = [focusRootId];
   while ((up.length || down.length) && room()) {
-    const nextUp = [];
+    const nextUp = [], nextDown = [];
+
     for (const id of up) {
       for (const famId of (individuals.get(id)?.famc || [])) {
         const fam = families.get(famId);
@@ -667,28 +735,103 @@ function computeLineageSet() {
           people.add(p);
           _lineageGen.set(p, _lineageGen.get(id) - 1);
           nextUp.push(p);
+          // Every ancestor is also walked downwards, which is what puts the
+          // subject's siblings and first cousins on the chart — capped below.
+          downMeta.set(p, { anc: p, depth: 0 });
+          nextDown.push(p);
         }
       }
     }
 
-    const nextDown = [];
     for (const id of down) {
+      const meta = downMeta.get(id);
       for (const famId of (individuals.get(id)?.fams || [])) {
         const fam = families.get(famId);
         if (!fam) continue;
         fams.add(famId);
         for (const cid of fam.chil) {
           if (!individuals.has(cid) || people.has(cid)) continue;
+          let cMeta;
+          if (!meta || meta.anc === null) {
+            cMeta = { anc: null, depth: 0 };   // focus person's own descendants: unlimited
+          } else {
+            const ancestorGen = -(_lineageGen.get(meta.anc) ?? 0);
+            const depth = meta.depth + 1;
+            if (depth > _collateralMaxDepth(ancestorGen, cousinDegree)) continue;   // too distant a cousin
+            cMeta = { anc: meta.anc, depth };
+          }
           if (!room()) break;
           people.add(cid);
           _lineageGen.set(cid, _lineageGen.get(id) + 1);
+          downMeta.set(cid, cMeta);
           nextDown.push(cid);
-          addSpouses(cid);
         }
       }
     }
 
     up = nextUp; down = nextDown;
+  }
+
+  // One more hop: the spouse of every blood relative kept above gets a box
+  // right next to them — but their own parents/siblings are not walked, so
+  // this never grows the chart past "married in, one column wide."
+  for (const id of [...people]) {
+    for (const famId of (individuals.get(id)?.fams || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (!sp || sp === id || !individuals.has(sp) || people.has(sp) || !room()) continue;
+      people.add(sp);
+      fams.add(famId);
+      _lineageGen.set(sp, _lineageGen.get(id));
+    }
+  }
+
+  // People the reader asked for by clicking a "+N" chip. They come in whatever
+  // the walk decided, and ignore the budget — the click *is* the budget.
+  for (const id of (_revealed || [])) {
+    if (!individuals.has(id)) continue;
+    // Somebody opened earlier may already be here through the ordinary walk.
+    // Skipping the whole entry for them, as this did, also skipped bringing
+    // their partner in below — so a branch opened twice lost people the second
+    // time and the count stopped adding up.
+    if (!people.has(id)) people.add(id);
+    if (!_lineageGen.has(id)) {
+      // Take the generation from whichever relative is already on the chart.
+      for (const famId of (individuals.get(id).famc || [])) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        for (const p of [fam.husb, fam.wife]) {
+          if (p && _lineageGen.has(p)) _lineageGen.set(id, _lineageGen.get(p) + 1);
+        }
+      }
+      for (const famId of (individuals.get(id).fams || [])) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        for (const c of fam.chil) {
+          if (_lineageGen.has(c) && !_lineageGen.has(id)) _lineageGen.set(id, _lineageGen.get(c) - 1);
+        }
+        const sp = fam.husb === id ? fam.wife : fam.husb;
+        if (sp && _lineageGen.has(sp) && !_lineageGen.has(id)) _lineageGen.set(id, _lineageGen.get(sp));
+      }
+      if (!_lineageGen.has(id)) _lineageGen.set(id, 0);
+    }
+    for (const famId of [...(individuals.get(id).famc || []), ...(individuals.get(id).fams || [])]) {
+      if (families.has(famId)) fams.add(famId);
+    }
+    // Their partner comes with them, off-budget like the rest of this. The
+    // one-hop pass above would otherwise be asked to find room for somebody the
+    // reader has explicitly opened, and a "+14" that only ever produces eleven
+    // people is a broken promise. Their family is still not walked — the
+    // partner arrives, their side of the tree does not.
+    for (const famId of (individuals.get(id).fams || [])) {
+      const fam = families.get(famId);
+      if (!fam) continue;
+      const sp = fam.husb === id ? fam.wife : fam.husb;
+      if (!sp || sp === id || !individuals.has(sp) || people.has(sp)) continue;
+      people.add(sp);
+      _lineageGen.set(sp, _lineageGen.get(id));
+    }
   }
 
   for (const famId of [...fams]) {
@@ -779,27 +922,46 @@ function focusHiddenCount() {
 // ═══════════════════════════════════════════════════════════════
 // CLASSICAL TREE LAYOUT  (2D ancestry diagram)
 // ═══════════════════════════════════════════════════════════════
-// A deterministic layered chart instead of the force simulation:
-//   Y — generation row, straight from computeGenerationDepths(), so cousins
-//       and uncles line up with their peers rather than with their own
-//       recursion depth. The focus person's generation is row 0.
-//   X — tidy tree (Reingold–Tilford's first approximation): leaves take the
-//       next free column, every parent is centred over its children, spouses
-//       sit either side of that centre.
-// Genealogy is a graph, not a tree (remarriage, cousin marriage), so each
-// person is placed by whichever subtree reaches them first and memoised.
-// Non-overlap is enforced explicitly per row after the recursive pass, because
-// on real genealogy the recursion alone does not deliver it — see the overlap
-// removal step below.
+// A deterministic layered chart instead of the force simulation.
+//
+//   Y — the generation, and nothing else. Everybody of one generation sits on
+//       one line, always. This is the thing a family tree has to get right, so
+//       nothing downstream is ever allowed to nudge a row to make room.
+//
+//   X — solved as a layered graph, the standard treatment for exactly this
+//       shape of problem. People of generation g form one layer; the marriages
+//       below them form another, so every connector spans a single layer and
+//       none of them has to jump a rank. Each layer is ordered to keep
+//       relatives together (crossing reduction), then each node is pulled
+//       toward the average position of what it connects to, subject to a
+//       minimum gap between neighbours in the same row.
+//
+// The point of doing X this way is that genealogy is a *graph*, not a tree:
+// people remarry, cousins marry, a couple's two families of origin both want to
+// sit above them. Any scheme that hands out private x-intervals — a block, a
+// subtree, a wing — has to break those cases by force, and what it breaks first
+// is the generation rows. Relaxation has no such problem: it cannot produce an
+// overlap, because non-overlap is the constraint it solves under, and it never
+// needs to touch Y to satisfy it. Marriage and child connectors come out short
+// because the layout minimises them, not because the structure guaranteed it.
 
 // Spacing is set by the name labels, not the dots: a column narrower than a
 // typical "Christian Siegenthaler" makes neighbouring names overlap at any
 // zoom that renders them readably.
-const TREE_ROW_H   = 150;   // vertical distance between generations
-const TREE_COL_W   = 180;   // horizontal slot width for one leaf
-const TREE_SPOUSE_DX = 155; // gap between the two halves of a couple
-const TREE_FAM_DY  = 0.42;  // FAM node sits this fraction of a row below its couple
-const TREE_FAM_GAP = 90;    // extra breathing room between two sibling blocks
+const TREE_ROW_H     = 128;  // vertical distance between generations
+const TREE_COL_W     = 104;  // minimum distance between two people in a row (NODE_BOX_W + 12)
+const TREE_SPOUSE_DX = 100;  // nominal width of a couple, used for connector routing
+const TREE_FAM_DY    = 0.24; // marriage row sits this fraction of a row below its couple
+                             // — far enough to clear the bottom of a NODE_BOX_H box
+const TREE_MARK_GAP  = 26;   // minimum distance between two marriage markers in a row
+const TREE_GROUP_GAP = 40;   // extra clearance between one family's children and the next's
+const TREE_BUS_UP    = 48;   // sibling bar sits this far above the children's row
+const TREE_LANE_DY   = 20;   // and stacks up by this much when families must share a span
+const TREE_LANE_MIN  = 7;    // ...never less than this, however many lanes a row needs
+const TREE_CHIP_DX   = 22;   // "+N" chip offset from the junction it belongs to
+const TREE_CHIP_DY   = 13;
+const TREE_ORDER_PASSES = 6; // crossing-reduction sweeps
+const TREE_COORD_PASSES = 8; // coordinate relaxation sweeps
 
 // Greedy interval colouring for the horizontal connector runs between two
 // rows. Sweeps left to right and gives each run the lowest lane whose previous
@@ -828,229 +990,596 @@ function computeTreeLayout() {
   const visible = new Set(nodes.map(n => n.id));
   if (!visible.has(focusRootId)) return null;
 
-  // Rows come from the lineage walk (see computeLineageSet), which assigns them
-  // by construction. Ancestor depth is the fallback for anyone it never reached.
-  const depths  = computeGenerationDepths();
-  const rootGen = depths.get(focusRootId) ?? 0;
-  const row     = id => _lineageGen?.get(id) ?? ((depths.get(id) ?? rootGen) - rootGen);
-  const genY    = id => row(id) * TREE_ROW_H;
+  const people = [...visible].filter(id => individuals.has(id));
+  if (!people.length) return null;
 
-  const visFams = id => (individuals.get(id)?.fams || [])
-    .filter(f => visible.has(f) && families.has(f));
-  const visParents = id => {
+  // Families that join at least two people on screen. Tested by membership
+  // rather than by the FAM node being one of `nodes`, so the chart still works
+  // with the "show family nodes" toggle off — the markers are what the child
+  // connectors are grouped by either way.
+  const visFam = new Map();
+  for (const [fid, fam] of families) {
+    const par  = [fam.husb, fam.wife].filter(p => p && visible.has(p));
+    const kids = fam.chil.filter(c => visible.has(c));
+    if (par.length + kids.length >= 2) visFam.set(fid, { fam, par, kids });
+  }
+
+  const famsOf = id => (individuals.get(id)?.fams || []).filter(f => visFam.has(f));
+  const parentsOf = id => {
     const out = [];
-    for (const famId of (individuals.get(id)?.famc || [])) {
-      const fam = families.get(famId);
-      if (!fam) continue;
-      for (const p of [fam.husb, fam.wife]) if (p && visible.has(p)) out.push(p);
+    for (const fid of (individuals.get(id)?.famc || [])) {
+      const v = visFam.get(fid);
+      if (v) out.push(...v.par);
     }
     return out;
   };
 
-  const xs       = new Map();   // id -> x
-  const visiting = new Set();   // cycle guard for malformed / cousin-marriage data
-  let cursor     = 0;
-  const nextSlot = () => (cursor += TREE_COL_W) - TREE_COL_W;
-
-  // Place a person and everything descending from them; returns their x.
-  function place(id) {
-    if (xs.has(id)) return xs.get(id);
-    if (visiting.has(id)) return null;
-    visiting.add(id);
-
-    const kidXs = [];
-    for (const famId of visFams(id)) {
-      for (const cid of families.get(famId).chil) {
-        if (!visible.has(cid)) continue;
-        const cx = place(cid);
-        if (cx != null) kidXs.push(cx);
-      }
+  // ── 1. Rows ──
+  // The generation, straight from the lineage walk, which assigns it by
+  // construction (one step up is one row up). Ancestor depth is the fallback
+  // for anyone it never reached. Nothing below this point changes a row: rows
+  // are the one thing the chart has to get right, so every overlap the layout
+  // has to resolve is resolved sideways instead.
+  const depths  = computeGenerationDepths();
+  const rootGen = depths.get(focusRootId) ?? 0;
+  const gen = new Map();
+  for (const id of people) {
+    gen.set(id, _lineageGen?.get(id) ?? ((depths.get(id) ?? rootGen) - rootGen));
+  }
+  // A couple is one unit on a chart, so the two halves must be level. Repeat:
+  // levelling one couple can unlevel another through a remarriage.
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false;
+    for (const { par } of visFam.values()) {
+      if (par.length < 2) continue;
+      const g = Math.min(...par.map(p => gen.get(p)));
+      for (const p of par) if (gen.get(p) !== g) { gen.set(p, g); moved = true; }
     }
-    visiting.delete(id);
-
-    // Centre over the children's span, or take a fresh column as a leaf.
-    const centre = kidXs.length
-      ? (Math.min(...kidXs) + Math.max(...kidXs)) / 2
-      : nextSlot();
-
-    // A person with a visible spouse straddles that centre so the pair, not
-    // just one of them, sits above the children they share.
-    const spouses = [];
-    for (const famId of visFams(id)) {
-      const fam = families.get(famId);
-      const sp = fam.husb === id ? fam.wife : fam.husb;
-      if (sp && visible.has(sp) && !xs.has(sp) && sp !== id) spouses.push(sp);
-    }
-
-    xs.set(id, spouses.length ? centre - TREE_SPOUSE_DX / 2 : centre);
-    spouses.forEach((sp, i) => xs.set(sp, centre + TREE_SPOUSE_DX / 2 + i * TREE_SPOUSE_DX));
-    return xs.get(id);
+    if (!moved) break;
   }
 
-  // Start from the topmost people so whole branches lay out in one sweep;
-  // shallowest generation first, then oldest, for a stable left-to-right order.
-  const roots = [...visible]
-    .filter(id => individuals.has(id) && visParents(id).length === 0)
-    .sort((a, b) => (depths.get(a) ?? 0) - (depths.get(b) ?? 0) ||
-                    ((individuals.get(a).birthYear ?? 9999) - (individuals.get(b).birthYear ?? 9999)));
-  roots.forEach(place);
-  // Anyone left (reachable only through a cycle we broke) still needs a slot.
-  for (const id of visible) if (individuals.has(id)) place(id);
-
-  // ── Overlap removal ──
-  // The recursive pass cannot promise a clean chart on real genealogy: anyone
-  // reachable from two branches keeps the x the first branch gave them, and
-  // their parent then centres over children sitting somewhere else entirely,
-  // dropping whole subtrees on top of each other. Spouses were never allocated
-  // a column at all. So enforce the constraint that actually matters — within a
-  // row, no two people closer than one column — and alternate it with pulling
-  // parents back over their children so the result still reads as a tree.
-  const byRow = new Map();
-  for (const id of xs.keys()) {
-    const r = row(id);
-    if (!byRow.has(r)) byRow.set(r, []);
-    byRow.get(r).push(id);
+  // Marriages get a layer of their own between the couple and their children,
+  // so a person→marriage→child path is two single-layer connectors rather than
+  // one that has to be routed past a whole rank of boxes.
+  const famGen = new Map();
+  for (const [fid, v] of visFam) {
+    famGen.set(fid, v.par.length
+      ? Math.max(...v.par.map(p => gen.get(p)))
+      : Math.min(...v.kids.map(c => gen.get(c))) - 1);
   }
 
-  // Sibling blocks: the children of one family, plus the spouses they marry in,
-  // belong together. Holding a gap between blocks is what keeps one family's
-  // child connectors from running through the middle of the family next door.
-  const block = new Map();
-  for (const id of visible) {
-    if (!families.has(id)) continue;
-    for (const cid of families.get(id).chil) {
-      if (xs.has(cid) && !block.has(cid)) block.set(cid, id);
-    }
-  }
-  for (const [cid, g] of [...block]) {
-    for (const famId of visFams(cid)) {
-      const fam = families.get(famId);
-      const sp = fam.husb === cid ? fam.wife : fam.husb;
-      if (sp && xs.has(sp) && !block.has(sp)) block.set(sp, g);
-    }
-  }
-  const blockOf = id => block.get(id) ?? ('solo:' + id);
+  // Layer index: people of generation g at 2g, the marriages under them at 2g+1.
+  const layerOf = new Map();
+  for (const id of people)    layerOf.set(id, 2 * gen.get(id));
+  for (const [fid] of visFam) layerOf.set(fid, 2 * famGen.get(fid) + 1);
 
-  // Push apart left to right, then slide the row back so its centre of mass
-  // stays put — without that every row creeps rightwards and the chart shears.
-  const separateRows = () => {
-    for (const ids of byRow.values()) {
-      ids.sort((a, b) => xs.get(a) - xs.get(b));
-      const before = ids.reduce((s, id) => s + xs.get(id), 0) / ids.length;
-      for (let i = 1; i < ids.length; i++) {
-        const gap = blockOf(ids[i - 1]) !== blockOf(ids[i]) ? TREE_FAM_GAP : 0;
-        const min = xs.get(ids[i - 1]) + TREE_COL_W + gap;
-        if (xs.get(ids[i]) < min) xs.set(ids[i], min);
-      }
-      const after = ids.reduce((s, id) => s + xs.get(id), 0) / ids.length;
-      const shift = before - after;
-      if (shift) for (const id of ids) xs.set(id, xs.get(id) + shift);
-    }
+  // Connections, weighted. A marriage pulls harder than a descent: when a
+  // husband's parents are on one side of the chart and his wife's on the other,
+  // something has to give, and it should be the two ancestries stretching
+  // rather than the couple coming apart. A couple drawn apart is read as an
+  // error; grandparents a little off-centre are not.
+  const adj = new Map();
+  const link = (a, b, w) => {
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push({ id: b, w });
+    adj.get(b).push({ id: a, w });
   };
+  for (const [fid, v] of visFam) {
+    for (const p of v.par)  link(p, fid, 3);
+    for (const c of v.kids) link(fid, c, 1);
+    // Spouses also pull on each other directly, not only through their marker.
+    // Via the marker alone a couple is only held together as hard as everything
+    // else pulling on the marker allows, and they drift apart by a column or
+    // two — enough for the marriage line between them to become the longest
+    // thing on the row.
+    if (v.par.length === 2) link(v.par[0], v.par[1], 2);
+  }
 
-  // Bottom-up: every parent wants to sit over the middle of their children.
-  const rowsDesc = [...byRow.keys()].sort((a, b) => b - a);
-  const recentreParents = () => {
-    for (const r of rowsDesc) {
-      for (const id of byRow.get(r)) {
-        const kidXs = [];
-        for (const famId of visFams(id)) {
-          for (const cid of families.get(famId).chil) {
-            if (xs.has(cid)) kidXs.push(xs.get(cid));
-          }
+  // Only the subject's own blood line gets a "cut ancestry" chip. Every leaf on
+  // the chart is missing parents in the sense that they are not drawn — most of
+  // them are people who married in, whose families were never in scope, and a
+  // chip on each is a row of markers saying nothing. What is worth marking is
+  // where the *line* stops: collateral branches run back into the same
+  // ancestors, so chipping those once, up on the line, covers them all.
+  const bloodLine = new Set([focusRootId]);
+  for (let frontier = [focusRootId]; frontier.length;) {
+    const next = [];
+    for (const id of frontier) {
+      for (const famId of (individuals.get(id)?.famc || [])) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        for (const p of [fam.husb, fam.wife]) {
+          if (p && individuals.has(p) && !bloodLine.has(p)) { bloodLine.add(p); next.push(p); }
         }
-        if (kidXs.length) xs.set(id, (Math.min(...kidXs) + Math.max(...kidXs)) / 2);
+      }
+    }
+    frontier = next;
+  }
+
+
+  const slotOf = L => L % 2 === 0 ? TREE_COL_W : TREE_MARK_GAP;
+
+  // ── 2. Order within each layer ──
+  // The seed is the whole classical shape of the chart, written as one
+  // left-to-right sequence; each layer then just sorts by it. Everything on a
+  // father's side is emitted before him and everything on a mother's side after
+  // her, recursively, so paternal lines occupy the left of the chart and
+  // maternal lines the right at every generation. The subject is emitted
+  // between the two halves of their own sibship, which is what puts them near
+  // the middle. The sweeps that follow only refine this — they reduce crossings
+  // locally and cannot untangle a bad seed, so the seed is where the shape of
+  // the chart is actually decided.
+  const spousesOf = id => famsOf(id)
+    .map(f => { const v = visFam.get(f); return v.fam.husb === id ? v.fam.wife : v.fam.husb; })
+    .filter(sp => sp && sp !== id && visible.has(sp));
+
+  // ── Marriage groups ──
+  // Everyone linked by marriage forms one group, laid out as one run so that
+  // each of them ends up beside somebody they actually married: a widow between
+  // her two husbands, and a second husband next to his own first wife. Seating
+  // only a person's own spouses strands the far end of such a chain somewhere
+  // else, and the marriage line then reaches across whoever landed in between —
+  // which is what a stray dashed line is. The group is also the unit the
+  // ordering sweeps move, so nothing can be sorted into the middle of a couple.
+  const mateGroup = new Map();   // person -> group id
+  const chainOf   = [];          // group id -> members, left to right
+  for (const id of people) {
+    if (mateGroup.has(id)) continue;
+    const g = chainOf.length;
+    const group = new Set([id]);
+    for (const m of group) {
+      for (const sp of spousesOf(m)) if (!mateGroup.has(sp)) group.add(sp);
+    }
+    const deg = m => spousesOf(m).filter(sp => group.has(sp)).length;
+    // Start at an end of the chain, so the walk lays it out in one run.
+    let start = id;
+    for (const m of group) if (deg(m) <= 1) { start = m; break; }
+    const chain = [];
+    (function walk(m) {
+      if (chain.includes(m)) return;
+      chain.push(m);
+      for (const sp of spousesOf(m)) if (group.has(sp)) walk(sp);
+    })(start);
+    // Father left, mother right: flip the run if it came out wife-first. It has
+    // to be judged on the marriage that actually joins the first two of them —
+    // any other marriage of theirs says nothing about which way round this run
+    // is. Beyond the first pair the order is fixed by the marriages themselves.
+    if (chain.length > 1) {
+      const joining = famsOf(chain[0]).find(f => {
+        const fam = visFam.get(f).fam;
+        return fam.husb === chain[1] || fam.wife === chain[1];
+      });
+      if (joining && families.get(joining).wife === chain[0]) chain.reverse();
+    }
+    for (const m of chain) mateGroup.set(m, g);
+    chainOf.push(chain);
+  }
+
+  const seq = new Map();
+  let seqN = 0;
+  const push = id => { if (id != null && !seq.has(id)) seq.set(id, seqN++); };
+  const famcOf = id => (individuals.get(id)?.famc || []).find(f => visFam.has(f));
+  const seenFam = new Set();
+
+  // A person, everyone they are married to, and everything descending from any
+  // of them.
+  const emitDesc = id => {
+    if (seq.has(id)) return;
+    const chain = chainOf[mateGroup.get(id)];
+    for (const m of chain) push(m);
+    for (const m of chain) {
+      for (const fid of famsOf(m)) {
+        if (seenFam.has(fid)) continue;
+        seenFam.add(fid);
+        push(fid);
+        for (const c of visFam.get(fid).kids) emitDesc(c);
       }
     }
   };
 
-  // Ends on a separation pass, so non-overlap holds whatever the recentring did.
-  separateRows();
-  for (let i = 0; i < 4; i++) { recentreParents(); separateRows(); }
+  // Everything on one person's side of the family — their parents, their
+  // parents' whole ancestry, and their brothers and sisters with all their
+  // issue. The caller decides whether this lands before or after the person, by
+  // when it calls; that choice is the paternal-left / maternal-right rule.
+  const emitSide = x => {
+    const fid = famcOf(x);
+    if (!fid || seenFam.has(fid)) return;
+    seenFam.add(fid);
+    const v = visFam.get(fid);
+    const fa = v.par.find(p => p === v.fam.husb) ?? null;
+    const mo = v.par.find(p => p === v.fam.wife) ?? null;
+    if (fa) emitSide(fa);
+    push(fa); push(fid); push(mo);
+    if (mo) emitSide(mo);
+    for (const c of v.kids) if (c !== x) emitDesc(c);
+  };
+
+  const subjFam = famcOf(focusRootId);
+  if (subjFam) {
+    seenFam.add(subjFam);
+    const v = visFam.get(subjFam);
+    const fa = v.par.find(p => p === v.fam.husb) ?? null;
+    const mo = v.par.find(p => p === v.fam.wife) ?? null;
+    const sibs = v.kids.filter(c => c !== focusRootId);
+    const half = Math.floor(sibs.length / 2);
+    if (fa) emitSide(fa);
+    push(fa); push(subjFam); push(mo);
+    sibs.slice(0, half).forEach(emitDesc);
+    emitDesc(focusRootId);
+    sibs.slice(half).forEach(emitDesc);
+    if (mo) emitSide(mo);
+  } else {
+    emitDesc(focusRootId);
+  }
+
+  // Anyone the walk never reached — an unconnected fragment of the focus set.
+  const byBirth = (a, b) =>
+    (gen.get(a) - gen.get(b)) ||
+    ((individuals.get(a).birthYear ?? 9999) - (individuals.get(b).birthYear ?? 9999));
+  people.filter(id => parentsOf(id).length === 0).sort(byBirth).forEach(emitDesc);
+  people.forEach(emitDesc);
+  for (const [fid] of visFam) push(fid);
+
+  const layers = new Map();
+  for (const [id, L] of layerOf) {
+    if (!layers.has(L)) layers.set(L, []);
+    layers.get(L).push(id);
+  }
+  const keys = [...layers.keys()].sort((a, b) => a - b);
+  for (const L of keys) layers.get(L).sort((a, b) => seq.get(a) - seq.get(b));
+
+  // Position within the marriage run — the sweeps may reorder the runs, never
+  // the people inside one, so a couple can never be pulled apart.
+  const inChain = new Map();
+  chainOf.forEach(chain => chain.forEach((m, i) => inChain.set(m, i)));
+
+  // Where each married group first appears in the seed. Ties in the sweeps
+  // below are broken by this, so equal barycentres — which is the normal case
+  // for a row of siblings, who all hang off the same marriage — fall back to
+  // the shape the seed laid out rather than to whatever order the groups
+  // happened to be discovered in.
+  const groupSeq = new Map();
+  for (const id of people) {
+    const k = mateGroup.get(id);
+    groupSeq.set(k, Math.min(groupSeq.get(k) ?? Infinity, seq.get(id) ?? 0));
+  }
+  const gseq = id => groupSeq.get(mateGroup.get(id)) ?? (seq.get(id) ?? 0);
+
+  const idx = new Map();
+  const reindex = L => layers.get(L).forEach((id, i) => idx.set(id, i));
+  keys.forEach(reindex);
+
+  // Barycentre sweeps: order each layer by the average position of whatever it
+  // connects to in the layer just before it, alternating direction. This is what
+  // keeps a family's children together instead of scattered among their cousins.
+  for (let pass = 0; pass < TREE_ORDER_PASSES; pass++) {
+    const order = pass % 2 ? [...keys].reverse() : keys;
+    for (let i = 1; i < order.length; i++) {
+      const L = order[i], prev = order[i - 1];
+      const ids = layers.get(L);
+
+      // A barycentre is a position in the *reference* layer. A node with no
+      // connection into that layer — someone who married in, whose only link
+      // runs the other way — has no barycentre at all, and giving it a stand-in
+      // taken from this layer's own indices sorts it against numbers measured
+      // on a different scale. That is what threw people to the wrong side of
+      // the chart. Leave them out here; they are filled in below from a
+      // neighbour, which keeps them where they already were.
+      const bary = new Map();
+      for (const id of ids) {
+        const ns = (adj.get(id) || []).filter(o => layerOf.get(o.id) === prev);
+        if (ns.length) bary.set(id, ns.reduce((s, o) => s + idx.get(o.id), 0) / ns.length);
+      }
+
+      if (L % 2 === 0) {
+        // Married people share one barycentre — their group's — so the sort
+        // cannot separate them, and a spouse with no line of their own simply
+        // rides along with the partner who has one.
+        const sum = new Map(), count = new Map();
+        for (const id of ids) {
+          if (!bary.has(id)) continue;
+          const k = mateGroup.get(id);
+          sum.set(k, (sum.get(k) ?? 0) + bary.get(id));
+          count.set(k, (count.get(k) ?? 0) + 1);
+        }
+        for (const id of ids) {
+          const k = mateGroup.get(id);
+          if (count.has(k)) bary.set(id, sum.get(k) / count.get(k));
+        }
+      }
+
+      // Anyone still without one keeps their place, just after whoever precedes
+      // them in the order as it stands.
+      let last = -1;
+      for (const id of ids) {
+        if (bary.has(id)) last = bary.get(id);
+        else bary.set(id, last + 1e-6);
+      }
+
+      // Marriage runs sort as a unit and keep their internal order, so the
+      // father stays on the left of his wife and nobody is dropped between them.
+      ids.sort((a, b) => bary.get(a) - bary.get(b) ||
+                         gseq(a) - gseq(b) ||
+                         (inChain.get(a) ?? 0) - (inChain.get(b) ?? 0) ||
+                         seq.get(a) - seq.get(b));
+      reindex(L);
+    }
+  }
+
+  // ponytail: a greedy adjacent-swap pass on top of the barycentre sweeps was
+  // tried here and measurably made the chart worse — it minimises crossings
+  // between the person and marriage layers, which is not the same thing as
+  // brackets crossing on the page, and the swaps disturbed the seed order that
+  // was carrying the shape. Left out on the numbers: 4343 crossing brackets
+  // without it, 4500 with, for 66% more layout time.
+
+  // ── 3. X coordinates ──
+  // Order is settled; now pull every node toward the average x of what it
+  // connects to, while never letting two neighbours in a row come closer than
+  // the minimum gap. Repeated in both directions this settles couples beside
+  // each other, marriage markers between their spouses, and children under
+  // their parents — the things the old block layout tried to guarantee
+  // structurally and could not, because a genealogy is a graph and a block
+  // layout only fits a tree.
+  const xs = new Map();
+  for (const L of keys) {
+    let x = 0;
+    for (const id of layers.get(L)) { xs.set(id, x); x += TREE_COL_W; }
+  }
+
+  // Consecutive people of one marriage group, as they currently sit in a layer.
+  const runsIn = (L, gap) => {
+    const runs = [];
+    for (const id of layers.get(L)) {
+      const k = L % 2 === 0 ? mateGroup.get(id) : undefined;
+      const tail = runs[runs.length - 1];
+      if (tail && k !== undefined && tail.k === k) tail.ids.push(id);
+      else runs.push({ k, ids: [id] });
+    }
+    for (const r of runs) r.w = (r.ids.length - 1) * gap;
+    return runs;
+  };
+
+  // Pack a row: each run as near its target as the gaps allow. Packing once
+  // from each end and taking the midpoint shares out the slack, instead of
+  // jamming everything against whichever side happened to be packed first.
+  // `gaps[i]` is the clearance required between run i-1 and run i, so different
+  // sibling groups can be held further apart than siblings of one family.
+  const pack = (runs, target, gaps) => {
+    const lo = [], hi = [], n = runs.length;
+    for (let i = 0; i < n; i++) {
+      lo[i] = i ? Math.max(target[i], lo[i - 1] + runs[i - 1].w + gaps[i]) : target[i];
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      hi[i] = i < n - 1 ? Math.min(target[i], hi[i + 1] - runs[i].w - gaps[i + 1]) : target[i];
+    }
+    const out = runs.map((_, i) => (lo[i] + hi[i]) / 2);
+    for (let i = 1; i < n; i++) out[i] = Math.max(out[i], out[i - 1] + runs[i - 1].w + gaps[i]);
+    return out;
+  };
+
+  // Children of one family belong together; children of the next belong apart.
+  // Without the extra clearance the two families' sibling bars run into each
+  // other and you cannot tell which bracket a child hangs from — which is the
+  // one thing the bracket exists to say.
+  const famcKey = id => (individuals.get(id)?.famc || []).find(f => visFam.has(f)) ?? null;
+  const gapsFor = (runs, L) => {
+    const base = slotOf(L);
+    return runs.map((r, i) => {
+      if (!i || L % 2 !== 0) return base;
+      const prev = runs[i - 1].ids[runs[i - 1].ids.length - 1];
+      const here = r.ids[0];
+      const a = famcKey(prev), b = famcKey(here);
+      return (a && b && a !== b) ? base + TREE_GROUP_GAP : base;
+    });
+  };
+
+  const place = L => {
+    if (!layers.get(L).length) return;
+    const gap = slotOf(L);
+    // Married people move as one rigid run, fixed a column apart. Placing them
+    // individually lets two families pulling in opposite directions stretch a
+    // couple, and the marriage line between them then becomes the longest thing
+    // on the row — which is the stray dash, arrived at from the other end.
+    const runs = runsIn(L, gap);
+    const target = runs.map(r => {
+      let sum = 0, wt = 0;
+      r.ids.forEach((id, i) => {
+        for (const o of adj.get(id) || []) {
+          if (r.ids.includes(o.id)) continue;   // rigid inside the run already
+          sum += (xs.get(o.id) - i * gap) * o.w;
+          wt += o.w;
+        }
+      });
+      return wt ? sum / wt : xs.get(r.ids[0]);
+    });
+    const out = pack(runs, target, gapsFor(runs, L));
+    runs.forEach((r, i) => r.ids.forEach((id, j) => xs.set(id, out[i] + j * gap)));
+  };
+
+  for (let pass = 0; pass < TREE_COORD_PASSES; pass++) {
+    for (const L of (pass % 2 ? [...keys].reverse() : keys)) place(L);
+  }
+
+  // The marriage marker belongs *between* the two people it marries — that is
+  // what makes it readable as their marriage rather than as one more dot in the
+  // row, and with two or three spouses it is the only thing that says which
+  // marriage produced which children. Relaxation puts it near the midpoint but
+  // the children pull it off; snap it back, then re-pack the row so two markers
+  // still cannot land on top of each other.
+  for (const L of keys) {
+    if (L % 2 === 0 || !layers.get(L).length) continue;
+    const midpoint = fid => {
+      const par = visFam.get(fid).par;
+      return par.length ? par.reduce((s, p) => s + xs.get(p), 0) / par.length : xs.get(fid);
+    };
+    // Re-order the markers by where they now want to be before packing them.
+    // Left in the order the sweeps produced, a marker whose couple has moved
+    // past its neighbour's gets shoved back out from between its own parents by
+    // the separation constraint — which is exactly what it must not do.
+    layers.get(L).sort((a, b) => midpoint(a) - midpoint(b));
+    const runs = runsIn(L, TREE_MARK_GAP);
+    const out = pack(runs, runs.map(r => midpoint(r.ids[0])), gapsFor(runs, L));
+    runs.forEach((r, i) => xs.set(r.ids[0], out[i]));
+  }
 
   const pos = new Map();
-  for (const [id, x] of xs) pos.set(id, { x, y: genY(id) });
-
-  // FAM nodes hang just below their couple, centred between them — that is
-  // what turns two spouse links plus N child links into the classic bracket.
-  for (const id of visible) {
-    if (!families.has(id)) continue;
-    const fam = families.get(id);
-    const par = [fam.husb, fam.wife].filter(p => p && pos.has(p));
-    const kids = fam.chil.filter(c => pos.has(c));
-    if (par.length) {
-      const px = par.reduce((s, p) => s + pos.get(p).x, 0) / par.length;
-      const py = Math.max(...par.map(p => pos.get(p).y));
-      pos.set(id, { x: px, y: py + TREE_ROW_H * TREE_FAM_DY });
-    } else if (kids.length) {
-      const cx = kids.reduce((s, c) => s + pos.get(c).x, 0) / kids.length;
-      const cy = Math.min(...kids.map(c => pos.get(c).y));
-      pos.set(id, { x: cx, y: cy - TREE_ROW_H * (1 - TREE_FAM_DY) });
-    }
+  for (const id of people)    pos.set(id, { x: xs.get(id), y: gen.get(id) * TREE_ROW_H });
+  for (const [fid] of visFam) {
+    pos.set(fid, { x: xs.get(fid), y: (famGen.get(fid) + TREE_FAM_DY) * TREE_ROW_H });
   }
 
-  // Every family's child connectors share one horizontal run. Left at the
-  // default mid-row height, all the families feeding one row put that run at
-  // the *same* y, so wherever their spans meet the lines lie on top of each
-  // other and you cannot tell which child belongs to which parents. Deal each
-  // family its own lane in the band between the FAM node and the child row,
-  // ordered left to right so neighbours never share a lane.
-  // This is interval-graph colouring, not a fixed set of lanes on rotation:
-  // cycling through N lanes still lands two overlapping families on the same
-  // one as soon as more than N of them are in play. Sweep left to right and
-  // give each family the lowest lane whose previous occupant has already
-  // finished, so overlapping runs are guaranteed different lanes and the chart
-  // only spends as many lanes as the busiest point actually needs.
+
+  // Every family's child connectors share one horizontal bar — the sibling bar
+  // of a hand-drawn chart. All the bars feeding one row sit at the same height,
+  // which is what makes the chart read: a run at its own private height per
+  // family is exactly the staircase that looked wrong. The block layout above
+  // gives each family a private x-interval, so equal heights are safe.
+  // The lane pass is only a fallback for the case it cannot rule out — two
+  // marriages of the same person, whose bars can still overlap. It is interval
+  // colouring, so a family only leaves the shared height when it genuinely
+  // collides with a neighbour, and only by as many lanes as that needs.
   _treeBusY = new Map();
 
-  // Spread the lanes across the band between the two rows.
-  const assignLanes = (items, yTop, yBottom) => {
-    const lanes = _assignBusLanes(items);
-    const band = yBottom - yTop;
-    for (const it of items) {
-      const t = lanes > 1 ? it.lane / (lanes - 1) : 0;
-      _treeBusY.set(it.key, yTop + band * (0.3 + 0.5 * t));
-    }
-  };
-
-  // Child connectors: one run per family, from the FAM marker out to its
-  // furthest child, in the band between the marker row and the children's row.
+  // Child connectors: one bar per family, from the FAM marker out to its
+  // furthest child, sitting a fixed distance above the children's row.
   const famsByChildRow = new Map();
-  // Spouse connectors: one run per person→family, in the band above the marker.
-  // A remarriage reaches a long way sideways and would otherwise be drawn at
-  // the same height as every other couple in the row, straight through them.
-  const spousesByRow = new Map();
 
-  for (const id of visible) {
-    if (!families.has(id) || !pos.has(id)) continue;
-    const fam = families.get(id);
+  for (const [id, fam] of families) {
+    if (!pos.has(id)) continue;
     const famPos = pos.get(id);
-
     const kids = fam.chil.filter(c => pos.has(c));
-    if (kids.length) {
-      const span = [famPos.x, ...kids.map(c => pos.get(c).x)];
-      const childY = Math.min(...kids.map(c => pos.get(c).y));
-      if (!famsByChildRow.has(childY)) famsByChildRow.set(childY, []);
-      famsByChildRow.get(childY).push({ key: id, x0: Math.min(...span), x1: Math.max(...span) });
-    }
-
-    for (const p of [fam.husb, fam.wife]) {
-      if (!p || !pos.has(p)) continue;
-      const py = pos.get(p).y;
-      if (!spousesByRow.has(py)) spousesByRow.set(py, []);
-      spousesByRow.get(py).push({
-        key: `${p}>${id}`,
-        x0: Math.min(pos.get(p).x, famPos.x),
-        x1: Math.max(pos.get(p).x, famPos.x),
-      });
-    }
+    if (!kids.length) continue;
+    const span = [famPos.x, ...kids.map(c => pos.get(c).x)];
+    const childY = Math.min(...kids.map(c => pos.get(c).y));
+    if (!famsByChildRow.has(childY)) famsByChildRow.set(childY, []);
+    famsByChildRow.get(childY).push({
+      key: id,
+      parents: [fam.husb, fam.wife].filter(p => p && pos.has(p)),
+      kids,
+      x0: Math.min(...span),
+      x1: Math.max(...span),
+    });
   }
 
   for (const [childY, items] of famsByChildRow) {
-    assignLanes(items, childY - TREE_ROW_H * (1 - TREE_FAM_DY), childY);
+    const lanes = _assignBusLanes(items);
+    for (const it of items) {
+      // Bars that overlap in x get different lanes so they never run into each
+      // other. A lane cannot go above the markers the bars hang from, though —
+      // a bar above its own marker draws as a backwards Z — so with a fixed
+      // step per lane the top ones all hit that ceiling and collapse back onto
+      // one height, overlapping after all. Share out the band that is actually
+      // available instead, so every lane in a row keeps a height of its own.
+      const ceiling = Math.max(...it.parents.map(p => pos.get(p).y), childY - TREE_ROW_H)
+                      + TREE_ROW_H * TREE_FAM_DY + 14;
+      const bottom = childY - TREE_BUS_UP;
+      // Give every lane at least a few pixels of its own even where the band is
+      // too shallow to hold them all. A bar drawn a little high still reads;
+      // two bars on the same line do not.
+      const top = Math.min(ceiling, bottom - TREE_LANE_MIN * (lanes - 1));
+      const step = lanes > 1 ? Math.min(TREE_LANE_DY, (bottom - top) / (lanes - 1)) : 0;
+      const y = bottom - it.lane * step;
+      _treeBusY.set(it.key, y);
+      // With FAM nodes hidden the links run parent→child directly and there is
+      // no family id on either end to look the bar up by, so register it under
+      // each parent-child pair too. Same bar, so the bracket still forms.
+      for (const p of it.parents) for (const c of it.kids) _treeBusY.set(`${p}~${c}`, y);
+    }
   }
-  for (const [rowY, items] of spousesByRow) {
-    assignLanes(items, rowY, rowY + TREE_ROW_H * TREE_FAM_DY);
+
+  // ── Omission markers ──
+  // A "+N" chip for every branch the focus walk had to cut, so the chart says
+  // *that* something is hidden and how much rather than ending mid-family.
+  //
+  // The chip sits *at the junction the branch was cut from* — beside the
+  // marriage marker whose other children are missing, above the person whose
+  // parents are. That is the whole design: the chip is already at the place a
+  // reader is asking the question, so it needs no line drawn to it. Giving it a
+  // slot out in the row and a connector back, as this did before, is what put a
+  // stray line on the chart no matter what colour the line was painted.
+  //
+  // The number is everyone standing behind the cut, not just the first row of
+  // them: keep walking outward from each hidden person the way the chart would
+  // and you get the figure a reader actually wants — "14 more people this way",
+  // not "2 more children". A click then brings in only the nearest row, and the
+  // chip comes back on the people who just arrived carrying what is left. So
+  // the branch opens a generation at a time and the count always says how much
+  // further it goes.
+  const hiddenBeyond = (seeds, dir) => {
+    const seen = new Set();
+    let frontier = seeds.filter(id => individuals.has(id) && !visible.has(id));
+    while (frontier.length) {
+      const next = [];
+      for (const id of frontier) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const indi = individuals.get(id);
+        if (!indi) continue;
+        if (dir === 'down') {
+          for (const famId of (indi.fams || [])) {
+            const fam = families.get(famId);
+            if (!fam) continue;
+            // The partner arrives with them, so they are part of the count —
+            // but their own family is not walked, exactly as the chart does it.
+            const sp = fam.husb === id ? fam.wife : fam.husb;
+            if (sp && individuals.has(sp) && !visible.has(sp)) seen.add(sp);
+            for (const c of fam.chil) {
+              if (individuals.has(c) && !visible.has(c) && !seen.has(c)) next.push(c);
+            }
+          }
+        } else {
+          for (const famId of (indi.famc || [])) {
+            const fam = families.get(famId);
+            if (!fam) continue;
+            for (const p of [fam.husb, fam.wife]) {
+              if (p && individuals.has(p) && !visible.has(p) && !seen.has(p)) next.push(p);
+            }
+          }
+        }
+      }
+      frontier = next;
+    }
+    return seen;
+  };
+
+  const omitted = [];
+  for (const [fid, fam] of families) {
+    const missing = fam.chil.filter(c => individuals.has(c) && !visible.has(c));
+    if (!missing.length) continue;
+    // Hang it off the family's marker where there is one. A person whose only
+    // shown relative is a parent has no marker — that is precisely the case a
+    // generation-at-a-time reveal creates, and without this the branch would
+    // open once and then dead-end with nothing left to click.
+    let x, y;
+    if (pos.has(fid)) {
+      const m = pos.get(fid);
+      x = m.x + TREE_CHIP_DX; y = m.y + TREE_CHIP_DY;
+    } else {
+      const par = [fam.husb, fam.wife].filter(p => p && pos.has(p));
+      if (!par.length) continue;
+      const p = pos.get(par[0]);
+      x = p.x + TREE_CHIP_DX; y = p.y + NODE_BOX_H / 2 + TREE_CHIP_DY;
+    }
+    omitted.push({
+      x, y, n: hiddenBeyond(missing, 'down').size, hidden: missing, kind: 'children',
+    });
+  }
+  for (const id of people) {
+    if (!bloodLine.has(id) || !pos.has(id)) continue;
+    const parents = [];
+    for (const famId of (individuals.get(id).famc || [])) {
+      const fam = families.get(famId);
+      if (fam) for (const p of [fam.husb, fam.wife]) if (p && individuals.has(p)) parents.push(p);
+    }
+    const missing = parents.filter(p => !visible.has(p));
+    if (!missing.length) continue;
+    const p = pos.get(id);
+    omitted.push({
+      x: p.x, y: p.y - NODE_BOX_H / 2 - TREE_CHIP_DY,
+      n: hiddenBeyond(missing, 'up').size, hidden: missing, kind: 'parents',
+    });
   }
 
   // Centre the whole chart on the focus person. Read the offset out first —
@@ -1062,8 +1591,10 @@ function computeTreeLayout() {
     const dx = f.x, dy = f.y;
     for (const p of pos.values()) { p.x -= dx; p.y -= dy; }
     for (const [id, y] of _treeBusY) _treeBusY.set(id, y - dy);
+    for (const o of omitted) { o.x -= dx; o.y -= dy; }
   }
 
+  _treeOmitted = omitted;
   return pos;
 }
 
@@ -1102,8 +1633,10 @@ function applyTreeLayout() {
   // same space as the nodes or _linkPath rejects every one of them as out of
   // range and quietly falls back to the shared midpoint.
   if (_treeBusY) for (const [id, y] of _treeBusY) _treeBusY.set(id, cy + y);
+  if (_treeOmitted) for (const o of _treeOmitted) { o.x += cx; o.y += cy; }
 
   tick();
+  renderOmittedMarkers();
   onSimEnd();
   return true;
 }
@@ -1113,6 +1646,67 @@ function releaseTreePins() {
   for (const n of nodes) {
     if (n._treePinned) { delete n.fx; delete n.fy; delete n._treePinned; }
   }
+  _treeOmitted = null;
+  gMain?.select('g.omitted-g').selectAll('*').remove();
+}
+
+// "+N" chips marking where a real branch was cut by the focus budget —
+// dashed stub out of the anchor (a family's bus, or a person missing a
+// parent) to a small dashed box with the hidden count.
+function renderOmittedMarkers() {
+  if (!gMain) return;
+  let g = gMain.select('g.omitted-g');
+  if (g.empty()) g = gMain.append('g').attr('class', 'omitted-g');
+
+  const data = _treeOmitted || [];
+  const sel = g.selectAll('g.omit-chip').data(data, (d, i) => i);
+  sel.exit().remove();
+  const entered = sel.enter().append('g').attr('class', 'omit-chip');
+  entered.append('rect').attr('class', 'omit-box');
+  entered.append('text').attr('class', 'omit-count');
+
+  const merged = entered.merge(sel);
+  const W = 30, H = 16;
+
+  // No connector. The chip is placed at the junction it belongs to — beside the
+  // marriage marker, or just above the person — so there is nothing to join it
+  // to. Every version of this that drew a line ended up looking like something
+  // stray on the canvas, whichever way the line was styled, because a line to a
+  // thing already sitting at the right place has nothing to say.
+
+  // Shaped like a person's box but smaller, which is enough to read as a
+  // placeholder for people.
+  merged.select('rect.omit-box')
+    .attr('x', -W / 2).attr('y', -H / 2)
+    .attr('width', W).attr('height', H)
+    .attr('rx', NODE_BOX_RX)
+    .attr('fill', '#2a2a2a')
+    .attr('stroke', '#8a8a8a')
+    .attr('stroke-width', 1);
+
+  merged.select('text.omit-count')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('fill', '#cfcfcf')
+    .attr('font-size', '9px')
+    .attr('pointer-events', 'none')
+    .text(d => '+' + d.n);
+
+  merged.attr('transform', d => `translate(${d.x},${d.y})`)
+    .style('cursor', 'pointer')
+    .on('click', (evt, d) => {
+      evt.stopPropagation();
+      revealHidden(d.hidden || []);
+    });
+}
+
+// Bring a cut branch onto the chart. Re-runs the focus walk with those people
+// forced in, so they arrive with a generation and their connectors like anyone
+// else rather than being bolted on beside the chip.
+function revealHidden(ids) {
+  if (!ids.length) return;
+  for (const id of ids) _revealed.add(id);
+  _refocus();
 }
 
 function setTreeLayout(on) {
@@ -1576,36 +2170,37 @@ function renderGraph() {
   const indiSel = nodeSel.filter(d => d.type === 'INDI');
   const famSel  = nodeSel.filter(d => d.type === 'FAM');
 
-  indiSel.append('circle')
-    .attr('r', 8)
+  indiSel.append('rect')
+    .attr('class', 'indi-box')
+    .attr('x', -NODE_BOX_W / 2)
+    .attr('y', -NODE_BOX_H / 2)
+    .attr('width', NODE_BOX_W)
+    .attr('height', NODE_BOX_H)
+    .attr('rx', NODE_BOX_RX)
     .attr('fill', d => nodeBaseColor(d))
-    .attr('stroke', '#ffffff44')
+    .attr('stroke', '#00000033')
     .attr('stroke-width', 0.8)
-    .attr('opacity', d => d.data.deceased ? 0.5 : 1);
+    .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
+    .attr('opacity', d => d.data.deceased ? 0.55 : 1);
 
-  // Ring the focus person — otherwise they're just another dot in the middle
+  // Ring the focus person — otherwise they're just another box in the middle
   // of the tree that was built around them.
   indiSel.filter(d => d.id === focusRootId)
-    .append('circle')
+    .append('rect')
     .attr('class', 'focus-ring')
-    .attr('r', 15)
+    .attr('x', -NODE_BOX_W / 2 - 4)
+    .attr('y', -NODE_BOX_H / 2 - 4)
+    .attr('width', NODE_BOX_W + 8)
+    .attr('height', NODE_BOX_H + 8)
+    .attr('rx', NODE_BOX_RX + 3)
     .attr('fill', 'none')
     .attr('stroke', '#f2f2f2')
     .attr('stroke-width', 1.5)
     .attr('pointer-events', 'none');
 
-  indiSel.filter(d => d.data.deceased)
-    .append('text')
-    .attr('dy', '4px')
-    .attr('text-anchor', 'middle')
-    .attr('fill', '#bbb')
-    .attr('font-size', '11px')
-    .attr('pointer-events', 'none')
-    .text('×');
-
   famSel.append('polygon')
     .attr('class', 'fam-polygon')
-    .attr('points', d => { const s = famNodeSize; return `0,${-s} ${s},0 0,${s} ${-s},0`; })
+    .attr('points', () => { const s = famMarkerSize(); return `0,${-s} ${s},0 0,${s} ${-s},0`; })
     .attr('fill',   d => d.data.div ? nodeColors.famDiv : nodeColors.fam)
     .attr('stroke', d => d.data.div ? nodeColors.famDiv : nodeColors.fam)
     .attr('stroke-width',     d => d.data.div ? 1.5 : 1)
@@ -1613,66 +2208,112 @@ function renderGraph() {
     .attr('opacity', 0.88);
   console.timeEnd('[rg] shapes');
 
-  // Labels layer (INDI only)
+  // Name label — lives inside the box (not a separate layer floating above
+  // it), so it moves, scales and z-orders with the node for free.
   console.time('[rg] labels');
-  labelSel = gMain.append('g').attr('class', 'labels-g')
-    .selectAll('text')
-    .data(nodes.filter(n => n.type === 'INDI'), d => d.id)
-    .join('text')
+  labelSel = indiSel.append('text')
     .attr('class', 'node-label')
-    .attr('dy', '-12px')
     .attr('text-anchor', 'middle')
-    .attr('fill', d => labelColor(d))
+    .attr('dominant-baseline', 'central')
+    .attr('dy', '-4px')
+    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
     .attr('fill-opacity', labelStyle.textOpacity)
-    .attr('font-size', labelStyle.fontSize + 'px')
+    .attr('font-size', NODE_BOX_FONT + 'px')
     .attr('font-weight', labelStyle.fontWeight || 'normal')
+    .attr('pointer-events', 'none')
     .text(d => d.data.displayName);
+
+  // Years on a second line under the name. Only for people who have one —
+  // an empty element still costs a DOM node per person, and on a big chart
+  // that is the difference between a snappy repaint and a stuttering one.
+  yearSel = indiSel.filter(d => nodeYears(d.data))
+    .append('text')
+    .attr('class', 'node-years')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('dy', '7px')
+    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
+    .attr('fill-opacity', labelStyle.textOpacity * 0.75)
+    .attr('font-size', NODE_YEAR_FONT + 'px')
+    .attr('pointer-events', 'none')
+    .text(d => nodeYears(d.data));
 
   console.timeEnd('[rg] labels');
   updateLabels();
 }
 
+// Smallest the name is allowed to shrink to before truncating is the better
+// trade — below this it is a smudge and you may as well cut it and keep it
+// legible.
+const LABEL_MIN_FONT = 7;
+
+// Fit a name inside the box. The old code budgeted characters from an average
+// glyph width, which is wrong in both directions: "Wilhelmine Wyttenbach" ran
+// past the edge while "Anna Ith" was cut short of it. Only the rendered width
+// knows, so measure — shrink to fit if a little is needed, and truncate only
+// what is still too long at the smallest readable size.
+function _fitLabel(el, full, avail, size) {
+  el.setAttribute('font-size', size + 'px');
+  el.textContent = full;
+  const w = el.getComputedTextLength();
+  if (w <= avail || !w) return;
+
+  // Width scales with the font size, so the size that fits follows from the one
+  // measurement — no search, and measuring is what costs.
+  const shrunk = Math.max(LABEL_MIN_FONT, size * avail / w);
+  el.setAttribute('font-size', shrunk + 'px');
+  if (el.getComputedTextLength() <= avail) return;
+
+  let lo = 1, hi = full.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    el.textContent = full.slice(0, mid) + '…';
+    if (el.getComputedTextLength() <= avail) lo = mid; else hi = mid - 1;
+  }
+  el.textContent = full.slice(0, lo) + '…';
+}
+
 function updateLabels() {
   if (!labelSel || labelSel.empty()) return;
   const zoom = currentZoom;
-  const hidden = zoom < 0.35;
-  const brief  = zoom < 1.1;
-  // Labels live in the zoomed <g>, so a plain font-size would grow with the
-  // zoom — a focused view (few nodes, zoomed right in) turned into overlapping
-  // giant text. Dividing by the zoom keeps them a constant size on screen.
-  const fontSize = labelStyle.fontSize / zoom;
-  const dy       = -12 / zoom;
+  // Below this the box itself is a few screen px wide — the name would just
+  // be noise, so drop it rather than render illegible text.
+  const hidden = zoom < 0.28;
 
-  // In the chart a column is TREE_COL_W wide in graph units, but labels are a
-  // fixed size on screen — so at 0.5 zoom that column is only 90 screen px and
-  // "Katharina Baumgartner" runs straight over her neighbour. Budget characters
-  // by the screen width the column actually has. ~0.55em per character is close
-  // enough for a proportional font at these sizes.
-  const treeChars = useTreeLayout()
-    ? Math.max(6, Math.floor((TREE_COL_W * zoom) / (labelStyle.fontSize * 0.55)))
-    : null;
+  const weight = labelStyle.fontWeight || 'normal';
 
   labelSel.each(function(d) {
-    // All visual properties as SVG presentation attributes — never CSS style(),
-    // which would enter the CSS cascade and could override the fill attribute.
-    this.setAttribute('fill',         labelColor(d));
+    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
     this.setAttribute('fill-opacity', labelStyle.textOpacity);
-    this.setAttribute('font-size',    fontSize + 'px');
-    this.setAttribute('dy',           dy + 'px');
-    this.setAttribute('font-weight',  labelStyle.fontWeight || 'normal');
+    this.setAttribute('font-weight',  weight);
 
-    if (hidden) {
-      this.style.display = 'none';
+    if (hidden) { this.style.display = 'none'; return; }
+    this.style.display = '';
+
+    // Fitting is a property of the name and the box, not of the zoom, so it is
+    // worked out once per name and remembered. updateLabels runs on every zoom
+    // change and measuring text forces a layout — doing it here every time
+    // would make panning stutter on a large chart.
+    const full = d.data.displayName || '';
+    const key = full + ' ' + weight;
+    if (this.__fitKey !== key) {
+      _fitLabel(this, full, NODE_BOX_W - 10, NODE_BOX_FONT);
+      this.__fitKey  = key;
+      this.__fitText = this.textContent;
+      this.__fitSize = this.getAttribute('font-size');
     } else {
-      this.style.display = '';
-      const full = d.data.displayName || '';
-      if (treeChars != null) {
-        this.textContent = full.length > treeChars ? full.slice(0, treeChars - 1) + '…' : full;
-      } else {
-        const name = d.data.givn || full;
-        this.textContent = brief && name.length > 10 ? name.slice(0, 10) + '…' : full;
-      }
+      this.textContent = this.__fitText;
+      this.setAttribute('font-size', this.__fitSize);
     }
+  });
+
+  // The years are already short enough to fit, so they only need the colour
+  // refresh and the same legibility cutoff — one step earlier, since they are
+  // set smaller than the name and go to mush first.
+  yearSel?.each(function(d) {
+    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
+    this.setAttribute('fill-opacity', labelStyle.textOpacity * 0.75);
+    this.style.display = zoom < 0.4 ? 'none' : '';
   });
 }
 
@@ -1903,22 +2544,44 @@ function resetPhysics() {
   applyPhysicsParams();
 }
 
-// Square elbow: drop halfway, run across, drop again — the bracket shape every
-// printed family tree uses. Falls back to a straight segment within a row.
+// Smooth S-curve through the family's shared bus height — the rounded
+// "family tree app" look, in place of the old square elbow. Falls back to a
+// straight segment within a row.
 function _linkPath(d) {
   const sx = d.source.x ?? 0, sy = d.source.y ?? 0;
   const tx = d.target.x ?? 0, ty = d.target.y ?? 0;
-  if (!useTreeLayout() || Math.abs(ty - sy) < 1) return `M${sx},${sy}L${tx},${ty}`;
-  // Child connectors share one lane per family — that shared run is the
-  // bracket. Spouse connectors get a lane each. Sharing a single height across
-  // families is what made neighbouring connectors merge into one another.
+  if (!useTreeLayout()) return `M${sx},${sy}L${tx},${ty}`;
+
+  // Marriage line. The couple it joins is nearly always side by side, and then
+  // the line belongs at their own height: almost all of it is hidden behind the
+  // two boxes, and what shows is a short bar across the gap between them with
+  // the marker on it — the marriage bar of a printed chart, which is quiet
+  // enough to disappear into the drawing. Routing every one of them down into
+  // the gap below instead hangs a visible bracket under every couple on the
+  // chart, and a few dozen of those read as dashes strewn everywhere.
+  //
+  // Only when the two ends are further apart than a column can somebody else's
+  // box be in between, and only then does the line have to drop out of the row
+  // first. That case is rare and needs the detour; the common one does not.
+  if (d.ltype === 'spouse') {
+    const sameRow = Math.abs(ty - sy) < 1;
+    if (Math.abs(tx - sx) <= TREE_COL_W * (sameRow ? 1.2 : 0.75)) {
+      return sameRow ? `M${sx},${sy}L${tx},${ty}` : `M${sx},${sy}H${tx}V${ty}`;
+    }
+    const bar = sameRow ? sy + TREE_ROW_H * TREE_FAM_DY : ty;
+    return `M${sx},${sy}V${bar}H${tx}V${ty}`;
+  }
+
+  // Child connector: down from the marriage marker to the family's sibling bar,
+  // along it, then down to the child — the bracket of a printed chart, drawn as
+  // a smooth S so the corners do not read as noise at small zoom.
   const sid = typeof d.source === 'object' ? d.source.id : d.source;
   const tid = typeof d.target === 'object' ? d.target.id : d.target;
-  const bus = _treeBusY?.get(d.ltype === 'spouse' ? `${sid}>${tid}` : sid);
+  const bus = _treeBusY?.get(sid) ?? _treeBusY?.get(`${sid}~${tid}`);
   const my = bus != null && bus > Math.min(sy, ty) && bus < Math.max(sy, ty)
     ? bus
     : (sy + ty) / 2;
-  return `M${sx},${sy}V${my}H${tx}V${ty}`;
+  return `M${sx},${sy}C${sx},${my} ${tx},${my} ${tx},${ty}`;
 }
 
 function tick() {
@@ -1926,7 +2589,6 @@ function tick() {
   linkSel.attr('d', _linkPath);
 
   nodeSel.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
-  labelSel?.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
 }
 
 function onSimEnd() {
@@ -2479,7 +3141,7 @@ function fmtPlace(date, plac) {
 function flashNode(id) {
   if (!nodeSel) return;
   nodeSel.filter(d => d.id === id)
-    .select('circle')
+    .select('rect.indi-box')
     .attr('filter', 'url(#glow)')
     .transition().delay(700).duration(400)
     .attr('filter', null);
@@ -2557,7 +3219,7 @@ function applyHighlight() {
   nodeSel.each(function(d) {
     const inHL = !hasHL || hlSet.has(d.id);
     const baseOp = (d.type === 'INDI' && d.data.deceased) ? 0.5 : 1.0;
-    d3.select(this).selectAll('circle, polygon')
+    d3.select(this).selectAll('rect.indi-box, polygon')
       .attr('opacity', inHL ? baseOp : 0.07)
       .attr('filter', inHL && d.id === selectedIndiId ? 'url(#glow)' : null);
   });
@@ -2569,7 +3231,9 @@ function applyHighlight() {
     return (hlSet.has(sid) && hlSet.has(tid)) ? 0.80 : 0.04;
   });
 
-  labelSel?.attr('opacity', d => (!hasHL || hlSet.has(d.id)) ? 1 : 0.07);
+  const dim = d => (!hasHL || hlSet.has(d.id)) ? 1 : 0.07;
+  labelSel?.attr('opacity', dim);
+  yearSel?.attr('opacity', dim);
   refresh3D();
 }
 
@@ -2587,7 +3251,13 @@ function refreshNodeColors() {
   if (!nodeSel) return;
   nodeSel.each(function(d) {
     if (d.type === 'INDI') {
-      d3.select(this).select('circle').attr('fill', nodeBaseColor(d));
+      const col = nodeBaseColor(d);
+      d3.select(this).select('rect.indi-box').attr('fill', col);
+      // The years line is drawn in the same contrast colour as the name, so it
+      // has to follow the fill too — left out, it stays readable against the
+      // old colour and vanishes against the new one.
+      d3.select(this).selectAll('text.node-label, text.node-years')
+        .attr('fill', contrastTextColor(col));
     } else {
       const col = d.data.div ? nodeColors.famDiv : nodeColors.fam;
       d3.select(this).select('.fam-polygon')
@@ -4363,6 +5033,7 @@ function _refocus() {
 // Focus the 2D view on a person, switching to 2D if needed.
 function focusOnPerson(id) {
   if (!id || !individuals.has(id)) return;
+  if (id !== focusRootId) _revealed.clear();   // expansions belonged to the old chart
   focusRootId = id;
   if (currentView !== '2d') { setView('2d'); return; }   // setView rebuilds with the new focus
   _refocus();
@@ -4371,8 +5042,18 @@ function focusOnPerson(id) {
 function clearFocus() {
   if (!focusRootId) return;
   focusRootId = null;
+  _revealed.clear();
   if (currentView === '2d') _refocus();
   else { updateFocusUI(); updateHLButtons(); }
+}
+
+function setCousinDegree(v) {
+  cousinDegree = Math.max(0, Math.min(4, parseInt(v)));
+  if (!Number.isFinite(cousinDegree)) cousinDegree = 1;
+  localStorage.setItem('cousinDegree', cousinDegree);
+  const out = document.getElementById('cousin-degree-val');
+  if (out) out.textContent = t('focus.cousinLevel' + cousinDegree);
+  if (currentView === '2d' && focusRootId) _refocus();
 }
 
 function setFocusLimit(v) {
@@ -5117,6 +5798,127 @@ function export3DTopDown() {
   }, 2500);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 2D IMAGE EXPORT
+// ═══════════════════════════════════════════════════════════════
+// The chart is already an SVG, so the export is that same drawing rather than a
+// second one: clone the live <svg>, frame it to its own contents and rasterise.
+// Nothing here needs to know how a person, a marriage marker or a connector is
+// drawn — unlike the 3D export, which has to redraw the scene from scratch onto
+// a canvas and therefore has to be kept in step with the renderer by hand.
+const EXPORT_MARGIN = 40;
+const EXPORT_LONG_EDGE = 6000;   // target for the longer side, in pixels
+const EXPORT_MAX_PIXELS = 40e6;  // browsers refuse to rasterise much beyond this
+const EXPORT_MAX_EDGE = 16384;   // ...and refuse any single dimension past this
+
+// Standalone SVG has no page around it to inherit from, and CSS beats a
+// presentation attribute — so anything styled in the stylesheet has to travel
+// with the copy or the export will not match the screen.
+const EXPORT_SVG_CSS = `
+  .node-label { text-anchor: middle; dominant-baseline: auto; }
+`;
+
+// How much to blow the chart up when rasterising: sharp enough to print, but
+// inside what a browser will actually allocate. A family tree is a wide, short
+// thing, so a full-file chart runs into the ceilings long before its long edge
+// reaches the target.
+//
+// Both ceilings are enforced by the browser refusing to allocate the canvas, so
+// a chart that is already past them at 1:1 has to be scaled *down*. A slightly
+// soft image is worth having; a failed export is not.
+function _exportScale(w, h) {
+  const long = Math.max(w, h) || 1;
+  return Math.min(
+    Math.max(1, EXPORT_LONG_EDGE / long),      // sharp enough to print
+    EXPORT_MAX_EDGE / long,                    // no dimension past the cap
+    Math.sqrt(EXPORT_MAX_PIXELS / (w * h || 1)) // and not too many pixels in total
+  );
+}
+
+function _svgForExport() {
+  const src = document.getElementById('graph-svg');
+  const main = gMain?.node();
+  if (!src || !main) return null;
+
+  const box = main.getBBox();
+  if (!box.width || !box.height) return null;
+
+  const clone = src.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+  // Names and years are hidden on screen once the zoom drops far enough that
+  // they would be unreadable. The export has no zoom — it is the whole chart at
+  // full size — so exporting while zoomed out must not produce a chart of empty
+  // boxes. Unhide them on the copy, which leaves the live view alone.
+  clone.querySelectorAll('.node-label, .node-years').forEach(el => { el.style.display = ''; });
+
+  // The bounding box is in the main group's own coordinates, so dropping the
+  // zoom transform and framing on the box exports the whole chart at its
+  // natural size — not whatever happens to be on screen right now.
+  const mainClone = clone.querySelector('g.main-g');
+  if (mainClone) mainClone.removeAttribute('transform');
+
+  const x = box.x - EXPORT_MARGIN, y = box.y - EXPORT_MARGIN;
+  const w = box.width + EXPORT_MARGIN * 2, h = box.height + EXPORT_MARGIN * 2;
+  clone.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
+  clone.setAttribute('width', w);
+  clone.setAttribute('height', h);
+  clone.style.width = '';
+  clone.style.height = '';
+
+  // Fonts and background come from the page, which the copy leaves behind.
+  clone.setAttribute('font-family', getComputedStyle(src).fontFamily || 'sans-serif');
+  const bg = getComputedStyle(document.getElementById('graph-container')).backgroundColor;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('fill', bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#000000');
+  clone.insertBefore(rect, clone.firstChild);
+
+  const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  style.textContent = EXPORT_SVG_CSS;
+  clone.insertBefore(style, clone.firstChild);
+
+  return { markup: new XMLSerializer().serializeToString(clone), w, h };
+}
+
+function export2DImage() {
+  if (currentView !== '2d') { alert(t('focus.exportNeeds2D')); return; }
+  const svg = _svgForExport();
+  if (!svg) { alert(t('focus.exportEmpty')); return; }
+
+  const scale = _exportScale(svg.w, svg.h);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.round(svg.w * scale);
+    canvas.height = Math.round(svg.h * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) { alert(t('focus.exportFailed')); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = _baseFilename() + '_2d.png';
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+  img.onerror = () => alert(t('focus.exportFailed'));
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.markup);
+}
+
+// The same drawing, kept as vector — worth having for a chart that gets
+// printed, and free given the copy already exists.
+function export2DSVG() {
+  if (currentView !== '2d') { alert(t('focus.exportNeeds2D')); return; }
+  const svg = _svgForExport();
+  if (!svg) { alert(t('focus.exportEmpty')); return; }
+  _downloadBlob(svg.markup, _baseFilename() + '_2d.svg', 'image/svg+xml;charset=utf-8');
+}
+
 // Resize 3D view when window resizes
 window.addEventListener('resize', () => { if (currentView === '3d') resize3D(); });
 
@@ -5303,6 +6105,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (fls) {
     fls.value = focusLimit;
     document.getElementById('focus-limit-val').textContent = focusLimit;
+  }
+  const cds = document.getElementById('cousin-degree-slider');
+  if (cds) {
+    cds.value = cousinDegree;
+    document.getElementById('cousin-degree-val').textContent = t('focus.cousinLevel' + cousinDegree);
   }
   const tlt = document.getElementById('tree-layout-toggle');
   if (tlt) tlt.checked = treeLayout;

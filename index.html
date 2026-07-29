@@ -42,7 +42,7 @@
     <div id="search-results"></div>
     <div class="sidebar-label">
       <span data-i18n="sidebar.familyNames">Familiennamen</span>
-      <label class="surname-color-toggle" data-i18n-title="sidebar.colorToggle" title="Beschriftung einfärben: aktiviert = Nachname, deaktiviert = Geschlecht">
+      <label class="surname-color-toggle" data-i18n-title="sidebar.colorToggle" title="Farbe der Personen-Kästchen: aktiviert = nach Familienname, deaktiviert = nach Geschlecht">
         <input type="checkbox" id="color-by-surname" checked>
         <span id="color-mode-label" data-i18n="sidebar.colorModeSurname">Nachname</span>
       </label>
@@ -63,7 +63,25 @@
       </div>
       <input type="range" id="focus-limit-slider" min="10" max="600" step="10" value="120"
              oninput="setFocusLimit(this.value)">
+      <div class="focus-limit-row" data-i18n-title="focus.cousinsTitle"
+           title="Wie weit das Diagramm Seitenlinien verfolgt.">
+        <span data-i18n="focus.cousins">Cousins/Cousinen</span>
+        <span id="cousin-degree-val">1. Grades</span>
+      </div>
+      <input type="range" id="cousin-degree-slider" min="0" max="4" step="1" value="1"
+             list="cousin-degree-ticks" oninput="setCousinDegree(this.value)">
+      <datalist id="cousin-degree-ticks">
+        <option value="0" label="0"></option><option value="1" label="1"></option>
+        <option value="2" label="2"></option><option value="3" label="3"></option>
+        <option value="4" label="4"></option>
+      </datalist>
       <div id="focus-hidden-info" style="display:none"></div>
+      <button class="sidebar-btn" onclick="export2DImage()" style="margin-top:6px"
+              data-i18n-title="focus.exportPNGTitle" title="Das ganze Diagramm als PNG speichern, unabhängig vom Zoom">&#x1F4E5;
+        <span data-i18n="focus.exportPNG">Als Bild speichern</span></button>
+      <button class="sidebar-btn" onclick="export2DSVG()"
+              data-i18n-title="focus.exportSVGTitle" title="Das ganze Diagramm als Vektorgrafik speichern — zum Drucken">&#x1F4D0;
+        <span data-i18n="focus.exportSVG">Als SVG speichern</span></button>
       <div class="focus-hint" data-i18n="focus.hint">Person auswählen → &bdquo;Fokus&ldquo; im Detailfenster</div>
     </div>
 
