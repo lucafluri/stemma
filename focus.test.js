@@ -2,21 +2,31 @@
 'use strict';
 
 /**
- * Tests for the 2D focus filter (computeFocusSet in app.js).
+ * Tests for the 2D focus filter (computeFocusSet in js/graph-data.js).
  * Run with: node focus.test.js
  *
- * app.js is a browser script, not a module, so the function is lifted out of
- * the source text and run with its globals injected.
+ * The functions under test now live in real ES modules under js/ (state is a
+ * shared `state.<name>` object rather than bare globals). Pure, self-contained
+ * functions are exercised with real `import()`; computeTreeLayout's tests
+ * additionally lift its source text (and that of the handful of helpers it
+ * calls) so a fixture can hand it a `state` object directly, the same way the
+ * original monolithic app.js tests did, without needing a module-mocking
+ * framework just to isolate it from computeGenerationDepths.
  */
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 
-const src = fs.readFileSync(require('path').join(__dirname, 'app.js'), 'utf8');
+const JS_DIR = path.join(__dirname, 'js');
+const src = fs.readdirSync(JS_DIR)
+  .filter(f => f.endsWith('.js'))
+  .map(f => fs.readFileSync(path.join(JS_DIR, f), 'utf8'))
+  .join('\n');
 
 function lift(name) {
   const m = src.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
-  assert(m, `${name} not found in app.js — did it get renamed?`);
+  assert(m, `${name} not found under js/ — did it get renamed?`);
   return m[0];
 }
 
@@ -24,7 +34,7 @@ function constOf(name) {
   // Exponent form too — 40e6 reads better than 40000000 in the source, and a
   // helper that silently returns 40 for it is worse than no helper.
   const m = src.match(new RegExp(`const ${name}\\s*=\\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)`));
-  assert(m, `${name} not found in app.js`);
+  assert(m, `${name} not found under js/`);
   return Number(m[1]);
 }
 // The shipped default: first cousins and no further.
@@ -34,12 +44,15 @@ const lineageSrc    = lift('computeLineageSet');
 const collateralSrc = lift('_collateralMaxDepth');
 
 // `tree` selects which branch of computeFocusSet runs: the lineage chart set
-// or the force view's BFS ball.
+// or the force view's BFS ball. Its state is a plain object stand-in for the
+// real js/state.js `state` -- computeFocusSet/computeLineageSet only ever
+// read/write it as `state.<name>`, never reassign the binding itself, so a
+// fresh object per call is enough to isolate one test from the next.
 function focusSet(individuals, families, focusRootId, focusLimit, tree = false) {
   return new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
+    'state', 'useTreeLayout',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, focusRootId, focusLimit, () => tree, tree, new Set(), COUSIN_DEGREE);
+  )({ individuals, families, focusRootId, focusLimit, treeLayout: tree, _revealed: new Set(), cousinDegree: COUSIN_DEGREE }, () => tree);
 }
 
 // ── Fixture: a 4-generation line plus a wide sibling ring ──
@@ -265,9 +278,9 @@ test('a wider setting reaches strictly further, never less', () => {
 test('turning the option up brings second cousins in', () => {
   const { individuals, families } = buildAncestryFixture();
   const at = degree => new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
+    'state', 'useTreeLayout',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, 'I3', 100, () => true, true, new Set(), degree);
+  )({ individuals, families, focusRootId: 'I3', focusLimit: 100, treeLayout: true, _revealed: new Set(), cousinDegree: degree }, () => true);
 
   assert.ok(!at(1).has('GreatAuntUncle'), 'hidden at the default');
   assert.ok(at(2).has('GreatAuntUncle'), 'shown once second cousins are asked for');
@@ -437,19 +450,16 @@ const LAYOUT_CONSTS = ['TREE_ROW_H', 'TREE_COL_W', 'TREE_SPOUSE_DX', 'TREE_FAM_D
 function layoutOf({ individuals, families, focusRootId, depths }) {
   // Everyone plus every family is on screen; FAM nodes are the bipartite mode.
   const nodes = [...individuals.keys(), ...families.keys()].map(id => ({ id }));
-  const args = [individuals, families, focusRootId, nodes,
-    () => depths, depths, null, null, () => constOf('FAM_MARKER_MIN'),
-    ...LAYOUT_CONSTS.map(constOf)];
-  // computeTreeLayout reassigns _treeBusY, so read it back after the call
-  // rather than handing in a map and expecting it to have been filled.
-  return new Function(
-    'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
-    'famMarkerSize', ...LAYOUT_CONSTS,
+  // computeTreeLayout writes state._treeBusY itself, so read it back off the
+  // same state object after the call rather than handing in a map and
+  // expecting it to have been filled.
+  const state = { individuals, families, focusRootId, nodes, _lineageGen: null, _treeBusY: null, _treeOmitted: null };
+  const pos = new Function(
+    'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
-     const pos = computeTreeLayout();
-     return { pos, busY: _treeBusY };`
-  )(...args);
+     return computeTreeLayout();`
+  )(state, () => depths, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
+  return { pos, busY: state._treeBusY };
 }
 
 // Rows are the invariant everything else gives way to, so every layout fixture
@@ -984,9 +994,9 @@ console.log('\n_revealed (clicking a "+N" chip)');
 
 function revealSet(individuals, families, focusRootId, focusLimit, revealed) {
   return new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree',
+    'state', 'useTreeLayout',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )(individuals, families, focusRootId, focusLimit, () => true, true, revealed, COUSIN_DEGREE);
+  )({ individuals, families, focusRootId, focusLimit, treeLayout: true, _revealed: revealed, cousinDegree: COUSIN_DEGREE }, () => true);
 }
 
 test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
@@ -1005,15 +1015,13 @@ test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
 
   // Only H, W and Shown are on screen; the other two children were cut.
   const nodes = ['H', 'W', 'Shown', 'F1'].map(id => ({ id }));
+  const tlState = { individuals, families, focusRootId: 'Shown', nodes, _lineageGen: null, _treeBusY: null, _treeOmitted: null };
   const r = new Function(
-    'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
-    'famMarkerSize', ...LAYOUT_CONSTS,
+    'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
-     return { pos, omitted: _treeOmitted };`
-  )(individuals, families, 'Shown', nodes, () => depths, depths, null, null,
-    () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
+     return { pos, omitted: state._treeOmitted };`
+  )(tlState, () => depths, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
 
   const chip = (r.omitted || []).find(o => o.kind === 'children');
   assert.ok(chip, 'a family with cut children must be marked');
@@ -1050,23 +1058,21 @@ function buildDeepBranch() {
 // Lay out a chart for a subject with a given budget and revealed set, and hand
 // back the chips, so a test can click one the way the reader would.
 function chipsFor(individuals, families, focusRootId, focusLimit, revealed) {
-  const set = new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree', '_lineageGen',
-    `${collateralSrc}\n${lineageSrc}\n${ballSrc}
-     const s = computeFocusSet(); return { s, gen: _lineageGen };`
-  )(individuals, families, focusRootId, focusLimit, () => true, true, revealed, COUSIN_DEGREE, null);
+  const fsState = { individuals, families, focusRootId, focusLimit, treeLayout: true, _revealed: revealed, cousinDegree: COUSIN_DEGREE, _lineageGen: null };
+  const s = new Function(
+    'state', 'useTreeLayout',
+    `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
+  )(fsState, () => true);
 
+  const tlState = { individuals, families, focusRootId, nodes: [...s].map(id => ({ id })),
+    _lineageGen: fsState._lineageGen, _treeBusY: null, _treeOmitted: null };
   const r = new Function(
-    'individuals', 'families', 'focusRootId', 'nodes',
-    'computeGenerationDepths', '_lineageGen', '_treeBusY', '_treeOmitted',
-    'famMarkerSize', ...LAYOUT_CONSTS,
+    'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
     `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
-     return { pos, omitted: _treeOmitted };`
-  )(individuals, families, focusRootId, [...set.s].map(id => ({ id })),
-    () => set.gen, set.gen, null, null,
-    () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
-  return { shown: set.s, chips: r.omitted || [] };
+     return { pos, omitted: state._treeOmitted };`
+  )(tlState, () => tlState._lineageGen, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
+  return { shown: s, chips: r.omitted || [] };
 }
 
 test('the count is everyone behind the branch, not just the next row', () => {
@@ -1146,10 +1152,10 @@ test('a revealed person joins the chart, budget or no budget', () => {
 test('a revealed person gets a generation like everybody else', () => {
   const { individuals, families } = buildTree();
   const gen = new Function(
-    'individuals', 'families', 'focusRootId', 'focusLimit', 'useTreeLayout', 'treeLayout', '_revealed', 'cousinDegree', '_lineageGen',
+    'state', 'useTreeLayout',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}
-     computeFocusSet(); return _lineageGen;`
-  )(individuals, families, 'I3', 4, () => true, true, new Set(['I7']), COUSIN_DEGREE, null);
+     computeFocusSet(); return state._lineageGen;`
+  )({ individuals, families, focusRootId: 'I3', focusLimit: 4, treeLayout: true, _revealed: new Set(['I7']), cousinDegree: COUSIN_DEGREE, _lineageGen: null }, () => true);
   assert.ok(gen.has('I7'), 'without a row the layout cannot place them');
   assert.strictEqual(gen.get('I7'), gen.get('I3'), 'a sibling shares the subject\'s row');
 });
@@ -1162,9 +1168,9 @@ test('a revealed person gets a generation like everybody else', () => {
 console.log('\ncomputeGenerationDepths (married-in people)');
 
 const depthsOf = (individuals, families) => new Function(
-  'individuals', 'families', '_genDepthsCache', 'GEN_GAP',
+  'state', 'GEN_GAP',
   `${lift('computeGenerationDepths')}\nreturn computeGenerationDepths();`
-)(individuals, families, null, 28);
+)({ individuals, families, _genDepthsCache: null }, 28);
 
 // GG -> G -> P -> KID. Each generation marries somebody with no parents on file.
 function buildInLawFixture() {
@@ -1363,9 +1369,9 @@ test('the inference cannot add generations to the chart', () => {
 console.log('\n_linkPath (connector routing)');
 
 const pathFor = (d, tree = true) => new Function(
-  'd', 'useTreeLayout', '_treeBusY', 'TREE_ROW_H', 'TREE_FAM_DY', 'TREE_COL_W',
+  'd', 'state', 'useTreeLayout', 'TREE_ROW_H', 'TREE_FAM_DY', 'TREE_COL_W',
   `${lift('_linkPath')}\nreturn _linkPath(d);`
-)(d, () => tree, new Map(), constOf('TREE_ROW_H'), constOf('TREE_FAM_DY'), constOf('TREE_COL_W'));
+)(d, { _treeBusY: new Map() }, () => tree, constOf('TREE_ROW_H'), constOf('TREE_FAM_DY'), constOf('TREE_COL_W'));
 
 // Every horizontal run in a path, as [y, x0, x1].
 function horizontals(path) {
@@ -1508,7 +1514,7 @@ console.log('\ngenerationNumbers / inGenRange (generation band)');
 // setter. The setter reaches for the DOM and a redraw, so both are stubbed —
 // what is under test is which band it settles on, not what it repaints.
 const genBand = (individuals, families, genRange = null) => new Function(
-  'individuals', 'families', '_genDepthsCache', '_genNumbers', 'GEN_GAP', 'genRange',
+  'state', 'GEN_GAP',
   `${lift('computeGenerationDepths')}
    ${lift('generationNumbers')}
    ${lift('generationCount')}
@@ -1522,11 +1528,11 @@ const genBand = (individuals, families, genRange = null) => new Function(
      numbers: generationNumbers(),
      count:   generationCount(),
      inRange: id => inGenRange(id),
-     set:     (lo, hi) => { setGenRange(lo, hi); return genRange; },
+     set:     (lo, hi) => { setGenRange(lo, hi); return state.genRange; },
      // A drag must move the label without touching the band behind it.
-     drag:    (lo, hi) => { previewGenRange(lo, hi); return genRange; },
+     drag:    (lo, hi) => { previewGenRange(lo, hi); return state.genRange; },
    };`
-)(individuals, families, null, null, 28, genRange);
+)({ individuals, families, _genDepthsCache: null, _genNumbers: null, genRange }, 28);
 
 // Four generations down one line, so the numbering has somewhere to count from.
 function buildLadder() {

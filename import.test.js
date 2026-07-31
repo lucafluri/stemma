@@ -5,15 +5,19 @@
  * Tests for linking an import card to somebody already in the tree.
  * Run with: node import.test.js
  *
- * app.js is a browser script, not a module, so the functions are lifted out of
- * the source text and run with their globals injected.
+ * The functions under test live in js/import.js as real ES modules (state is
+ * a shared `state.<name>` object rather than a bare global). They're lifted
+ * out of the module's source text and run with a stand-in `state` object
+ * injected, the same isolation technique the original monolithic app.js
+ * tests used, since these functions are deeply entangled with the rest of
+ * the import UI (rendering, DOM) that a plain `import()` would also pull in.
  */
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, 'js', 'import.js'), 'utf8');
 
 function lift(name) {
   const m = src.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
@@ -60,15 +64,14 @@ function buildAction() {
 
 function makeApi(individuals, actions) {
   return new Function(
-    'individuals', '_importActions', 'document',
-    '_renderImportCard', '_renderImportSummary',
+    'state', 'document', '_renderImportCard', '_renderImportSummary',
     `${liftConst('_IM_UPDATE_FIELDS')}
      ${lift('_imExistingValue')}
      ${lift('_imLinkExisting')}
      ${lift('_imToggleFieldApply')}
      ${lift('_imUnlink')}
      return { _imLinkExisting, _imUnlink, _imToggleFieldApply, _imExistingValue };`
-  )(individuals, actions, { querySelector: () => null }, () => '', () => {});
+  )({ individuals, _importActions: actions }, { querySelector: () => null }, () => '', () => {});
 }
 
 console.log('\nimport linking');
