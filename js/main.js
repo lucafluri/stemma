@@ -8,7 +8,7 @@ import * as Render2dMod from './render-2d.js';
 import * as Render3dMod from './render-3d.js';
 import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
-import { _fullRebuildGraph, _tryRestoreAutosave } from './gedcom-io.js';
+import { _fullRebuildGraph, _tryRestoreAutosave, updateFileButtons } from './gedcom-io.js';
 import { focusOnPerson, updateFocusUI } from './graph-data.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
@@ -149,6 +149,9 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('DOMContentLoaded', () => {
   renderPresetList();
+  // Names the last-opened file on the button before anything is loaded — that
+  // offer is the whole point of it surviving the reload.
+  updateFileButtons();
   _tryRestoreAutosave();
 
   // Touch support

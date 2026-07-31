@@ -19,6 +19,24 @@ export const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, 
 
 export const NODE_YEAR_FONT = 8;
 
+// What goes on the name line of a person's box: the married name with the
+// maiden surname after it in brackets, the compact form a printed chart uses.
+// displayName is already capped at 24 characters when the file is parsed, so the
+// bracket is the only thing that can lengthen the line — and _fitLabel shrinks
+// or clips it exactly as it does any other long name.
+//
+// Used by both the initial render and the re-fit in updateLabels(): if those two
+// disagreed about the text, the fit cache would be keyed on one string while
+// another was on screen.
+export function nodeLabelText(indi) {
+  const name   = indi.displayName || '';
+  const maiden = (indi.maidenName || '').trim();
+  // Nothing to say when she is already shown under her birth name — a woman who
+  // kept it, or a record that filled both fields in with the same surname.
+  if (!maiden || name.includes(maiden)) return name;
+  return name ? `${name} (${maiden})` : maiden;
+}
+
 export function nodeYears(indi) {
   const b = indi.birthYear || null;
   const d = indi.death?.date?.match(/\b(\d{4})\b/)?.[1] || null;
@@ -166,9 +184,28 @@ export function initSVG() {
   state.svgSel.on('click', evt => {
     if (evt.target === state.svgSel.node()) closeDetailPanel();
   });
+
+  // Backstop for the pointer leaving the chart altogether — onto the sidebar, the
+  // detail panel, or out of the window. A node right at the edge can lose its own
+  // mouseleave to that, and nothing would come along afterwards to clear it.
+  state.svgSel.on('mouseleave', () => _showQuickAdd(null));
 }
 
 export const QA_BTN_R = 9;
+
+// The plus as two strokes crossing at the origin — the same point the circle is
+// centred on, so it is centred by construction.
+//
+// It used to be a text glyph nudged half a pixel, which is the giveaway: a "+"
+// sits on the font's math axis rather than in the middle of its em box, so
+// dominant-baseline centres the box and leaves the glyph off by however much
+// that font disagrees. No font-family is set here, so the amount varied by
+// platform and no single nudge could be right everywhere. Geometry has no
+// metrics to argue with.
+export function _qaPlusPath(r = QA_BTN_R) {
+  const arm = Math.round(r * 0.45);
+  return `M${-arm},0H${arm}M0,${-arm}V${arm}`;
+}
 
 export function _appendQaButton(sel, dx, dy, title, onClick) {
   const g = sel.append('g')
@@ -183,19 +220,36 @@ export function _appendQaButton(sel, dx, dy, title, onClick) {
     .attr('fill', '#1e1e1e')
     .attr('stroke', '#888')
     .attr('stroke-width', 1);
-  g.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('dy', '0.5px')
-    .attr('font-size', '13px')
-    .attr('fill', '#ddd')
-    .attr('pointer-events', 'none')
-    .text('+');
+  g.append('path')
+    .attr('d', _qaPlusPath())
+    .attr('stroke', '#ddd')
+    .attr('stroke-width', 1.6)
+    .attr('stroke-linecap', 'round')
+    .attr('fill', 'none')
+    .attr('pointer-events', 'none');
   g.append('title').text(title);
   return g;
 }
 
 export const QA_BTN_OFFSET = QA_BTN_R - 2;
+
+// At most one node shows its quick-add buttons, and it is the one the cursor is
+// on. Enforced by remembering which node has them rather than by trusting every
+// mouseenter to be answered by a matching mouseleave — it is not. Sweeping the
+// pointer quickly across the graph, or straight off it onto the sidebar, drops
+// leave events, and a node that missed one kept its buttons lit indefinitely.
+// Clearing the previous node on the way in cannot miss, whatever the browser did
+// with the events in between.
+export function _showQuickAdd(el) {
+  if (state._qaHoverEl === el) return;
+  const set = (node, display) => {
+    if (!node) return;
+    for (const b of node.querySelectorAll('.qa-hover-btn')) b.style.display = display;
+  };
+  set(state._qaHoverEl, 'none');
+  state._qaHoverEl = el;
+  set(el, '');
+}
 
 export function _addQuickAddButtons(indiSel, famSel) {
   _appendQaButton(indiSel, 0, -(NODE_BOX_H / 2 + QA_BTN_OFFSET), t('detail.addParent'), d => quickAddFromHover(d.id, 'parent'));
@@ -205,6 +259,9 @@ export function _addQuickAddButtons(indiSel, famSel) {
 }
 
 export function renderGraph() {
+  // The element it points at is about to be thrown away; the new buttons come
+  // back hidden, so the tracker has to come back empty too.
+  state._qaHoverEl = null;
   console.time('[rg] clear');       state.gMain.selectAll('*').remove();                    console.timeEnd('[rg] clear');
 
   // Links layer — <path> so the tree layout can draw square elbows; the force
@@ -249,9 +306,12 @@ export function renderGraph() {
       // otherwise paint over it — raise() moves this <g> to the end of its
       // parent so the hovered node and its buttons are always on top.
       d3.select(this).raise();
-      d3.select(this).selectAll('.qa-hover-btn').style('display', '');
+      _showQuickAdd(this);
     })
-    .on('mouseleave', function () { d3.select(this).selectAll('.qa-hover-btn').style('display', 'none'); })
+    // Only if this node is still the one holding them: when the pointer crosses
+    // to a neighbour the enter can arrive before the leave, and an unguarded
+    // leave would then switch off the buttons the cursor has just arrived on.
+    .on('mouseleave', function () { if (state._qaHoverEl === this) _showQuickAdd(null); })
     .on('dblclick', (evt, d) => {
       evt.stopPropagation();
       delete d.fx; delete d.fy;
@@ -326,7 +386,7 @@ export function renderGraph() {
     .attr('font-size', NODE_BOX_FONT + 'px')
     .attr('font-weight', state.labelStyle.fontWeight || 'normal')
     .attr('pointer-events', 'none')
-    .text(d => d.data.displayName);
+    .text(d => nodeLabelText(d.data));
 
   // Years on a second line under the name. Only for people who have one —
   // an empty element still costs a DOM node per person, and on a big chart
@@ -401,7 +461,7 @@ export function updateLabels() {
     // worked out once per name and remembered. updateLabels runs on every zoom
     // change and measuring text forces a layout — doing it here every time
     // would make panning stutter on a large chart.
-    const full = d.data.displayName || '';
+    const full = nodeLabelText(d.data);
     const key = full + '\\0' + weight;
     if (this.__fitKey !== key) {
       _fitLabel(this, full, NODE_BOX_W - 10, NODE_BOX_FONT);

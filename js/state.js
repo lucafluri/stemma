@@ -8,6 +8,8 @@ export const state = {
   individuals: new Map(),   // id -> indi object
   families: new Map(),   // id -> fam object
   otherLines: [],          // raw lines from unrecognized level-0 GEDCOM records (SOUR, OBJE, …), re-emitted verbatim on save
+  _fileHandle: null,       // FileSystemFileHandle the loaded data came from, when it came from one
+  _importFileHandle: null, // ...and the one the import wizard is holding, until it loads or is closed
   allNodes: [],   // complete dataset (all INDI + FAM nodes)
   allLinks: [],   // complete dataset (links with _src/_tgt string IDs, never mutated by D3)
   nodes: [],      // currently active (filtered) nodes passed to simulation
@@ -92,6 +94,7 @@ export const state = {
   nodeColors: { ...NODE_COLOR_DEFAULTS },
   famNodeSize: parseInt(localStorage.getItem('famNodeSize')) || 1,
   _panelSwipe: null,  // { startY, startTranslate }
+  _qaHoverEl: null,   // the node <g> currently showing its quick-add buttons, if any
   _touchDragged: false,
   _touchStartPos: null,
   _estimatedYears: null,  // Map<id, number>

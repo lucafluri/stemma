@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { _fullRebuildGraph, _loadDatasetFile, escHtml, escJs } from './gedcom-io.js';
+import { _fullRebuildGraph, _loadDatasetFile, escHtml, escJs, fileAccessSupported } from './gedcom-io.js';
 import { row } from './panels.js';
 import { tick } from './render-2d.js';
 
@@ -830,6 +830,7 @@ export function closeTextImport() {
   document.getElementById('import-modal').style.display = 'none';
   state._importActions = [];
   state._importLoadedFile = null;
+  state._importFileHandle = null;
   state._importImageData = null;
 }
 
@@ -854,6 +855,7 @@ export function _resetImportUI() {
   state._importActions = [];
   state._importJsonPersons = null;
   state._importLoadedFile = null;
+  state._importFileHandle = null;
   state._importImageData = null;
 }
 
@@ -866,11 +868,43 @@ export function _imDragOver(e) { e.preventDefault(); document.getElementById('im
 
 export function _imDragLeave(e) { document.getElementById('import-drop-zone').classList.remove('drag-over'); }
 
-export function _imDrop(e) {
+// Opening the file chooser. Through showOpenFilePicker where it exists, because
+// that is the only way of choosing a file that also yields a handle to it — the
+// hidden <input type="file"> hands back a detached copy, which is enough to read
+// but leaves nothing to reopen or save back to. Falls back to the input
+// elsewhere, where reading is all that is on offer anyway.
+export async function _imPickFile() {
+  if (!fileAccessSupported()) { document.getElementById('import-file-input').click(); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      types: [{
+        description: 'GEDCOM / JSON / YAML / text / image',
+        accept: { '*/*': ['.ged', '.json', '.yaml', '.yml', '.txt', '.text', '.png', '.jpg', '.jpeg', '.gif', '.webp'] },
+      }],
+    });
+    if (handle) _imLoadFile(await handle.getFile(), handle);
+  } catch (err) {
+    if (err.name !== 'AbortError') document.getElementById('import-file-input').click();
+  }
+}
+
+export async function _imDrop(e) {
   e.preventDefault();
   document.getElementById('import-drop-zone').classList.remove('drag-over');
+  // A dropped item can yield a handle too, so a file dragged in is as reopenable
+  // as one picked from the dialog. Read the item before any await: the
+  // DataTransfer is emptied as soon as the event handler yields.
+  const item = e.dataTransfer.items?.[0];
   const file = e.dataTransfer.files?.[0];
-  if (file) _imLoadFile(file);
+  let handle = null;
+  if (item?.getAsFileSystemHandle) {
+    try {
+      const h = await item.getAsFileSystemHandle();
+      if (h?.kind === 'file') handle = h;
+    } catch { /* not a real file, or the browser said no — the File still works */ }
+  }
+  if (handle) _imLoadFile(await handle.getFile(), handle);
+  else if (file) _imLoadFile(file);
 }
 
 export function _importPasteHandler(e) {
@@ -886,9 +920,14 @@ export function handleImportFileSelect(e) {
   if (file) _imLoadFile(file);
 }
 
-export function _imLoadFile(file) {
+export function _imLoadFile(file, handle = null) {
   state._importJsonPersons = null;
   state._importLoadedFile = file;
+  // Carried alongside the file so the wizard's "replace" button, which loads it
+  // later, can pass it on too — the handle is what makes the file reopenable and
+  // saveable, and it must not be dropped just because the load went via a
+  // review step.
+  state._importFileHandle = handle;
   state._importImageData = null;
   document.getElementById('import-error-msg').style.display = 'none';
   document.getElementById('import-drop-label').style.display = 'none';
@@ -909,7 +948,7 @@ export function _imLoadFile(file) {
   // First import on empty dataset: load directly, skip the review wizard.
   if ((isGed || isJson || isYaml) && state.individuals.size === 0) {
     closeTextImport();
-    _loadDatasetFile(file);
+    _loadDatasetFile(file, handle);
     return;
   }
 
@@ -977,9 +1016,11 @@ export function _imLoadFile(file) {
 export function importReplaceDataset() {
   if (!state._importLoadedFile) { _imShowError(t('import.noFileLoaded')); return; }
   if (state.individuals.size && !confirm(t('import.replaceConfirm'))) return;
+  // Both read out before closeTextImport(), which clears them.
   const file = state._importLoadedFile;
+  const handle = state._importFileHandle;
   closeTextImport();
-  _loadDatasetFile(file);
+  _loadDatasetFile(file, handle);
 }
 
 export function _loadTesseract() {

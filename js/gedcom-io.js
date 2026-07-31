@@ -1,14 +1,15 @@
 import { state } from './state.js';
 import { buildSurnameColorMap, buildSurnameList } from './colors.js';
-import { DECEASED_AGE_THRESHOLD, buildGraphData, updateFocusUI } from './graph-data.js';
+import { DECEASED_AGE_THRESHOLD, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
 import { applyFilter, autoSettle, buildAndRunSimulation, initSVG, renderGraph } from './render-2d.js';
 import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, initGraph3D, update3DNames, updateViewToggleUI } from './render-3d.js';
 
 export function _setDirty(v) {
   state._gedcomDirty = v;
-  const btn = document.getElementById('dl-btn');
-  if (btn) btn.classList.toggle('has-unsaved', v);
+  for (const id of ['dl-btn', 'save-file-btn']) {
+    document.getElementById(id)?.classList.toggle('has-unsaved', v);
+  }
   if (v) _autosave(); else localStorage.removeItem('gedcomAutosave');
 }
 
@@ -95,15 +96,50 @@ export function _fullRebuildGraph(opts = {}) {
   console.timeEnd('[rebuild] total');
 }
 
+// Nobody born more than DECEASED_AGE_THRESHOLD years ago is still alive, so a
+// record that never said so is simply incomplete rather than a claim that they
+// are living.
+//
+// Most people in a genealogy have no birth date at all, and leaving all of them
+// unmarked is the case this used to miss entirely — the tree is full of
+// 18th-century ancestors drawn as though they might be about. Where there is no
+// recorded year the estimate stands in: it is derived from the years their
+// relatives do have, so someone three generations above a person born in 1900 is
+// placed around 1810 and marked, on the same rule.
+//
+// The estimate is a guess, and this writes `1 DEAT Y` into the file on save.
+// It only ever fills a blank — a recorded birth year always decides for itself,
+// and anyone already marked is left alone.
 export function _autoMarkDeceasedByAge() {
   const cutoffYear = new Date().getFullYear() - DECEASED_AGE_THRESHOLD;
-  for (const indi of state.individuals.values()) {
-    if (!indi.deceased && indi.birthYear && indi.birthYear <= cutoffYear) indi.deceased = true;
+  // Computing the estimates walks the whole tree, so only pay for it if somebody
+  // actually lacks a year.
+  let est = null;
+  for (const [id, indi] of state.individuals) {
+    if (indi.deceased) continue;
+    if (indi.birthYear) {
+      if (indi.birthYear <= cutoffYear) indi.deceased = true;
+      continue;
+    }
+    est ??= computeEstimatedYears();
+    const guess = est.get(id);
+    if (guess && guess <= cutoffYear) indi.deceased = true;
   }
 }
 
-export function _loadDatasetFile(file) {
+// `handle` is the File System Access handle the file came from, when it came
+// from one. Every other caller — the import wizard, the autosave restore — hands
+// over a detached File and so clears it: without that, "save" would still be
+// pointing at whatever file was opened before this one and would write the new
+// data straight over it.
+export function _loadDatasetFile(file, handle = null) {
   if (!file) return;
+  state._fileHandle = handle;
+  // Whatever was opened last is what the reopen button should offer, so the
+  // remembering happens here — the one point every route into the app funnels
+  // through — rather than at each of them. Doing it per entry point is how the
+  // import paths ended up leaving the button pointing at a file opened long ago.
+  if (handle) _saveRecentHandle(handle).catch(() => { /* private mode, no store */ });
 
   document.getElementById('status').textContent = t('graph.loading');
   document.getElementById('loading-overlay').style.display = 'flex';
@@ -158,6 +194,7 @@ export function _loadDatasetFile(file) {
       document.getElementById('view-toggle-btn').disabled = false;
       window._gedcomFilename = file.name;
       _setDirty(false);
+      updateFileButtons();
 
       updateViewToggleUI();
       updateFocusUI();
@@ -177,6 +214,139 @@ export function _loadDatasetFile(file) {
     document.getElementById('status').textContent = t('errors.readError');
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+// ── The working file ────────────────────────────────────────────────────────
+// Reopening the last file and saving back over it both need a handle to the
+// file itself, which only the File System Access API gives. A file chosen
+// through <input type="file"> is a detached copy: there is no way back to where
+// it came from, which is why "save" has always meant "download another copy".
+//
+// Handles survive a reload, but only in IndexedDB — they are structured-clone
+// values, not strings, so localStorage cannot hold one. Permission does not
+// survive, and re-granting it must happen inside a user gesture; both entry
+// points here are click handlers, which is what makes that legal.
+
+export function fileAccessSupported() {
+  return typeof window !== 'undefined' && 'showOpenFilePicker' in window;
+}
+
+function _idb(mode, fn) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('gedcomVis', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('handles');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      // Read the result inside oncomplete: the transaction commits on its own
+      // as soon as the event loop runs dry, so it cannot outlive this callback.
+      const req = fn(db.transaction('handles', mode).objectStore('handles'));
+      req.transaction.oncomplete = () => { db.close(); resolve(req.result); };
+      req.transaction.onerror    = () => { db.close(); reject(req.transaction.error); };
+    };
+  });
+}
+
+export const _saveRecentHandle = h  => _idb('readwrite', s => s.put(h, 'recent'));
+export const _readRecentHandle = () => _idb('readonly',  s => s.get('recent'));
+
+// Whether we may touch the file yet. Asking is only allowed from a gesture, so
+// `ask` is false for the passive check that decides how to label the buttons.
+async function _permitted(handle, ask) {
+  const opts = { mode: 'readwrite' };
+  if (await handle.queryPermission(opts) === 'granted') return true;
+  return ask && await handle.requestPermission(opts) === 'granted';
+}
+
+// Save in the format the file already is, not the one we happen to prefer —
+// writing GEDCOM text into a file called .json is how you corrupt somebody's
+// data while telling them it was saved.
+function _textForFile(name) {
+  const n = (name || '').toLowerCase();
+  if (n.endsWith('.json')) return GEDCOMModule.exportJSON(state.individuals, state.families);
+  if (n.endsWith('.yaml') || n.endsWith('.yml')) return GEDCOMModule.exportYAML(state.individuals, state.families);
+  return '﻿' + serializeGEDCOM();
+}
+
+export async function openRecentFile() {
+  if (!fileAccessSupported()) return;
+  try {
+    let handle = state._fileHandle || await _readRecentHandle();
+    // Nothing remembered yet, or the file is gone — pick one, and that becomes
+    // the file both buttons mean from now on.
+    if (!handle || !await _permitted(handle, true)) {
+      if (handle) return;   // permission was refused; not our place to override
+      [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'GEDCOM / JSON / YAML', accept: { 'text/plain': ['.ged', '.json', '.yaml', '.yml'] } }],
+      });
+      if (!handle || !await _permitted(handle, true)) return;
+    }
+    const file = await handle.getFile();
+    _loadDatasetFile(file, handle);   // which is what records it as the recent one
+  } catch (err) {
+    if (err.name === 'AbortError') return;          // the picker was dismissed
+    document.getElementById('status').textContent = t('errors.loadError', { msg: err.message });
+  }
+}
+
+// Writes over the file the loaded data actually came from. Deliberately does not
+// fall back to the *remembered* handle: after an ordinary import the dataset on
+// screen has nothing to do with the last file opened, and quietly overwriting it
+// would destroy a file the user never named.
+export async function saveToFile() {
+  if (!fileAccessSupported()) { downloadGEDCOM(); return; }
+  try {
+    const handle = state._fileHandle;
+    if (!handle || !await _permitted(handle, true)) return;
+
+    const name = handle.name || window._gedcomFilename;
+    const w = await handle.createWritable();
+    await w.write(_textForFile(name));
+    await w.close();
+
+    window._gedcomFilename = name;
+    await _saveRecentHandle(handle);
+    _setDirty(false);
+    updateFileButtons();
+    document.getElementById('status').textContent = t('topbar.savedTo', { name });
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    document.getElementById('status').textContent = t('errors.saveError', { msg: err.message });
+  }
+}
+
+// Both buttons name the file they act on, so it is never a guess which one gets
+// written. Called on startup too, when only the remembered handle knows the name.
+export async function updateFileButtons() {
+  const openBtn = document.getElementById('open-recent-btn');
+  const saveBtn = document.getElementById('save-file-btn');
+  if (!openBtn || !saveBtn) return;
+  if (!fileAccessSupported()) {
+    // Firefox and mobile browsers have no way to write back to a chosen file.
+    // Offering the buttons anyway would promise something they cannot do.
+    openBtn.style.display = saveBtn.style.display = 'none';
+    return;
+  }
+
+  // The open button offers whatever was last opened, even across a reload.
+  let recent = state._fileHandle?.name;
+  if (!recent) {
+    try { recent = (await _readRecentHandle())?.name; } catch { /* no store yet */ }
+  }
+  openBtn.style.display = 'inline-block';
+  openBtn.innerHTML = recent
+    ? '↻ <span>' + escHtml(recent) + '</span>'
+    : '\u{1F4C1} <span>' + escHtml(t('topbar.openFile')) + '</span>';
+  openBtn.title = recent ? t('topbar.openRecentTitle', { name: recent }) : t('topbar.openFileTitle');
+
+  // The save button only appears once the data on screen came from a file we
+  // can write back to, so what it would overwrite is never in doubt.
+  const live = state._fileHandle?.name;
+  saveBtn.style.display = live ? 'inline-block' : 'none';
+  if (live) {
+    saveBtn.innerHTML = '\u{1F4BE} <span>' + escHtml(live) + '</span>';
+    saveBtn.title = t('topbar.saveToTitle', { name: live });
+  }
 }
 
 export const _GD_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];

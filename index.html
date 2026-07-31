@@ -14,6 +14,8 @@
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" data-i18n-label="topbar.menu" aria-label="Menü öffnen">&#9776;</button>
   <h1>&#127795; <span data-i18n="app.name">Stammbaum</span></h1>
   <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren"><span data-i18n="topbar.import">&#x1F4E5; Import</span></button>
+  <button id="open-recent-btn" onclick="openRecentFile()" style="display:none" data-i18n-title="topbar.openFileTitle" title="Datei öffnen">&#x1F4C1; <span data-i18n="topbar.openFile">Datei öffnen</span></button>
+  <button id="save-file-btn" onclick="saveToFile()" style="display:none" data-i18n-title="topbar.saveToTitle" title="In dieselbe Datei speichern">&#x1F4BE;</button>
   <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen"><span data-i18n="topbar.newPerson">&#xff0b; Neue Person</span></button>
   <button id="view-toggle-btn" onclick="toggleView()" data-i18n-title="topbar.viewTitle" title="Zwischen 2D und 3D wechseln (V)" disabled>&#x25E7; <span data-i18n="topbar.view2d">2D</span></button>
   <div id="dl-wrap" style="display:none">
@@ -461,7 +463,7 @@
     <div id="import-step-input">
       <p class="import-hint" data-i18n-html="import.hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR (offline) gelesen; bei Bedarf steht KI als Fallback bereit.</p>
 
-      <div id="import-drop-zone" ondragover="_imDragOver(event)" ondragleave="_imDragLeave(event)" ondrop="_imDrop(event)" onclick="document.getElementById('import-file-input').click()">
+      <div id="import-drop-zone" ondragover="_imDragOver(event)" ondragleave="_imDragLeave(event)" ondrop="_imDrop(event)" onclick="_imPickFile()">
         <div id="import-drop-label">&#x1F4C2; <span data-i18n="import.dropLabel">Datei ablegen, klicken zum Wählen, oder Strg+V zum Einfügen</span></div>
         <div id="import-drop-filename" style="display:none"></div>
         <img id="import-image-preview" style="display:none" data-i18n-label="import.previewAlt" alt="Vorschau">

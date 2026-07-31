@@ -1683,6 +1683,37 @@ body.relation-picking * { cursor: crosshair !important; }
 }
 #import-btn:hover { background: #515151; }
 
+/* Working-file buttons. Both carry a filename, which can be long, so they get a
+   ceiling and ellipsis rather than pushing the rest of the topbar off-screen. */
+#open-recent-btn, #save-file-btn {
+  background: #434343;
+  color: #e0e0e0;
+  border: 1px solid #5c5c5c;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#open-recent-btn span, #save-file-btn span {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+#open-recent-btn:hover, #save-file-btn:hover { background: #515151; }
+/* Unsaved work makes the save-in-place button the one to reach for — same cue
+   the download button already uses. */
+#save-file-btn.has-unsaved {
+  color: #c6c6c6;
+  border-color: #969696;
+  animation: dl-pulse 2.5s ease-in-out infinite;
+}
+
 #new-person-btn {
   background: #f2f2f2;
   color: #0a0a0a;
