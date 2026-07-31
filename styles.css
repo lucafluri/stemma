@@ -494,6 +494,11 @@ body {
 #graph-3d-container,
 #graph-3d-container canvas {
   touch-action: none;
+  /* A press-and-hold on the canvas otherwise raises iOS's share/copy callout
+     mid-orbit, which cancels the gesture and leaves the camera stuck. */
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Drag handle for mobile bottom sheet */

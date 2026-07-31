@@ -6,7 +6,7 @@ import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenera
 import { wasTouchDrag } from './main.js';
 import { closeDetailPanel, quickAddChildFromHover, quickAddFromHover, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _tryPickRelationPerson, applyHighlight } from './relations.js';
-import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, setView, update3DNames } from './render-3d.js';
+import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, fit3D, setView, update3DNames } from './render-3d.js';
 import { _linkPath, applyTimelineYFix, applyTreeLayout, famMarkerSize, frameTreeChart, releaseTreePins, useTreeLayout } from './tree-layout.js';
 
 export const NODE_BOX_W  = 92;
@@ -725,7 +725,7 @@ export function zoomToNode(nid) {
 export function centerView() {
   if (state.currentView === '3d' && state.graph3d) {
     _setOrbitTarget3D(null);           // orbit back to origin
-    state.graph3d.zoomToFit(800, 60);
+    fit3D();
   } else {
     zoomToFit();
   }

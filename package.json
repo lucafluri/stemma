@@ -4,7 +4,7 @@
   "description": "",
   "main": "js/main.js",
   "scripts": {
-    "test": "node gedcom.test.js && node import.test.js && node focus.test.js"
+    "test": "node gedcom.test.js && node import.test.js && node focus.test.js && node mobile.test.js"
   },
   "repository": {
     "type": "git",

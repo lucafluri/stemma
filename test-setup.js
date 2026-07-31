@@ -38,8 +38,14 @@ function setupDom() {
   // Third-party libraries loaded via <script src> in the browser -- app code
   // only calls into them from inside function bodies (never at module top
   // level), so a no-op stub is enough for import-time module evaluation.
-  const noop = () => {};
-  const chain = () => new Proxy(noop, { get: () => chain(), apply: () => chain() });
+  // A regular function, not an arrow: the app calls `new THREE.OrbitControls(...)`
+  // and `new THREE.CanvasTexture(...)`, and an arrow function is not constructible,
+  // so a chain built on one throws the moment any of that runs.
+  const chain = () => new Proxy(function () {}, {
+    get: () => chain(),
+    apply: () => chain(),
+    construct: () => chain(),
+  });
   global.d3 = new Proxy({}, { get: () => chain() });
   global.THREE = new Proxy({}, { get: () => chain() });
   global.ForceGraph3D = () => chain();

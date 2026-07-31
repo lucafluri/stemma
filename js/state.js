@@ -60,10 +60,15 @@ export const state = {
   _birthYearRange: null,  // { min, max } saved for 3D stratification
   _genRange3D: null,  // { min, max } generation depth, same purpose
   _3dMousePos: { x: 0, y: 0 },
+  _3dGestureDragged: false,  // the pointer travelled, so the click that follows is not a tap
   showFamNodes: true,   // show FAM diamond nodes (vs direct parent-child links)
   stratify3D: localStorage.getItem('stratify3D') || 'time',
   showTimeline3D: true,   // show the visual timeline axis (spine + rings)
-  show3DNames: true,   // render name+year labels above nodes in 3D
+  // Labels default off on a phone. Every one of them is its own canvas texture,
+  // and a hundred of them on a 390px screen is an unreadable mat of boxes that
+  // also costs more texture memory than the whole rest of the scene. The toggle
+  // is still there for anyone who wants them.
+  show3DNames: typeof window === 'undefined' || window.innerWidth > 768,
   _nodeDragEnabled: false, // node dragging disabled by default
   _timeline3DObj: null,   // THREE.Group holding timeline meshes in the 3D scene
   _3dYHalfSpan: 750,   // half-range of Y axis in 3D sim units (older→+half, newer→-half)

@@ -28,7 +28,7 @@ export function setView(view) {
         _push3DData(); apply3DPhysics(); build3DTimeline(); update3DNames();
         // Re-pushing restarts the 3D layout, so the old camera no longer frames
         // anything — refit once it has had a moment to spread out.
-        setTimeout(() => state.graph3d?.zoomToFit(700, 80), 900);
+        setTimeout(() => fit3D(700), 900);
       }
     }
     setTimeout(() => {
@@ -99,6 +99,13 @@ export function updateViewToggleUI() {
   }
 }
 
+// Frame the whole graph. The padding is in screen pixels, so the desktop value
+// eats a third of the width of a phone held upright — the graph ends up framed
+// into the middle of the screen with margins nobody asked for.
+export function fit3D(ms = 800) {
+  state.graph3d?.zoomToFit(ms, _isMobile() ? 20 : 60);
+}
+
 export function resize3D() {
   if (!state.graph3d) return;
   const el = document.getElementById('graph-3d-container');
@@ -143,7 +150,9 @@ export function initGraph3D() {
     .nodeVal(n => _famNodeVal(n))
     .nodeRelSize(state._3dAppearance.nodeRelSize)
     .nodeOpacity(state._3dAppearance.nodeOpacity)
-    .nodeResolution(12)
+    // Spheres are small on a phone screen; the facets do not show, the triangles
+    // still cost.
+    .nodeResolution(_isMobile() ? 8 : 12)
     // No .nodeLabel() here: the library's own hover tooltip would show
     // alongside the custom #tooltip div that onNodeHover()/onHover() already
     // drive (shared with the 2D view) — showing both at once is the "two
@@ -155,6 +164,7 @@ export function initGraph3D() {
     // ── Events ──
     .onNodeClick((n, evt) => {
       if (evt) evt.stopPropagation();
+      if (state._3dGestureDragged) return;   // this "tap" was the end of an orbit
       if (n.type === 'INDI' && _tryPickRelationPerson(n.id)) return;
       if (n.type === 'INDI') showIndiDetail(n.id);
       else showFamDetail(n.id);
@@ -168,7 +178,10 @@ export function initGraph3D() {
         onOut();
       }
     })
-    .onBackgroundClick(() => { _isMobile() ? minimizeDetailPanel() : closeDetailPanel(); })
+    .onBackgroundClick(() => {
+      if (state._3dGestureDragged) return;
+      _isMobile() ? minimizeDetailPanel() : closeDetailPanel();
+    })
     .enableNodeDrag(state._nodeDragEnabled);
 
   // Delay setup so the library's internal controls finish initialising first
@@ -180,7 +193,23 @@ export function initGraph3D() {
     old.dispose();
 
     const cam = state.graph3d.camera();
-    const domEl = state.graph3d.renderer().domElement;
+    const renderer = state.graph3d.renderer();
+    const domEl = renderer.domElement;
+
+    // A phone reports a device pixel ratio of 3, so the renderer shades nine
+    // fragments for every one you can see — the single biggest thing between
+    // this scene and a usable frame rate on mobile. Two is past the point where
+    // the difference is visible on a screen held at arm's length.
+    //
+    // Only on mobile: whatever the library picked is right for a desktop GPU,
+    // and quietly changing it there would be a regression nobody asked for.
+    // setPixelRatio reaches the drawing buffer on the next setSize only, and the
+    // renderer has been sized already, so re-apply the size rather than waiting
+    // for a resize that may never come.
+    if (_isMobile()) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight, false);
+    }
 
     state._orbitControls3d = new THREE.OrbitControls(cam, domEl);
     state._orbitControls3d.enableDamping  = true;
@@ -210,9 +239,32 @@ export function initGraph3D() {
 
     // Before a rotate drag starts, pull the pivot back onto the tree
     // (pan/zoom can leave the orbit target floating in empty space)
+    //
+    // The same listeners answer "was this a tap or the end of a drag?". A rotate
+    // gesture finishes with a click event, and when it happens to finish over a
+    // node the library reports it as a tap on that node — so on a touch screen,
+    // where one finger orbits, turning the scene kept throwing open the detail
+    // panel of whatever the finger landed on. Slop is wider for a finger than
+    // for a mouse: nobody holds a phone still enough for 4px.
+    let downAt = null, slop = 4;
     domEl.addEventListener('pointerdown', (evt) => {
+      if (evt.isPrimary) {
+        downAt = { x: evt.clientX, y: evt.clientY };
+        slop = evt.pointerType === 'touch' ? 10 : 4;
+        state._3dGestureDragged = false;
+      }
       if (evt.button === 0) _snapOrbitPivot3D();
     });
+    domEl.addEventListener('pointermove', (evt) => {
+      if (!downAt || !evt.isPrimary) return;
+      if (Math.hypot(evt.clientX - downAt.x, evt.clientY - downAt.y) > slop) {
+        state._3dGestureDragged = true;
+      }
+    });
+    // Leave the flag standing until the click that follows has been judged by it.
+    for (const ev of ['pointerup', 'pointercancel']) {
+      domEl.addEventListener(ev, () => { downAt = null; });
+    }
 
     // Redirect the render-loop's update() call to our OrbitControls + orbit target tracking
     old.update = () => { _tickOrbitTarget(); state._orbitControls3d.update(); };
@@ -238,7 +290,7 @@ export function initGraph3D() {
     update3DNames();
 
     // Set render orders after the scene has first rendered
-    setTimeout(() => { refresh3D(); state.graph3d?.zoomToFit(800, 60); }, 2500);
+    setTimeout(() => { refresh3D(); fit3D(); }, 2500);
   }, 150);
 }
 
@@ -371,7 +423,10 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 }
 
 export function makeTextSprite3D(drawFn, logicalW, logicalH) {
-  const DPR = 4;
+  // 4× is for a desktop GPU. Each sprite is its own canvas texture, so on a
+  // phone that is 16× the memory per label for detail no phone screen resolves —
+  // and running out of texture memory drops the whole scene, not just the text.
+  const DPR = _isMobile() ? 2 : 4;
   const canvas = document.createElement('canvas');
   canvas.width  = logicalW * DPR;
   canvas.height = logicalH * DPR;
@@ -733,6 +788,13 @@ export function export3DTopDown() {
 }
 
 window.addEventListener('resize', () => { if (state.currentView === '3d') resize3D(); });
+// Rotating a phone fires resize while the browser still reports the old
+// dimensions, which leaves the canvas the wrong shape until something else
+// happens to resize it. Measure again once the new layout has settled.
+window.addEventListener('orientationchange', () => {
+  if (state.currentView !== '3d') return;
+  setTimeout(resize3D, 300);
+});
 
 export function _graphCentroid3D() {
   if (!state.graph3d) return new THREE.Vector3(0, 0, 0);
