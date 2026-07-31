@@ -25,6 +25,7 @@ export const state = {
   labelSel: null,
   yearSel: null,   // the birth–death line under each name
   currentZoom: 1,
+  _labelSig: null,  // which legibility band the labels were last laid out for
   selectedIndiId: null,    // currently shown in detail panel
   hlMode: null,            // null | 'ancestors' | 'descendants' | 'both'
   hlSet: new Set(),       // highlighted node ids
@@ -94,7 +95,6 @@ export const state = {
   nodeColors: { ...NODE_COLOR_DEFAULTS },
   famNodeSize: parseInt(localStorage.getItem('famNodeSize')) || 1,
   _panelSwipe: null,  // { startY, startTranslate }
-  _qaHoverEl: null,   // the node <g> currently showing its quick-add buttons, if any
   _touchDragged: false,
   _touchStartPos: null,
   _estimatedYears: null,  // Map<id, number>

@@ -4,7 +4,7 @@ import { PHYSICS_DEFAULTS, perf } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
-import { closeDetailPanel, quickAddChildFromHover, quickAddFromHover, row, showFamDetail, showIndiDetail } from './panels.js';
+import { closeDetailPanel, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _tryPickRelationPerson, applyHighlight } from './relations.js';
 import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, fit3D, setView, update3DNames } from './render-3d.js';
 import { _linkPath, applyTimelineYFix, applyTreeLayout, famMarkerSize, frameTreeChart, releaseTreePins, useTreeLayout } from './tree-layout.js';
@@ -125,6 +125,11 @@ export function initSVG() {
       state.gMain.attr('transform', evt.transform);
       const prev = state.currentZoom;
       state.currentZoom = evt.transform.k;
+      // A pan moves the whole layer with that one attribute; nothing about the
+      // labels depends on where the layer is. This event fires for panning as
+      // well as zooming, and without this line every animation frame of a drag
+      // walked every label on the chart.
+      if (prev === state.currentZoom) return;
       // Full label update only when crossing visibility thresholds; otherwise RAF-throttled
       const crossedThreshold = (prev < 0.35) !== (state.currentZoom < 0.35) ||
                                (prev < 1.1)  !== (state.currentZoom < 1.1);
@@ -185,83 +190,18 @@ export function initSVG() {
     if (evt.target === state.svgSel.node()) closeDetailPanel();
   });
 
-  // Backstop for the pointer leaving the chart altogether — onto the sidebar, the
-  // detail panel, or out of the window. A node right at the edge can lose its own
-  // mouseleave to that, and nothing would come along afterwards to clear it.
-  state.svgSel.on('mouseleave', () => _showQuickAdd(null));
-}
-
-export const QA_BTN_R = 9;
-
-// The plus as two strokes crossing at the origin — the same point the circle is
-// centred on, so it is centred by construction.
-//
-// It used to be a text glyph nudged half a pixel, which is the giveaway: a "+"
-// sits on the font's math axis rather than in the middle of its em box, so
-// dominant-baseline centres the box and leaves the glyph off by however much
-// that font disagrees. No font-family is set here, so the amount varied by
-// platform and no single nudge could be right everywhere. Geometry has no
-// metrics to argue with.
-export function _qaPlusPath(r = QA_BTN_R) {
-  const arm = Math.round(r * 0.45);
-  return `M${-arm},0H${arm}M0,${-arm}V${arm}`;
-}
-
-export function _appendQaButton(sel, dx, dy, title, onClick) {
-  const g = sel.append('g')
-    .attr('class', 'qa-hover-btn')
-    .attr('transform', `translate(${dx},${dy})`)
-    .style('display', 'none')
-    .style('cursor', 'pointer')
-    .on('click', (evt, d) => { evt.stopPropagation(); onClick(d); })
-    .on('mousedown', evt => evt.stopPropagation()); // don't let it start a node drag
-  g.append('circle')
-    .attr('r', QA_BTN_R)
-    .attr('fill', '#1e1e1e')
-    .attr('stroke', '#888')
-    .attr('stroke-width', 1);
-  g.append('path')
-    .attr('d', _qaPlusPath())
-    .attr('stroke', '#ddd')
-    .attr('stroke-width', 1.6)
-    .attr('stroke-linecap', 'round')
-    .attr('fill', 'none')
-    .attr('pointer-events', 'none');
-  g.append('title').text(title);
-  return g;
-}
-
-export const QA_BTN_OFFSET = QA_BTN_R - 2;
-
-// At most one node shows its quick-add buttons, and it is the one the cursor is
-// on. Enforced by remembering which node has them rather than by trusting every
-// mouseenter to be answered by a matching mouseleave — it is not. Sweeping the
-// pointer quickly across the graph, or straight off it onto the sidebar, drops
-// leave events, and a node that missed one kept its buttons lit indefinitely.
-// Clearing the previous node on the way in cannot miss, whatever the browser did
-// with the events in between.
-export function _showQuickAdd(el) {
-  if (state._qaHoverEl === el) return;
-  const set = (node, display) => {
-    if (!node) return;
-    for (const b of node.querySelectorAll('.qa-hover-btn')) b.style.display = display;
-  };
-  set(state._qaHoverEl, 'none');
-  state._qaHoverEl = el;
-  set(el, '');
-}
-
-export function _addQuickAddButtons(indiSel, famSel) {
-  _appendQaButton(indiSel, 0, -(NODE_BOX_H / 2 + QA_BTN_OFFSET), t('detail.addParent'), d => quickAddFromHover(d.id, 'parent'));
-  _appendQaButton(indiSel, NODE_BOX_W / 2 + QA_BTN_OFFSET, 0,     t('detail.addSpouse'), d => quickAddFromHover(d.id, 'spouse'));
-  _appendQaButton(indiSel, 0, NODE_BOX_H / 2 + QA_BTN_OFFSET,     t('detail.addChild'), d => quickAddFromHover(d.id, 'child'));
-  _appendQaButton(famSel, 0, famMarkerSize() + QA_BTN_OFFSET,     t('detail.addChild'), d => quickAddChildFromHover(d.id));
+  // Tooltip tracking, bound once here rather than on every node. Per node it was
+  // a listener on each of a thousand-odd elements, all of them dispatched
+  // through on every pixel of pointer movement across the chart — and all but
+  // one of them with nothing to do. The early return means the common case,
+  // moving over empty space, costs a single property read.
+  state.svgSel.on('mousemove', evt => {
+    if (document.getElementById('tooltip').style.display === 'none') return;
+    positionTooltip(evt);
+  });
 }
 
 export function renderGraph() {
-  // The element it points at is about to be thrown away; the new buttons come
-  // back hidden, so the tracker has to come back empty too.
-  state._qaHoverEl = null;
   perf.start('[rg] clear');       state.gMain.selectAll('*').remove();                    perf.end('[rg] clear');
 
   // Links layer — <path> so the tree layout can draw square elbows; the force
@@ -295,23 +235,7 @@ export function renderGraph() {
       else showFamDetail(d.id);
     })
     .on('mouseover', onHover)
-    .on('mousemove', onMove)
     .on('mouseout', onOut)
-    // mouseenter/mouseleave (not mouseover/mouseout) so moving onto one of the
-    // quick-add buttons — a child of this same <g> — doesn't count as leaving
-    // it and hide the very button the cursor is over.
-    .on('mouseenter', function () {
-      // A button reaches slightly past this node's own box, which can be
-      // sitting right next to another one (a spouse, typically) that would
-      // otherwise paint over it — raise() moves this <g> to the end of its
-      // parent so the hovered node and its buttons are always on top.
-      d3.select(this).raise();
-      _showQuickAdd(this);
-    })
-    // Only if this node is still the one holding them: when the pointer crosses
-    // to a neighbour the enter can arrive before the leave, and an unguarded
-    // leave would then switch off the buttons the cursor has just arrived on.
-    .on('mouseleave', function () { if (state._qaHoverEl === this) _showQuickAdd(null); })
     .on('dblclick', (evt, d) => {
       evt.stopPropagation();
       delete d.fx; delete d.fy;
@@ -371,8 +295,6 @@ export function renderGraph() {
     .attr('opacity', 0.88);
   perf.end('[rg] shapes');
 
-  _addQuickAddButtons(indiSel, famSel);
-
   // Name label — lives inside the box (not a separate layer floating above
   // it), so it moves, scales and z-orders with the node for free.
   perf.start('[rg] labels');
@@ -404,7 +326,9 @@ export function renderGraph() {
     .text(d => nodeYears(d.data));
 
   perf.end('[rg] labels');
-  updateLabels();
+  // These elements are brand new and have never been fitted, so this pass must
+  // run whatever band the zoom happens to already be in.
+  updateLabels(true);
 }
 
 export const LABEL_MIN_FONT = 7;
@@ -444,41 +368,44 @@ export function updateLabelColors() {
   });
 }
 
-export function updateLabels() {
+export function updateLabels(force = false) {
   if (!state.labelSel || state.labelSel.empty()) return;
   const zoom = state.currentZoom;
   // Below this the box itself is a few screen px wide — the name would just
   // be noise, so drop it rather than render illegible text.
   const hidden = zoom < 0.28;
-
+  // The years are set smaller than the name and go to mush one step earlier.
+  const yearsHidden = zoom < 0.4;
   const weight = state.labelStyle.fontWeight || 'normal';
 
-  state.labelSel.each(function(d) {
+  // Everything below depends only on which legibility band the zoom is in, and
+  // a zoom that stays inside its band changes none of it. Bail before touching a
+  // couple of thousand elements: this ran on every animation frame of a pan and
+  // rewrote the text, size and display of every label on the chart, which is
+  // what made dragging a large tree crawl.
+  const sig = `${hidden}|${yearsHidden}|${weight}`;
+  if (!force && state._labelSig === sig) return;
+  state._labelSig = sig;
+
+  state.labelSel.each(function (d) {
     if (hidden) { this.style.display = 'none'; return; }
     this.style.display = '';
 
     // Fitting is a property of the name and the box, not of the zoom, so it is
-    // worked out once per name and remembered. updateLabels runs on every zoom
-    // change and measuring text forces a layout — doing it here every time
-    // would make panning stutter on a large chart.
+    // worked out once per name and then left alone — the element keeps the text
+    // and size _fitLabel gave it until the name itself changes. Re-applying both
+    // from a cache on every pass, as this did, is a DOM write per label to put
+    // back the value already there.
     const full = nodeLabelText(d.data);
     const key = full + '\\0' + weight;
     if (this.__fitKey !== key) {
       _fitLabel(this, full, NODE_BOX_W - 10, NODE_BOX_FONT);
-      this.__fitKey  = key;
-      this.__fitText = this.textContent;
-      this.__fitSize = this.getAttribute('font-size');
-    } else {
-      this.textContent = this.__fitText;
-      this.setAttribute('font-size', this.__fitSize);
+      this.__fitKey = key;
     }
   });
 
-  // The years are already short enough to fit, so they only need the colour
-  // refresh and the same legibility cutoff — one step earlier, since they are
-  // set smaller than the name and go to mush first.
-  state.yearSel?.each(function(d) {
-    this.style.display = zoom < 0.4 ? 'none' : '';
+  state.yearSel?.each(function () {
+    this.style.display = yearsHidden ? 'none' : '';
   });
 }
 
@@ -858,8 +785,6 @@ export function onHover(evt, d) {
   tt.style.display = 'block';
   positionTooltip(evt);
 }
-
-export function onMove(evt) { positionTooltip(evt); }
 
 export function onOut() { document.getElementById('tooltip').style.display = 'none'; }
 

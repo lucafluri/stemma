@@ -53,7 +53,7 @@ screen and how many are hidden. `+N` chips mark where a branch was cut; clicking
 one opens the next generation.
 
 **Editing.** Click a person or family to open the detail panel; add parents,
-spouses and children inline, or from the `+` buttons that appear on hover.
+spouses and children from the buttons there.
 
 **Import.** GEDCOM, JSON and YAML load directly. Plain text and images
 (scanned charts) go through a review wizard that parses them into people you can
@@ -135,7 +135,7 @@ Eight suites, no framework — plain `node` scripts with `assert`:
 | `focus.test.js` | the focus filter and the whole 2D chart layout |
 | `import.test.js` | linking imported people to existing records |
 | `deceased.test.js` | auto-marking long-dead people |
-| `hover.test.js` | quick-add buttons and node box labels |
+| `hover.test.js` | the text on a person's box |
 | `stats.test.js` | the statistics figures and how they are rendered |
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
 | `workfile.test.js` | reopening and saving back over the same file |
