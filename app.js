@@ -2410,6 +2410,52 @@ function initSVG() {
   });
 }
 
+// Small "+" buttons around a node, shown only on hover, that jump straight
+// to the same quick-add form the detail panel offers — one click short of
+// opening the panel and finding the right button in it. They live inside the
+// node's own <g> so they move, scale and z-order with it for free, and start
+// hidden (mouseenter/mouseleave on the node toggles them, see nodeSel above).
+const QA_BTN_R = 9;
+function _appendQaButton(sel, dx, dy, title, onClick) {
+  const g = sel.append('g')
+    .attr('class', 'qa-hover-btn')
+    .attr('transform', `translate(${dx},${dy})`)
+    .style('display', 'none')
+    .style('cursor', 'pointer')
+    .on('click', (evt, d) => { evt.stopPropagation(); onClick(d); })
+    .on('mousedown', evt => evt.stopPropagation()); // don't let it start a node drag
+  g.append('circle')
+    .attr('r', QA_BTN_R)
+    .attr('fill', '#1e1e1e')
+    .attr('stroke', '#888')
+    .attr('stroke-width', 1);
+  g.append('text')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('dy', '0.5px')
+    .attr('font-size', '13px')
+    .attr('fill', '#ddd')
+    .attr('pointer-events', 'none')
+    .text('+');
+  g.append('title').text(title);
+  return g;
+}
+
+// Distance from the box/marker edge to the button's centre. Overlapping the
+// edge by a unit or two (rather than leaving a true gap) means the pointer
+// never actually leaves the <g> while crossing from one to the other, with
+// no invisible bridging shape needed — and no bridging shape means nothing
+// permanently extends a node's hit area into a tightly-packed neighbour's
+// space (a spouse box sitting right next to it, say) even while not hovered.
+const QA_BTN_OFFSET = QA_BTN_R - 2;
+
+function _addQuickAddButtons(indiSel, famSel) {
+  _appendQaButton(indiSel, 0, -(NODE_BOX_H / 2 + QA_BTN_OFFSET), t('detail.addParent'), d => quickAddFromHover(d.id, 'parent'));
+  _appendQaButton(indiSel, NODE_BOX_W / 2 + QA_BTN_OFFSET, 0,     t('detail.addSpouse'), d => quickAddFromHover(d.id, 'spouse'));
+  _appendQaButton(indiSel, 0, NODE_BOX_H / 2 + QA_BTN_OFFSET,     t('detail.addChild'), d => quickAddFromHover(d.id, 'child'));
+  _appendQaButton(famSel, 0, famMarkerSize() + QA_BTN_OFFSET,     t('detail.addChild'), d => quickAddChildFromHover(d.id));
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 5. RENDER GRAPH
 // ═══════════════════════════════════════════════════════════════
@@ -2449,6 +2495,18 @@ function renderGraph() {
     .on('mouseover', onHover)
     .on('mousemove', onMove)
     .on('mouseout', onOut)
+    // mouseenter/mouseleave (not mouseover/mouseout) so moving onto one of the
+    // quick-add buttons — a child of this same <g> — doesn't count as leaving
+    // it and hide the very button the cursor is over.
+    .on('mouseenter', function () {
+      // A button reaches slightly past this node's own box, which can be
+      // sitting right next to another one (a spouse, typically) that would
+      // otherwise paint over it — raise() moves this <g> to the end of its
+      // parent so the hovered node and its buttons are always on top.
+      d3.select(this).raise();
+      d3.select(this).selectAll('.qa-hover-btn').style('display', '');
+    })
+    .on('mouseleave', function () { d3.select(this).selectAll('.qa-hover-btn').style('display', 'none'); })
     .on('dblclick', (evt, d) => {
       evt.stopPropagation();
       delete d.fx; delete d.fy;
@@ -2507,6 +2565,8 @@ function renderGraph() {
     .attr('stroke-dasharray', d => d.data.div ? '3 2' : null)
     .attr('opacity', 0.88);
   console.timeEnd('[rg] shapes');
+
+  _addQuickAddButtons(indiSel, famSel);
 
   // Name label — lives inside the box (not a separate layer floating above
   // it), so it moves, scales and z-orders with the node for free.
@@ -2573,6 +2633,20 @@ function _fitLabel(el, full, avail, size) {
   el.textContent = full.slice(0, lo) + '…';
 }
 
+function updateLabelColors() {
+  if (!labelSel || labelSel.empty()) return;
+  const weight = labelStyle.fontWeight || 'normal';
+  labelSel.each(function(d) {
+    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
+    this.setAttribute('fill-opacity', labelStyle.textOpacity);
+    this.setAttribute('font-weight',  weight);
+  });
+  yearSel?.each(function(d) {
+    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
+    this.setAttribute('fill-opacity', labelStyle.textOpacity * 0.75);
+  });
+}
+
 function updateLabels() {
   if (!labelSel || labelSel.empty()) return;
   const zoom = currentZoom;
@@ -2583,10 +2657,6 @@ function updateLabels() {
   const weight = labelStyle.fontWeight || 'normal';
 
   labelSel.each(function(d) {
-    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
-    this.setAttribute('fill-opacity', labelStyle.textOpacity);
-    this.setAttribute('font-weight',  weight);
-
     if (hidden) { this.style.display = 'none'; return; }
     this.style.display = '';
 
@@ -2611,8 +2681,6 @@ function updateLabels() {
   // refresh and the same legibility cutoff — one step earlier, since they are
   // set smaller than the name and go to mush first.
   yearSel?.each(function(d) {
-    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
-    this.setAttribute('fill-opacity', labelStyle.textOpacity * 0.75);
     this.style.display = zoom < 0.4 ? 'none' : '';
   });
 }
@@ -2624,18 +2692,10 @@ function updateLabels() {
 // a gentle reheat, instead of building a brand-new simulation at alpha=1.
 // Used for single edits so only the changed node(s) actually move.
 function buildAndRunSimulation(opts = {}) {
-  // Classical chart: positions are computed outright, so there is nothing to
-  // simulate. Everything below (forces, warm reheat, headless ticking) is the
-  // force layout's business only.
-  if (useTreeLayout() && applyTreeLayout()) return;
-  releaseTreePins();
-
-  const warm = !!opts.warm && !!simulation;
-  const svgEl = document.getElementById('graph-svg');
-  const W = svgEl.clientWidth  || 1100;
-  const H = svgEl.clientHeight || 700;
-
-  // Keep birth year range for the 3D timeline
+  // Keep birth year range for the 3D timeline, and the generation range for
+  // the other way of stacking them. The 3D view reads both regardless of
+  // which 2D layout is active, so this has to run even when the tree layout
+  // is about to make the rest of this function a no-op below.
   const birthYears = nodes
     .filter(n => n.type === 'INDI' && n.data.birthYear)
     .map(n => n.data.birthYear);
@@ -2643,7 +2703,6 @@ function buildAndRunSimulation(opts = {}) {
   const maxBY = birthYears.length ? Math.max(...birthYears) : 2025;
   _birthYearRange = { min: minBY, max: maxBY };
 
-  // ...and the generation range, for the other way of stacking them.
   const gd = computeGenerationDepths();
   const gs = nodes.filter(n => n.type === 'INDI' && gd.has(n.id)).map(n => gd.get(n.id));
   _genRange3D = gs.length ? { min: Math.min(...gs), max: Math.max(...gs) } : null;
@@ -2660,6 +2719,17 @@ function buildAndRunSimulation(opts = {}) {
     }
     _birthYearRange = { min: eMin, max: eMax };
   }
+
+  // Classical chart: positions are computed outright, so there is nothing to
+  // simulate. Everything below (forces, warm reheat, headless ticking) is the
+  // force layout's business only.
+  if (useTreeLayout() && applyTreeLayout()) return;
+  releaseTreePins();
+
+  const warm = !!opts.warm && !!simulation;
+  const svgEl = document.getElementById('graph-svg');
+  const W = svgEl.clientWidth  || 1100;
+  const H = svgEl.clientHeight || 700;
 
   // Generation-depth based Y positioning: children are always below parents
   console.time('[sim] computeGenerationDepths');
@@ -3293,6 +3363,14 @@ function toggleQuickAdd(type) {
   }
 }
 
+// Entry point for the hover "+" buttons on the chart: open the person and
+// jump straight to the relevant quick-add form, instead of making the user
+// find the same button again in the panel that just opened.
+function quickAddFromHover(personId, type) {
+  showIndiDetail(personId);
+  toggleQuickAdd(type);
+}
+
 function confirmQuickAddRelative(personId, type) {
   const givn = document.getElementById(`qa-${type}-givn`)?.value.trim() || '';
   const surn = document.getElementById(`qa-${type}-surn`)?.value.trim() || '';
@@ -3563,13 +3641,7 @@ function refreshNodeColors() {
   if (!nodeSel) return;
   nodeSel.each(function(d) {
     if (d.type === 'INDI') {
-      const col = nodeBaseColor(d);
-      d3.select(this).select('rect.indi-box').attr('fill', col);
-      // The years line is drawn in the same contrast colour as the name, so it
-      // has to follow the fill too — left out, it stays readable against the
-      // old colour and vanishes against the new one.
-      d3.select(this).selectAll('text.node-label, text.node-years')
-        .attr('fill', contrastTextColor(col));
+      d3.select(this).select('rect.indi-box').attr('fill', nodeBaseColor(d));
     } else {
       const col = d.data.div ? nodeColors.famDiv : nodeColors.fam;
       d3.select(this).select('.fam-polygon')
@@ -3578,6 +3650,7 @@ function refreshNodeColors() {
     }
   });
   _applyFamNodeSize();
+  updateLabelColors();
   updateLabels();
   refresh3D();
 }
@@ -5115,6 +5188,15 @@ function startEdit() {
 }
 let _lastShownFamId = null;
 
+// Hover "+" on a family node: adding a child there only exists inside the
+// family's edit form, so jump straight into it with the new-child form
+// already open, instead of a bare click into the read-only family view.
+function quickAddChildFromHover(famId) {
+  showFamDetail(famId);
+  startEdit();
+  _famEditToggleNewChild();
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ADD PERSON
 // ═══════════════════════════════════════════════════════════════
@@ -5603,20 +5685,10 @@ function initGraph3D() {
     .nodeRelSize(_3dAppearance.nodeRelSize)
     .nodeOpacity(_3dAppearance.nodeOpacity)
     .nodeResolution(12)
-    .nodeLabel(n => {
-      if (n.type !== 'INDI') return '';
-      const i = n.data;
-      let born = i.birthYear ? ` *${i.birthYear}` : '';
-      if (!born && _estimatedYears && _estimatedYears.has(n.id)) born = ` ~${_estimatedYears.get(n.id)}`;
-      const died = i.deceased
-        ? (i.death.date ? ` †${i.death.date.match(/\d{4}/)?.[0] || ''}` : ' †')
-        : '';
-      const age = personAgeYears(n.id);
-      const ageStr = age ? ` · ${t(age.atDeath ? 'tooltip.ageAtDeath' : 'tooltip.age', { age: (age.approx ? '~' : '') + age.age })}` : '';
-      const genNum = generationNumbers().get(n.id);
-      const genStr = genNum != null ? ` · ${t('tooltip.generation', { n: genNum })}` : '';
-      return `<span style="background:rgba(20,20,20,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}${ageStr}${genStr}</span>`;
-    })
+    // No .nodeLabel() here: the library's own hover tooltip would show
+    // alongside the custom #tooltip div that onNodeHover()/onHover() already
+    // drive (shared with the 2D view) — showing both at once is the "two
+    // tooltips" bug. That one is the richer, kept one.
     // ── Links ──
     .linkColor(l => linkColor(l))
     .linkWidth(_3dAppearance.linkWidth)
