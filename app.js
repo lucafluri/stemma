@@ -2060,6 +2060,26 @@ function generationCount() {
   return g.size ? Math.max(...g.values()) + 1 : 0;
 }
 
+// Age for a hover tooltip: how old they'd be today if still alive, or how old
+// they were when they died. Falls back to the estimated birth year (the same
+// one the 3D timeline stratifies by) when no recorded date gives one, in which
+// case the age is marked approximate — an estimate propagated from a parent or
+// child is not a fact about this person, just the best guess available.
+function personAgeYears(id) {
+  const indi = individuals.get(id);
+  if (!indi) return null;
+  const bRaw  = indi.birthYear || (indi.birth?.date || '').match(/\d{4}/)?.[0];
+  const bYear = bRaw ? +bRaw : (_estimatedYears?.get(id) ?? null);
+  if (bYear == null) return null;
+  const approx = !bRaw;
+  if (indi.deceased) {
+    const dYear = indi.death?.date?.match(/\d{4}/)?.[0];
+    if (!dYear) return null; // known dead but no year to subtract from
+    return { age: +dYear - bYear, atDeath: true, approx };
+  }
+  return { age: new Date().getFullYear() - bYear, atDeath: false, approx };
+}
+
 // Build estimated birth years for every individual using a multi-pass BFS:
 //  1. Seed with known birthYears
 //  2. Propagate parent→child (+GEN_GAP), child→parent (-GEN_GAP), spouse (same year)
@@ -3021,6 +3041,13 @@ function onHover(evt, d) {
     if (i.occu) html += `<div class="tt-detail" style="color:#9f9f9f">${escHtml(i.occu)}</div>`;
     if (i.maidenName) html += `<div class="tt-detail" style="color:#888">${t('tooltip.born', { name: escHtml(i.maidenName) })}</div>`;
     else if (i.surn) html += `<div class="tt-detail" style="color:#888">${t('tooltip.familyName', { name: escHtml(i.surn) })}</div>`;
+    const age = personAgeYears(d.id);
+    if (age) {
+      const ageStr = (age.approx ? '~' : '') + age.age;
+      html += `<div class="tt-detail">${t(age.atDeath ? 'tooltip.ageAtDeath' : 'tooltip.age', { age: ageStr })}</div>`;
+    }
+    const genNum = generationNumbers().get(d.id);
+    if (genNum != null) html += `<div class="tt-detail" style="color:#888">${t('tooltip.generation', { n: genNum })}</div>`;
   } else {
     const f = d.data;
     const names = [f.husb, f.wife].filter(Boolean)
@@ -5337,13 +5364,61 @@ function clearFocus() {
   _refocus();
 }
 
+// How far the cousin slider can usefully go: past this, _collateralMaxDepth()
+// never cuts anything more off, since no ancestor in the file sits further
+// back than the tree is deep. That makes this the "all" position — the slider
+// should never offer a degree that changes nothing.
+function maxCousinDegree() {
+  return Math.max(1, generationCount() - 1);
+}
+
+// The label for a given degree, including the two edges: 0 is spelled "none"
+// and the slider's own max is spelled "all" rather than a specific number,
+// since that number is meaningless to the reader (it depends on the file).
+function cousinLevelLabel(deg, max) {
+  if (deg >= max && max > 4) return t('focus.cousinLevelAll');
+  if (deg <= 4) return t('focus.cousinLevel' + deg);
+  return t('focus.cousinLevelN', { n: deg });
+}
+
 function setCousinDegree(v) {
-  cousinDegree = Math.max(0, Math.min(4, parseInt(v)));
+  const max = maxCousinDegree();
+  cousinDegree = Math.max(0, Math.min(max, parseInt(v)));
   if (!Number.isFinite(cousinDegree)) cousinDegree = 1;
   localStorage.setItem('cousinDegree', cousinDegree);
   const out = document.getElementById('cousin-degree-val');
-  if (out) out.textContent = t('focus.cousinLevel' + cousinDegree);
+  if (out) out.textContent = cousinLevelLabel(cousinDegree, max);
   if (focusRootId) _refocus();
+}
+
+// Slider bounds come from the file, so they are rebuilt with it — the same
+// pattern as updateGenRangeUI() below.
+function updateCousinDegreeUI() {
+  const slider = document.getElementById('cousin-degree-slider');
+  const tick   = document.getElementById('cousin-degree-ticks');
+  const out    = document.getElementById('cousin-degree-val');
+  if (!slider) return;
+  const max = maxCousinDegree();
+  slider.max = max;
+  if (cousinDegree > max) cousinDegree = max;
+  slider.value = cousinDegree;
+  if (out) out.textContent = cousinLevelLabel(cousinDegree, max);
+  if (tick && tick.childElementCount !== max + 1) {
+    tick.innerHTML = '';
+    for (let d = 0; d <= max; d++) {
+      const o = document.createElement('option');
+      o.value = d;
+      o.label = String(d);
+      tick.appendChild(o);
+    }
+  }
+}
+
+// How far the "max. people" slider can usefully go: past the total number of
+// individuals in the file, a higher limit shows exactly the same chart, so
+// that count is the "all" position.
+function maxFocusLimit() {
+  return Math.max(10, individuals.size);
 }
 
 function setFocusLimit(v) {
@@ -5352,6 +5427,15 @@ function setFocusLimit(v) {
   const out = document.getElementById('focus-limit-val');
   if (out) out.textContent = focusLimit;
   if (focusRootId) _refocus();
+}
+
+function updateFocusLimitUI() {
+  const slider = document.getElementById('focus-limit-slider');
+  const out    = document.getElementById('focus-limit-val');
+  if (!slider) return;
+  slider.max = maxFocusLimit();
+  slider.value = Math.min(focusLimit, +slider.max);
+  if (out) out.textContent = focusLimit;
 }
 
 // The two thumbs are two native range inputs stacked on top of each other, so
@@ -5438,6 +5522,8 @@ function updateFocusUI() {
   const panel = document.getElementById('focus-panel');
   if (!panel) return;
   updateGenRangeUI();
+  updateCousinDegreeUI();
+  updateFocusLimitUI();
   // The panel starts hidden in the markup and used to be revealed by the same
   // line that hid it again in 3D. It belongs to both views now, so it is simply
   // shown once there is a tree to focus within.
@@ -5525,7 +5611,11 @@ function initGraph3D() {
       const died = i.deceased
         ? (i.death.date ? ` †${i.death.date.match(/\d{4}/)?.[0] || ''}` : ' †')
         : '';
-      return `<span style="background:rgba(20,20,20,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}</span>`;
+      const age = personAgeYears(n.id);
+      const ageStr = age ? ` · ${t(age.atDeath ? 'tooltip.ageAtDeath' : 'tooltip.age', { age: (age.approx ? '~' : '') + age.age })}` : '';
+      const genNum = generationNumbers().get(n.id);
+      const genStr = genNum != null ? ` · ${t('tooltip.generation', { n: genNum })}` : '';
+      return `<span style="background:rgba(20,20,20,.92);padding:3px 7px;border-radius:3px;font-size:12px;color:#e0e0e0">${escHtml(i.displayName || i.name)}${born}${died}${ageStr}${genStr}</span>`;
     })
     // ── Links ──
     .linkColor(l => linkColor(l))
@@ -6486,17 +6576,8 @@ document.addEventListener('DOMContentLoaded', () => {
   _initPanelSwipe();
   _initTouchDragGuard();
 
-  // View + focus controls
-  const fls = document.getElementById('focus-limit-slider');
-  if (fls) {
-    fls.value = focusLimit;
-    document.getElementById('focus-limit-val').textContent = focusLimit;
-  }
-  const cds = document.getElementById('cousin-degree-slider');
-  if (cds) {
-    cds.value = cousinDegree;
-    document.getElementById('cousin-degree-val').textContent = t('focus.cousinLevel' + cousinDegree);
-  }
+  // View + focus controls — slider bounds/labels are (re)computed in
+  // updateFocusUI() below, since they depend on the loaded file.
   const tlt = document.getElementById('tree-layout-toggle');
   if (tlt) tlt.checked = treeLayout;
   updateViewToggleUI();
