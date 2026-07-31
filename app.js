@@ -2665,7 +2665,7 @@ function updateLabels() {
     // change and measuring text forces a layout — doing it here every time
     // would make panning stutter on a large chart.
     const full = d.data.displayName || '';
-    const key = full + ' ' + weight;
+    const key = full + '\\0' + weight;
     if (this.__fitKey !== key) {
       _fitLabel(this, full, NODE_BOX_W - 10, NODE_BOX_FONT);
       this.__fitKey  = key;
