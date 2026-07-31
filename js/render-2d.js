@@ -562,7 +562,19 @@ export function buildAndRunSimulation(opts = {}) {
   }
 }
 
-export function applyPhysicsParams() {
+// Slider-rate entry point. `input` fires on every pixel a slider travels — well
+// past once per frame — and each event restarted a 1,400-node simulation from
+// alpha 1. Coalescing to one apply per frame means a drag costs one, not a
+// backlog the browser works through after your finger has stopped.
+let _physFrame = 0, _physOpts = {};
+export function schedulePhysicsParams(opts = {}) {
+  _physOpts = opts;
+  if (_physFrame) return;
+  _physFrame = requestAnimationFrame(() => { _physFrame = 0; applyPhysicsParams(_physOpts); });
+}
+
+// `opts.repin` is passed through to the 3D side; see apply3DPhysics.
+export function applyPhysicsParams(opts = {}) {
   const p = state.physicsParams;
 
   // The 2D force layout and the 3D graph each own an independent simulation
@@ -590,13 +602,21 @@ export function applyPhysicsParams() {
 
     state.simulation
       .alphaDecay(p.alphaDecay)
-      .velocityDecay(p.velocityDecay)
-      .alpha(Math.max(state.simulation.alpha(), 0.25))
-      .restart();
+      .velocityDecay(p.velocityDecay);
+
+    // Setting the forces above is cheap and has to happen either way, so the
+    // parameters are never out of date. Waking the simulation up is not cheap,
+    // and there is no reason to do it to a layout nobody is looking at — the
+    // view switch reheats whichever one you arrive at.
+    if (state.currentView === '2d') {
+      state.simulation.alpha(Math.max(state.simulation.alpha(), 0.25)).restart();
+    }
   }
 
   document.getElementById('loading-overlay').style.display = 'none';
-  if (state.graph3d) apply3DPhysics();
+  // Same rule for the 3D side: keep its forces current whichever view is up, so
+  // nothing is stale on arrival, but only wake it if it is the one on screen.
+  if (state.graph3d) apply3DPhysics({ ...opts, reheat: state.currentView === '3d' });
 }
 
 export function reheatSimulation() {

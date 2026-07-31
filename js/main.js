@@ -13,7 +13,7 @@ import { _fullRebuildGraph, _tryRestoreAutosave, updateFileButtons } from './ged
 import { focusOnPerson, updateFocusUI } from './graph-data.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
-import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, renderPresetList, resetView, toggleNodeDrag, zoomToFit } from './render-2d.js';
+import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, renderPresetList, resetView, schedulePhysicsParams, toggleNodeDrag, zoomToFit } from './render-2d.js';
 import { build3DTimeline, toggleView, updateViewToggleUI } from './render-3d.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
@@ -174,7 +174,9 @@ document.addEventListener('DOMContentLoaded', () => {
       state.physicsParams[key] = v;
       const vl = document.getElementById(vid);
       if (vl) vl.textContent = fmt(v);
-      applyPhysicsParams();
+      // Coalesced to one apply per frame, and no Y repin: no physics slider
+      // changes what the stratification pins depend on.
+      schedulePhysicsParams({ repin: false });
     });
   }
 

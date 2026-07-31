@@ -295,7 +295,12 @@ export function initGraph3D() {
   }, 150);
 }
 
-export function apply3DPhysics() {
+// `repin` recomputes every node's Y from the stratification. That depends on the
+// stratify mode and the axis spread and on nothing else — no physics slider
+// touches either — so dragging one used to pay for a full repin of every node on
+// every input event for no change at all. The controls that *do* change it (the
+// mode select, the spread slider) drive applyTimelineYFix themselves.
+export function apply3DPhysics({ repin = true, reheat = true } = {}) {
   if (!state.graph3d) return;
   const p = state.physicsParams;
 
@@ -316,10 +321,12 @@ export function apply3DPhysics() {
   // Pin nodes to exact Y positions based on (estimated) birth year.
   // Using node.fy is exact — unlike forceY which fights link/charge forces.
   // Remove any leftover soft forceY from previous sessions.
-  state.graph3d.d3Force('fy3d', null);
-  applyTimelineYFix();
+  if (repin) {
+    state.graph3d.d3Force('fy3d', null);
+    applyTimelineYFix();
+  }
 
-  state.graph3d.d3ReheatSimulation();
+  if (reheat) state.graph3d.d3ReheatSimulation();
 }
 
 export function refresh3D() {

@@ -128,7 +128,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Nine suites, no framework — plain `node` scripts with `assert`:
+Ten suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -139,6 +139,7 @@ Nine suites, no framework — plain `node` scripts with `assert`:
 | `hover.test.js` | the text on a person's box |
 | `stats.test.js` | the statistics figures and how they are rendered |
 | `autocomplete.test.js` | name suggestions and which form fields get them |
+| `physics.test.js` | what dragging a physics slider costs |
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
 | `workfile.test.js` | reopening and saving back over the same file |
 

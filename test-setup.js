@@ -34,6 +34,13 @@ function setupDom() {
   global.Blob = window.Blob;
   global.alert = () => {};
   global.confirm = () => true;
+  // The app schedules work with these as bare globals, the way browser code
+  // does, and anything that defers a frame throws without them. jsdom only
+  // supplies them under `pretendToBeVisual`, which also starts a refresh loop
+  // that would keep the test process alive — a timer is all that is wanted here.
+  const raf = fn => setTimeout(() => fn(Date.now()), 16);
+  global.requestAnimationFrame = window.requestAnimationFrame?.bind(window) || raf;
+  global.cancelAnimationFrame  = window.cancelAnimationFrame?.bind(window) || clearTimeout;
 
   // Third-party libraries loaded via <script src> in the browser -- app code
   // only calls into them from inside function bodies (never at module top
