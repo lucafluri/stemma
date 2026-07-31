@@ -94,7 +94,7 @@ export function showIndiDetail(id) {
     ${_quickAddFormHtml('child', id)}
   </div>`;
 
-  document.getElementById('detail-content').innerHTML = html;
+  _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
   document.getElementById('detail-buttons').style.display = 'flex';
@@ -291,7 +291,7 @@ export function showFamDetail(id) {
     html += `</div>`;
   }
 
-  document.getElementById('detail-content').innerHTML = html;
+  _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
   document.getElementById('detail-buttons').style.display = 'flex';
@@ -591,7 +591,7 @@ export function showIndiEditForm(id) {
   const datalistHtml = _buildPersonDatalist(id);
   const placeDatalistHtml = _buildPlaceDatalist();
 
-  document.getElementById('detail-content').innerHTML = `
+  _setPanelContent(`
     <div class="edit-section">
       <div class="edit-label">${t('detail.firstName')}</div>
       <input class="edit-input" id="ef-givn" value="${escAttr(i.givn)}">
@@ -695,10 +695,9 @@ export function showIndiEditForm(id) {
     <div class="edit-form-buttons">
       <button class="edit-save-btn" onclick="commitIndiEdit()">&#x2713; ${t('detail.save')}</button>
       <button class="edit-cancel-btn" onclick="cancelEdit()">${t('detail.cancel')}</button>
-    </div>`;
+    </div>`);
 
   _renderExistingRelations(id);
-  _acAttachEditForm();
 }
 
 export function _toggleDeathFields(checked) {
@@ -1030,7 +1029,7 @@ export function showFamEditForm(id) {
     ? f.marriages.map(m => ({ date: m.date || '', plac: m.plac || '', types: [...(m.types || [])] }))
     : [{ date: '', plac: '', types: [] }];
 
-  document.getElementById('detail-content').innerHTML = `
+  _setPanelContent(`
     <div class="edit-section">
       <div class="edit-label">${t('detail.partner1')}</div>
       <div class="ef-rel-add-row">
@@ -1094,7 +1093,7 @@ export function showFamEditForm(id) {
     <div class="edit-form-buttons">
       <button class="edit-save-btn" onclick="commitFamEdit()">&#x2713; ${t('detail.save')}</button>
       <button class="edit-cancel-btn" onclick="cancelEdit()">${t('detail.cancel')}</button>
-    </div>`;
+    </div>`);
 
   _famEditRenderMarriages();
   _famEditRenderChildren(f);
@@ -1564,8 +1563,31 @@ export function _acPlaces() {
 
 export function _acSurnames() {
   const m = new Map();
-  for (const [, i] of state.individuals) if (i.surn) m.set(i.surn, (m.get(i.surn) || 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([s]) => s);
+  for (const [, i] of state.individuals) {
+    // Maiden names belong in this list too: they are surnames the tree already
+    // knows, and they are exactly what someone is reaching for when filling in a
+    // woman's birth name.
+    for (const s of [i.surn, i.maidenName]) if (s) m.set(s, (m.get(s) || 0) + 1);
+  }
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([s]) => s);
+}
+
+// Given names, commonest first — in a genealogy the same handful come back
+// generation after generation, so the top of the list is nearly always the one
+// being typed.
+export function _acGivenNames() {
+  const m = new Map();
+  for (const [, i] of state.individuals) {
+    const g = (i.givn || '').trim();
+    if (!g) continue;
+    m.set(g, (m.get(g) || 0) + 1);
+    // Offer the parts of a double name as well, so "Hans Peter" also suggests
+    // "Hans" — and typing "Peter" finds it, which a whole-string match would not.
+    for (const part of g.split(/\s+/)) {
+      if (part && part !== g) m.set(part, (m.get(part) || 0) + 1);
+    }
+  }
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([s]) => s);
 }
 
 export function _acOccupations() {
@@ -1620,12 +1642,37 @@ export function _acAttach(input, getFn) {
   });
 }
 
-export function _acAttachEditForm() {
-  _acAttach(document.getElementById('ef-surn'),   _acSurnames);
-  _acAttach(document.getElementById('ef-maiden'), _acSurnames);
-  _acAttach(document.getElementById('ef-bplac'),  _acPlaces);
-  _acAttach(document.getElementById('ef-dplac'),  _acPlaces);
-  _acAttach(document.getElementById('ef-occu'),   _acOccupations);
-  // new-person subform inside edit form
-  _acAttach(document.getElementById('ef-np-surn'), _acSurnames);
+// Which suggestions a field gets, decided by what the field is rather than by
+// its id. Every form in the panel builds its inputs with the same suffixes —
+// `-givn`, `-surn`, `-bplac` and so on — whether it is the main edit form, a
+// quick-add relative, a new partner or a new child. Matching on the suffix wires
+// all of them at once, and wires the next one somebody adds without their having
+// to remember a list. The previous version named six specific ids, which is why
+// only the main edit form ever had this.
+const _AC_FIELDS = [
+  ['-givn',   () => _acGivenNames()],
+  ['-surn',   () => _acSurnames()],
+  ['-maiden', () => _acSurnames()],
+  ['-bplac',  () => _acPlaces()],
+  ['-dplac',  () => _acPlaces()],
+  ['-occu',   () => _acOccupations()],
+];
+
+export function _acAttachFields(root) {
+  const scope = root || document.getElementById('detail-content');
+  if (!scope) return;
+  for (const [suffix, getFn] of _AC_FIELDS) {
+    for (const input of scope.querySelectorAll(`input[id$="${suffix}"]`)) {
+      _acAttach(input, getFn);
+    }
+  }
+}
+
+// Every form lives in the detail panel and arrives by having its HTML written
+// here, so this is the one place that can promise the fields are wired.
+export function _setPanelContent(html) {
+  const el = document.getElementById('detail-content');
+  if (!el) return;
+  el.innerHTML = html;
+  _acAttachFields(el);
 }

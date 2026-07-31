@@ -53,7 +53,8 @@ screen and how many are hidden. `+N` chips mark where a branch was cut; clicking
 one opens the next generation.
 
 **Editing.** Click a person or family to open the detail panel; add parents,
-spouses and children from the buttons there.
+spouses and children from the buttons there. Name, place and occupation fields
+suggest values already in the tree as you type.
 
 **Import.** GEDCOM, JSON and YAML load directly. Plain text and images
 (scanned charts) go through a review wizard that parses them into people you can
@@ -127,7 +128,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Eight suites, no framework — plain `node` scripts with `assert`:
+Nine suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -137,6 +138,7 @@ Eight suites, no framework — plain `node` scripts with `assert`:
 | `deceased.test.js` | auto-marking long-dead people |
 | `hover.test.js` | the text on a person's box |
 | `stats.test.js` | the statistics figures and how they are rendered |
+| `autocomplete.test.js` | name suggestions and which form fields get them |
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
 | `workfile.test.js` | reopening and saving back over the same file |
 
