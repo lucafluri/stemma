@@ -54,7 +54,7 @@ export const state = {
   genRange: null,   // { min, max } | null
   treeLayout: localStorage.getItem('treeLayout') !== '0',
   _lineageGen: null,   // id -> chart row, filled by computeLineageSet()
-  _treeBusY: null,   // FAM id (and "parent~child") -> y of the sibling bar
+  _treeBusY: null,   // FAM id, "fam>child" and "parent~child" -> y of the sibling bar
   _treeOmitted: null,  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch markers
   _revealed: new Set(),
   _birthYearRange: null,  // { min, max } saved for 3D stratification

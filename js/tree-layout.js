@@ -9,7 +9,7 @@ export function famMarkerSize() {
   return useTreeLayout() ? Math.max(FAM_MARKER_MIN, state.famNodeSize) : state.famNodeSize;
 }
 
-export const TREE_ROW_H     = 128;  // vertical distance between generations
+export const TREE_ROW_H     = 160;  // vertical distance between generations
 
 export const TREE_COL_W     = 104;  // minimum distance between two people in a row (NODE_BOX_W + 12)
 
@@ -565,18 +565,31 @@ export function computeTreeLayout() {
   for (const [id, fam] of state.families) {
     if (!pos.has(id)) continue;
     const famPos = pos.get(id);
-    const kids = fam.chil.filter(c => pos.has(c));
-    if (!kids.length) continue;
-    const span = [famPos.x, ...kids.map(c => pos.get(c).x)];
-    const childY = Math.min(...kids.map(c => pos.get(c).y));
-    if (!famsByChildRow.has(childY)) famsByChildRow.set(childY, []);
-    famsByChildRow.get(childY).push({
-      key: id,
-      parents: [fam.husb, fam.wife].filter(p => p && pos.has(p)),
-      kids,
-      x0: Math.min(...span),
-      x1: Math.max(...span),
-    });
+    // A bar per family *per row its children sit on*. Where the generations
+    // disagree — an uncle recorded as his own nephew's brother, which real files
+    // are full of — a family's children land on two different rows, and one bar
+    // can only be at one height. The row the bar is not on then has no bracket
+    // at all: those connectors fall back to the shared midpoint in _linkPath and
+    // draw straight along every other family's bar. That fallback is where most
+    // of the overlapping lines came from.
+    const byRow = new Map();
+    for (const c of fam.chil) {
+      if (!pos.has(c)) continue;
+      const y = pos.get(c).y;
+      if (!byRow.has(y)) byRow.set(y, []);
+      byRow.get(y).push(c);
+    }
+    for (const [childY, kids] of byRow) {
+      const span = [famPos.x, ...kids.map(c => pos.get(c).x)];
+      if (!famsByChildRow.has(childY)) famsByChildRow.set(childY, []);
+      famsByChildRow.get(childY).push({
+        key: id,
+        parents: [fam.husb, fam.wife].filter(p => p && pos.has(p)),
+        kids,
+        x0: Math.min(...span),
+        x1: Math.max(...span),
+      });
+    }
   }
 
   for (const [childY, items] of famsByChildRow) {
@@ -588,15 +601,27 @@ export function computeTreeLayout() {
       // step per lane the top ones all hit that ceiling and collapse back onto
       // one height, overlapping after all. Share out the band that is actually
       // available instead, so every lane in a row keeps a height of its own.
-      const ceiling = pos.get(it.key).y + 14;
       const bottom = childY - TREE_BUS_UP;
-      // Give every lane at least a few pixels of its own even where the band is
-      // too shallow to hold them all. A bar drawn a little high still reads;
-      // two bars on the same line do not.
-      const top = Math.min(ceiling, bottom - TREE_LANE_MIN * (lanes - 1));
-      const step = lanes > 1 ? Math.min(TREE_LANE_DY, (bottom - top) / (lanes - 1)) : 0;
-      const y = bottom - it.lane * step;
+      // One step for the whole row, measured from the lowest marker in it, so
+      // every lane clears every marker and the lanes stay evenly spaced. Worked
+      // out per bar instead, two bars on neighbouring lanes get different steps
+      // and land a couple of pixels apart, which reads as one thick line.
+      //
+      // A lane must never rise above the marker its bar hangs from. That used to
+      // be allowed when the band was too shallow to hold every lane — but
+      // _linkPath rejects a bus outside the marker→child span, so such a bar was
+      // not drawn high, it was not drawn at all: the connector fell back to the
+      // shared midpoint and ran along everybody else's. Clamping is the lesser
+      // evil, and with the deeper band it almost never bites.
+      const roof = Math.max(...items.map(o => pos.get(o.key).y + 14));
+      const step = lanes > 1
+        ? Math.max(TREE_LANE_MIN, Math.min(TREE_LANE_DY, (bottom - roof) / (lanes - 1)))
+        : 0;
+      const y = Math.max(bottom - it.lane * step, pos.get(it.key).y + 14);
       state._treeBusY.set(it.key, y);
+      // Keyed by the pair as well: a family with children on two rows has two
+      // bars, and only the child says which of them a connector belongs to.
+      for (const c of it.kids) state._treeBusY.set(`${it.key}>${c}`, y);
       // With FAM nodes hidden the links run parent→child directly and there is
       // no family id on either end to look the bar up by, so register it under
       // each parent-child pair too. Same bar, so the bracket still forms.
@@ -906,7 +931,7 @@ export function _linkPath(d) {
   // a smooth S so the corners do not read as noise at small zoom.
   const sid = typeof d.source === 'object' ? d.source.id : d.source;
   const tid = typeof d.target === 'object' ? d.target.id : d.target;
-  const bus = state._treeBusY?.get(sid) ?? state._treeBusY?.get(`${sid}~${tid}`);
+  const bus = state._treeBusY?.get(`${sid}>${tid}`) ?? state._treeBusY?.get(`${sid}~${tid}`);
   const my = bus != null && bus > Math.min(sy, ty) && bus < Math.max(sy, ty)
     ? bus
     : (sy + ty) / 2;

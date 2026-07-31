@@ -291,6 +291,61 @@ export function downloadYAML() {
   _downloadBlob(text, _baseFilename() + '.famtree.yaml', 'text/yaml;charset=utf-8');
 }
 
+// The people the chart is currently drawing, as standalone individuals/families
+// maps the ordinary serializers can take. Read off state.nodes rather than
+// recomputing the focus walk, so it is exactly what is on screen — the
+// generation band and the surname filter cut into the focus set after it.
+//
+// Every reference that leaves the selection is pruned: a FAMC naming a family
+// that was not exported, or a HUSB naming somebody who was not, is a dangling
+// pointer that breaks the file on the way back in. The originals are left
+// untouched — these are copies.
+export function visibleSubset() {
+  const keep = new Set(state.nodes.filter(n => n.type === 'INDI').map(n => n.id));
+  const individuals = new Map();
+  const families    = new Map();
+
+  // A family is worth exporting while it still says something. One surviving
+  // spouse is enough — dropping the marriage because the *other* spouse is
+  // off-screen would throw away the marriage date, which is a fact about the
+  // person who is in the selection. Two surviving children are enough too, since
+  // that is what records them as siblings. A family reduced to a single child
+  // and no parents states nothing at all, so it is left out rather than
+  // exported as an empty shell.
+  for (const [fid, fam] of state.families) {
+    const husb = fam.husb && keep.has(fam.husb) ? fam.husb : null;
+    const wife = fam.wife && keep.has(fam.wife) ? fam.wife : null;
+    const chil = (fam.chil || []).filter(c => keep.has(c));
+    if (!husb && !wife && chil.length < 2) continue;
+    families.set(fid, { ...fam, id: fid, husb, wife, chil });
+  }
+  for (const id of keep) {
+    const indi = state.individuals.get(id);
+    if (!indi) continue;
+    individuals.set(id, {
+      ...indi,
+      id,
+      famc: (indi.famc || []).filter(f => families.has(f)),
+      fams: (indi.fams || []).filter(f => families.has(f)),
+    });
+  }
+  return { individuals, families };
+}
+
+export function downloadSelectionGEDCOM() {
+  const { individuals, families } = visibleSubset();
+  // otherLines are the file's own SOUR/OBJE/SUBM records — metadata about the
+  // source, not about anybody, so they travel with any subset.
+  const text = GEDCOMModule.serializeGEDCOM(individuals, families, state.otherLines);
+  _downloadBlob('﻿' + text, _baseFilename() + '_selection.ged', 'text/plain;charset=utf-8');
+}
+
+export function downloadSelectionJSON() {
+  const { individuals, families } = visibleSubset();
+  const text = GEDCOMModule.exportJSON(individuals, families);
+  _downloadBlob(text, _baseFilename() + '_selection.famtree.json', 'application/json;charset=utf-8');
+}
+
 export function toggleExportMenu(e) {
   e.stopPropagation();
   const dd = document.getElementById('export-dropdown');

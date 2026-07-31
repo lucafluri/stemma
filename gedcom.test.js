@@ -608,6 +608,121 @@ test('JSON round-trip preserves unknown level-1 subtree', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Exporting only the visible selection
+// ─────────────────────────────────────────────────────────────────────────────
+// visibleSubset() lives in js/gedcom-io.js, which is an ES module wired to the
+// DOM. Lift it the way focus.test.js lifts the layout functions and hand it a
+// plain `state` — it only ever reads state.nodes/individuals/families.
+const fs = require('fs');
+const path = require('path');
+const ioSrc = fs.readFileSync(path.join(__dirname, 'js', 'gedcom-io.js'), 'utf8');
+const subsetSrc = ioSrc.match(/export function visibleSubset\(\) \{[\s\S]*?\n\}/)[0].replace('export ', '');
+const visibleSubset = state =>
+  new Function('state', `${subsetSrc}\nreturn visibleSubset();`)(state);
+
+// GP1+GP2 -> PARENT ; PARENT+INLAW -> KID ; GP1+GP2 also -> AUNT (off-screen)
+function buildSelectionFixture() {
+  const ged = `0 @I1@ INDI
+1 NAME Grand /Pa/
+1 FAMS @F1@
+0 @I2@ INDI
+1 NAME Grand /Ma/
+1 FAMS @F1@
+0 @I3@ INDI
+1 NAME Par /Ent/
+1 FAMC @F1@
+1 FAMS @F2@
+0 @I4@ INDI
+1 NAME In /Law/
+1 FAMS @F2@
+0 @I5@ INDI
+1 NAME The /Kid/
+1 FAMC @F2@
+0 @I9@ INDI
+1 NAME Off /Screen/
+1 FAMC @F1@
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 CHIL @I3@
+1 CHIL @I9@
+0 @F2@ FAM
+1 HUSB @I3@
+1 WIFE @I4@
+1 CHIL @I5@
+1 MARR
+2 DATE 12 MAY 1901
+0 TRLR`;
+  return parseGEDCOM(ged);
+}
+
+// Every id a file points at must also be in it, or it breaks on the way back in.
+function assertNoDanglingRefs(individuals, families, label) {
+  for (const [id, i] of individuals) {
+    for (const f of (i.famc || [])) assert.ok(families.has(f), `${label}: ${id} FAMC -> missing ${f}`);
+    for (const f of (i.fams || [])) assert.ok(families.has(f), `${label}: ${id} FAMS -> missing ${f}`);
+  }
+  for (const [id, f] of families) {
+    for (const p of [f.husb, f.wife]) {
+      if (p) assert.ok(individuals.has(p), `${label}: ${id} spouse -> missing ${p}`);
+    }
+    for (const c of (f.chil || [])) assert.ok(individuals.has(c), `${label}: ${id} CHIL -> missing ${c}`);
+  }
+}
+
+test('a selection export keeps only the visible people', () => {
+  const { individuals, families } = buildSelectionFixture();
+  const nodes = ['I1', 'I2', 'I3', 'I4', 'I5'].map(n => ({ id: `@${n}@`, type: 'INDI' }))
+    .concat([{ id: '@F1@', type: 'FAM' }, { id: '@F2@', type: 'FAM' }]);
+  const sub = visibleSubset({ individuals, families, nodes });
+
+  assert.deepStrictEqual([...sub.individuals.keys()].sort(),
+    ['@I1@', '@I2@', '@I3@', '@I4@', '@I5@'], 'the off-screen aunt must not be exported');
+  assertNoDanglingRefs(sub.individuals, sub.families, 'selection');
+  // ...and the family she was a child of survives, minus her.
+  assert.deepStrictEqual(sub.families.get('@F1@').chil, ['@I3@'], 'F1 must drop the hidden child');
+});
+
+test('a selection export survives the round trip through GEDCOM and JSON', () => {
+  const { individuals, families } = buildSelectionFixture();
+  const nodes = ['I3', 'I4', 'I5'].map(n => ({ id: `@${n}@`, type: 'INDI' }));
+  const sub = visibleSubset({ individuals, families, nodes });
+
+  // I3's parents are gone, so the link up to F1 has to go with them.
+  assert.deepStrictEqual(sub.individuals.get('@I3@').famc, [], 'FAMC to a dropped family must be pruned');
+  assert.ok(!sub.families.has('@F1@'), 'a family with nobody left in it is not exported');
+
+  for (const [label, reparse] of [
+    ['gedcom', () => parseGEDCOM(serializeGEDCOM(sub.individuals, sub.families, []))],
+    ['json',   () => importJSON(exportJSON(sub.individuals, sub.families))],
+  ]) {
+    const back = reparse();
+    assert.deepStrictEqual([...back.individuals.keys()].sort(), ['@I3@', '@I4@', '@I5@'], `${label}: people`);
+    assertNoDanglingRefs(back.individuals, back.families, label);
+    assert.strictEqual(back.families.get('@F2@').marriages[0].date, '12 MAY 1901',
+      `${label}: the marriage fact must come along`);
+  }
+});
+
+test('a marriage is kept when only one spouse is on screen', () => {
+  // Dropping it would throw away the marriage date, which is a fact about the
+  // person who *is* in the selection.
+  const { individuals, families } = buildSelectionFixture();
+  const sub = visibleSubset({ individuals, families, nodes: [{ id: '@I3@', type: 'INDI' }] });
+  assert.ok(sub.families.has('@F2@'), 'F2 should survive on I3 alone');
+  assert.strictEqual(sub.families.get('@F2@').wife, null, 'the off-screen spouse must be unlinked');
+  assertNoDanglingRefs(sub.individuals, sub.families, 'lone spouse');
+});
+
+test('exporting a selection does not mutate the loaded tree', () => {
+  const { individuals, families } = buildSelectionFixture();
+  visibleSubset({ individuals, families, nodes: [{ id: '@I3@', type: 'INDI' }] });
+  assert.strictEqual(families.get('@F1@').chil.length, 2, 'the original family lost a child');
+  assert.strictEqual(families.get('@F2@').wife, '@I4@', 'the original marriage lost a spouse');
+  assert.deepStrictEqual(individuals.get('@I3@').famc, ['@F1@'], 'the original FAMC was pruned');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);

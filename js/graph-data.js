@@ -313,9 +313,16 @@ export function _defaultFocusRoot() {
   return best;
 }
 
+// How many people the chart is actually drawing. Read off the active nodes, so
+// it counts what is on screen rather than what the focus walk selected — the
+// generation band and the surname filter cut into it after that.
+export function focusShownCount() {
+  return state.nodes.filter(n => n.type === 'INDI').length;
+}
+
 export function focusHiddenCount() {
   if (!state.focusRootId) return 0;
-  return Math.max(0, state.individuals.size - state.nodes.filter(n => n.type === 'INDI').length);
+  return Math.max(0, state.individuals.size - focusShownCount());
 }
 
 export function computeGenerationDepths() {
@@ -852,8 +859,11 @@ export function updateFocusUI() {
     nameEl.classList.remove('focus-none');
     if (clearBtn) clearBtn.style.display = '';
     const hidden = focusHiddenCount();
+    const shown  = focusShownCount();
     if (hiddenEl) {
-      hiddenEl.textContent = hidden ? t('focus.hidden', { n: hidden }) : t('focus.allShown');
+      hiddenEl.textContent = hidden
+        ? t('focus.hidden', { shown, n: hidden })
+        : t('focus.allShown', { shown });
       hiddenEl.style.display = '';
     }
   } else {

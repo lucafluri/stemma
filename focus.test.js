@@ -764,6 +764,36 @@ test('a sibling bar never rides above the marker it hangs from', () => {
   }
 });
 
+test('a family whose children straddle two rows gets a bar on each', () => {
+  // Real files contradict themselves about generations often enough that a
+  // family's children regularly land on two different rows. One bar can only be
+  // at one height, so the row it is not on used to get no bracket at all — and
+  // _linkPath then falls back to the midpoint between marker and child, which is
+  // the same height for every such connector on the chart. That is what drew
+  // dozens of child links along one line.
+  const individuals = new Map();
+  const families = new Map();
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  p('DAD', [], ['FX']); p('MUM', [], ['FX']);
+  p('KidA', ['FX']); p('KidB', ['FX']);
+  f('FX', 'DAD', 'MUM', ['KidA', 'KidB']);
+  // KidB is recorded a generation further down than their own sibling.
+  const depths = new Map([['DAD', 0], ['MUM', 0], ['KidA', 1], ['KidB', 2]]);
+  const { pos, busY } = layoutOf({ individuals, families, focusRootId: 'KidA', depths });
+
+  assert.notStrictEqual(pos.get('KidA').y, pos.get('KidB').y, 'fixture: the two kids must be on different rows');
+  for (const kid of ['KidA', 'KidB']) {
+    const bar = busY.get(`FX>${kid}`);
+    assert.ok(bar != null, `no bar registered for FX -> ${kid}`);
+    // The height _linkPath will accept: strictly between the marker and the child.
+    const lo = Math.min(pos.get('FX').y, pos.get(kid).y);
+    const hi = Math.max(pos.get('FX').y, pos.get(kid).y);
+    assert.ok(bar > lo && bar < hi,
+      `FX -> ${kid}: bar ${bar} is outside ${lo}..${hi}, so the connector falls back to the shared midpoint`);
+  }
+});
+
 test('parents sit over the children they share', () => {
   const { pos } = layoutOf(buildBlockFixture());
   const mid = (a, b) => (pos.get(a).x + pos.get(b).x) / 2;
