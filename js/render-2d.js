@@ -576,31 +576,37 @@ export function buildAndRunSimulation(opts = {}) {
 }
 
 export function applyPhysicsParams() {
-  if (!state.simulation) return;
   const p = state.physicsParams;
 
-  state.simulation.force('link')
-    .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
-    .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength);
+  // The 2D force layout and the 3D graph each own an independent simulation
+  // -- e.g. the classical tree chart never creates state.simulation at all,
+  // and a user can easily be looking at the 3D view with no 2D one ever
+  // built. Neither one existing is a reason to skip the other: a slider
+  // change must reach whichever simulation(s) are actually live.
+  if (state.simulation) {
+    state.simulation.force('link')
+      .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+      .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength);
 
-  state.simulation.force('charge')
-    .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
-    .distanceMax(p.chargeDistMax);
+    state.simulation.force('charge')
+      .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
+      .distanceMax(p.chargeDistMax);
 
-  state.simulation.force('collide')
-    .radius(d => d.type === 'FAM' ? 9 : p.collideRadius);
+    state.simulation.force('collide')
+      .radius(d => d.type === 'FAM' ? 9 : p.collideRadius);
 
-  state.simulation.force('fy')
-    .strength(p.yStrength);
+    state.simulation.force('fy')
+      .strength(p.yStrength);
 
-  state.simulation.force('center')
-    .strength(p.centerStrength);
+    state.simulation.force('center')
+      .strength(p.centerStrength);
 
-  state.simulation
-    .alphaDecay(p.alphaDecay)
-    .velocityDecay(p.velocityDecay)
-    .alpha(Math.max(state.simulation.alpha(), 0.25))
-    .restart();
+    state.simulation
+      .alphaDecay(p.alphaDecay)
+      .velocityDecay(p.velocityDecay)
+      .alpha(Math.max(state.simulation.alpha(), 0.25))
+      .restart();
+  }
 
   document.getElementById('loading-overlay').style.display = 'none';
   if (state.graph3d) apply3DPhysics();
