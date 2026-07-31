@@ -1,5 +1,18 @@
 // Shared numeric/style constants used by more than one module.
 
+// Render and rebuild timings. These used to be bare console.time calls, so every
+// repaint wrote a dozen lines into the console of anyone actually using the app —
+// and on a big tree that is a repaint per interaction. Kept rather than deleted,
+// because the timings are how the slow paths in here were found in the first
+// place; turn them back on with `localStorage.perfLog = '1'` and reload.
+const _perfOn = (() => {
+  try { return localStorage.getItem('perfLog') === '1'; } catch { return false; }
+})();
+export const perf = {
+  start: _perfOn ? label => console.time(label)    : () => {},
+  end:   _perfOn ? label => console.timeEnd(label) : () => {},
+};
+
 export const PHYSICS_DEFAULTS = {
   spouseDist:     31,
   parentDist:     53,

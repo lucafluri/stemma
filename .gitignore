@@ -1,6 +1,7 @@
 /2026-02-26_Family_lucafluri.ged
 scripts/
 .claude/settings.local.json
+.devin/
 CLAUDE.md
 config.local.js
 node_modules/

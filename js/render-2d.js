@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { contrastTextColor, nodeBaseColor, refreshNodeColors } from './colors.js';
-import { PHYSICS_DEFAULTS } from './constants.js';
+import { PHYSICS_DEFAULTS, perf } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
@@ -262,11 +262,11 @@ export function renderGraph() {
   // The element it points at is about to be thrown away; the new buttons come
   // back hidden, so the tracker has to come back empty too.
   state._qaHoverEl = null;
-  console.time('[rg] clear');       state.gMain.selectAll('*').remove();                    console.timeEnd('[rg] clear');
+  perf.start('[rg] clear');       state.gMain.selectAll('*').remove();                    perf.end('[rg] clear');
 
   // Links layer — <path> so the tree layout can draw square elbows; the force
   // layout just emits a straight two-point path through the same element.
-  console.time('[rg] links');
+  perf.start('[rg] links');
   state.linkSel = state.gMain.append('g').attr('class', 'links-g')
     .selectAll('path')
     .data(state.links)
@@ -276,10 +276,10 @@ export function renderGraph() {
     .attr('stroke-dasharray', d => linkDash(d))
     .attr('stroke-width', d => linkWidth(d))
     .attr('opacity', d => linkBaseOpacity(d));
-  console.timeEnd('[rg] links');
+  perf.end('[rg] links');
 
   // Nodes layer
-  console.time('[rg] node join');
+  perf.start('[rg] node join');
   const nodeG = state.gMain.append('g').attr('class', 'nodes-g');
 
   state.nodeSel = nodeG.selectAll('g.ng')
@@ -326,10 +326,10 @@ export function renderGraph() {
       .on('drag', (evt, d) => { if (state._nodeDragEnabled) { d.fx = evt.x; d.fy = evt.y; } })
       .on('end', (evt) => { if (state._nodeDragEnabled && !evt.active) state.simulation.alphaTarget(0); })
     );
-  console.timeEnd('[rg] node join');
+  perf.end('[rg] node join');
 
   // Draw shapes per node — batched selections instead of per-node .each()
-  console.time('[rg] shapes');
+  perf.start('[rg] shapes');
   const indiSel = state.nodeSel.filter(d => d.type === 'INDI');
   const famSel  = state.nodeSel.filter(d => d.type === 'FAM');
 
@@ -369,13 +369,13 @@ export function renderGraph() {
     .attr('stroke-width',     d => d.data.div ? 1.5 : 1)
     .attr('stroke-dasharray', d => d.data.div ? '3 2' : null)
     .attr('opacity', 0.88);
-  console.timeEnd('[rg] shapes');
+  perf.end('[rg] shapes');
 
   _addQuickAddButtons(indiSel, famSel);
 
   // Name label — lives inside the box (not a separate layer floating above
   // it), so it moves, scales and z-orders with the node for free.
-  console.time('[rg] labels');
+  perf.start('[rg] labels');
   state.labelSel = indiSel.append('text')
     .attr('class', 'node-label')
     .attr('text-anchor', 'middle')
@@ -403,7 +403,7 @@ export function renderGraph() {
     .attr('pointer-events', 'none')
     .text(d => nodeYears(d.data));
 
-  console.timeEnd('[rg] labels');
+  perf.end('[rg] labels');
   updateLabels();
 }
 
@@ -499,7 +499,7 @@ export function buildAndRunSimulation(opts = {}) {
   state._genRange3D = gs.length ? { min: Math.min(...gs), max: Math.max(...gs) } : null;
 
   // Compute estimated birth years for persons without one (uses generation & relation info)
-  console.time('[sim] computeEstimatedYears'); computeEstimatedYears(); console.timeEnd('[sim] computeEstimatedYears');
+  perf.start('[sim] computeEstimatedYears'); computeEstimatedYears(); perf.end('[sim] computeEstimatedYears');
 
   // Expand range to include estimated years so timeline covers everyone
   if (state._estimatedYears && state._estimatedYears.size) {
@@ -538,9 +538,9 @@ export function buildAndRunSimulation(opts = {}) {
   const H = svgEl.clientHeight || 700;
 
   // Generation-depth based Y positioning: children are always below parents
-  console.time('[sim] computeGenerationDepths');
+  perf.start('[sim] computeGenerationDepths');
   const genDepths = computeGenerationDepths();
-  console.timeEnd('[sim] computeGenerationDepths');
+  perf.end('[sim] computeGenerationDepths');
   const maxGen = genDepths.size ? Math.max(...genDepths.values()) : 0;
 
   const genToY = gen => maxGen === 0 ? H / 2 : 30 + (gen / maxGen) * (H - 60);
@@ -623,11 +623,11 @@ export function buildAndRunSimulation(opts = {}) {
     state.simulation.stop().alphaDecay(HEADLESS_DECAY);
     const totalTicks = Math.ceil(Math.log(state.simulation.alphaMin() / state.simulation.alpha()) / Math.log(1 - HEADLESS_DECAY));
     console.log(`[sim] headless: ${state.nodes.length} nodes, ${state.links.length} links, ${totalTicks} ticks`);
-    console.time('[sim] headless ticks');
+    perf.start('[sim] headless ticks');
     for (let i = 0; i < totalTicks; i++) state.simulation.tick();
-    console.timeEnd('[sim] headless ticks');
-    console.time('[sim] tick() DOM paint');  tick();     console.timeEnd('[sim] tick() DOM paint');
-    console.time('[sim] onSimEnd');          onSimEnd(); console.timeEnd('[sim] onSimEnd');
+    perf.end('[sim] headless ticks');
+    perf.start('[sim] tick() DOM paint');  tick();     perf.end('[sim] tick() DOM paint');
+    perf.start('[sim] onSimEnd');          onSimEnd(); perf.end('[sim] onSimEnd');
   } else {
     state.simulation.on('tick', tick);
     state.simulation.on('end', onSimEnd);

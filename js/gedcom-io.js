@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { perf } from './constants.js';
 import { buildSurnameColorMap, buildSurnameList } from './colors.js';
 import { DECEASED_AGE_THRESHOLD, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
@@ -67,25 +68,25 @@ export function _fullRebuildGraph(opts = {}) {
   // which never calls this function.)
   if (!warm) state.genRange = null;
   _setDirty(true);
-  console.time('[rebuild] total');
-  console.time('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); console.timeEnd('[rebuild] surnameColorMap');
-  console.time('[rebuild] surnameList');     buildSurnameList(sorted);               console.timeEnd('[rebuild] surnameList');
-  console.time('[rebuild] buildGraphData');  buildGraphData();                        console.timeEnd('[rebuild] buildGraphData');
+  perf.start('[rebuild] total');
+  perf.start('[rebuild] surnameColorMap'); const sorted = buildSurnameColorMap(); perf.end('[rebuild] surnameColorMap');
+  perf.start('[rebuild] surnameList');     buildSurnameList(sorted);               perf.end('[rebuild] surnameList');
+  perf.start('[rebuild] buildGraphData');  buildGraphData();                        perf.end('[rebuild] buildGraphData');
   if (!state.svgSel) initSVG();
-  console.time('[rebuild] renderGraph');     renderGraph();                           console.timeEnd('[rebuild] renderGraph');
+  perf.start('[rebuild] renderGraph');     renderGraph();                           perf.end('[rebuild] renderGraph');
   document.getElementById('status').textContent =
     t('topbar.status', { persons: state.individuals.size, personsPlural: state.individuals.size !== 1 ? 'en' : '', families: state.families.size });
   if (!warm) state._firstLoad = true;
-  console.time('[rebuild] simulation');      buildAndRunSimulation({ warm });         console.timeEnd('[rebuild] simulation');
+  perf.start('[rebuild] simulation');      buildAndRunSimulation({ warm });         perf.end('[rebuild] simulation');
   // For 3D: push data directly instead of calling applyFilter() which would
   // run buildAndRunSimulation() a second time (doubles the sim cost).
   if (state.currentView === '3d' && state.graph3d) {
-    console.time('[rebuild] 3d data push');
+    perf.start('[rebuild] 3d data push');
     _push3DData();
     apply3DPhysics();
     build3DTimeline();
     update3DNames();
-    console.timeEnd('[rebuild] 3d data push');
+    perf.end('[rebuild] 3d data push');
   }
   // renderGraph() rebuilds all DOM/3D nodes from scratch, dropping highlight
   // opacity and orbit target — restore them so editing a person/family
@@ -93,7 +94,7 @@ export function _fullRebuildGraph(opts = {}) {
   applyHighlight();
   if (state.currentView === '3d' && state.selectedIndiId) _setOrbitTarget3D(state.selectedIndiId);
   updateFocusUI();
-  console.timeEnd('[rebuild] total');
+  perf.end('[rebuild] total');
 }
 
 // Nobody born more than DECEASED_AGE_THRESHOLD years ago is still alive, so a

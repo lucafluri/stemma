@@ -197,11 +197,10 @@ function installFakeIndexedDB() {
 
   // These cases put a real file through _loadDatasetFile, which runs the whole
   // load pipeline. Keep it in 2D — the 3D branch reaches for a canvas context
-  // jsdom does not provide — and quiet the render timers it logs on the way.
+  // jsdom does not provide.
   state.currentView = '2d';
   global.window.HTMLCanvasElement.prototype.getContext = () =>
     new Proxy({}, { get: () => () => {} });
-  console.time = console.timeEnd = () => {};
 
   await test('opening a file records it as the recent one', async () => {
     idb.clear();
