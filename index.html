@@ -147,6 +147,11 @@
       <button class="sidebar-btn" onclick="autoSettle()">&#x21ba; <span data-i18n="sidebar.reloadGraph">Graph neu laden</span></button>
     </div>
 
+    <details id="stats-panel" ontoggle="toggleStatsPanel(event)">
+      <summary data-i18n="stats.title">Statistik</summary>
+      <div id="stats-body"></div>
+    </details>
+
     <details id="link-colors-panel">
       <summary data-i18n="linkColors.title">Verbindungsfarben</summary>
       <div class="link-color-row">

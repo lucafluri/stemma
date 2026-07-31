@@ -414,11 +414,13 @@ body {
 .sidebar-toggle:hover { color: #cccccc; }
 
 /* ── LINK COLOR PANEL ── */
+#stats-panel,
 #link-colors-panel, #node-colors-panel, #appearance-panel {
   border-top: 1px solid #2e2e2e;
   margin-top: 4px;
   padding-top: 4px;
 }
+#stats-panel summary,
 #link-colors-panel summary, #node-colors-panel summary, #appearance-panel summary {
   font-size: 12px;
   color: #aaaaaa;
@@ -427,9 +429,13 @@ body {
   padding: 3px 0;
   list-style: none;
 }
+#stats-panel summary::-webkit-details-marker,
 #link-colors-panel summary::-webkit-details-marker, #node-colors-panel summary::-webkit-details-marker, #appearance-panel summary::-webkit-details-marker { display: none; }
+#stats-panel summary::before,
 #link-colors-panel summary::before, #node-colors-panel summary::before, #appearance-panel summary::before { content: '▶ '; font-size: 10px; }
+#stats-panel[open] summary::before,
 #link-colors-panel[open] summary::before, #node-colors-panel[open] summary::before, #appearance-panel[open] summary::before { content: '▼ '; font-size: 10px; }
+#stats-panel summary:hover,
 #link-colors-panel summary:hover, #node-colors-panel summary:hover, #appearance-panel summary:hover { color: #cccccc; }
 .link-color-row {
   display: flex;
@@ -2695,3 +2701,62 @@ body.relation-picking * { cursor: crosshair !important; }
   background: #343434;
   color: #ffffff;
 }
+
+/* ── Statistics panel ── */
+#stats-body { padding: 2px 0 6px; }
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  padding: 3px 0;
+  color: #9f9f9f;
+}
+.stat-label { flex: 1; min-width: 0; }
+.stat-value {
+  color: #d2d2d2;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* The qualifier that keeps a figure honest — the subset an average rests on,
+   who the record belongs to — set quietly under the number it belongs to. */
+.stat-hint {
+  display: block;
+  font-size: 10px;
+  color: #6a6a6a;
+  font-weight: normal;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-sep { border-top: 1px solid #262626; margin: 6px 0 4px; }
+.stat-group-title, .stat-group .stat-group-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6a6a6a;
+  margin: 6px 0 2px;
+}
+.stat-list { list-style: none; margin: 0; padding: 0; }
+.stat-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  padding: 2px 0;
+  color: #9f9f9f;
+}
+.stat-list li span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat-empty { font-size: 11px; color: #6a6a6a; padding: 6px 0; }
+/* Sex split as one bar, so the shape of the tree reads before the numbers do. */
+.stat-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 4px 0 8px; }
+.stat-seg-M { background: #4a90d9; }
+.stat-seg-F { background: #e0608a; }
+.stat-seg-U { background: #7e8fa8; }

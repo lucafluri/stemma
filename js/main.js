@@ -6,6 +6,7 @@ import * as PanelsMod from './panels.js';
 import * as RelationsMod from './relations.js';
 import * as Render2dMod from './render-2d.js';
 import * as Render3dMod from './render-3d.js';
+import * as StatsMod from './stats.js';
 import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
 import { _fullRebuildGraph, _tryRestoreAutosave, updateFileButtons } from './gedcom-io.js';
@@ -360,7 +361,7 @@ function _onLanguageChanged() {
 // runs this after the *whole* graph's synchronous evaluation has settled,
 // regardless of which module happened to be the entry point.
 queueMicrotask(() => Object.assign(window, ColorsMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod,
-  RelationsMod, Render2dMod, Render3dMod, TreeLayoutMod, {
+  RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
     state,
     toggleSidebar,
     _initPanelSwipe,

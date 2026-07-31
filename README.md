@@ -46,8 +46,8 @@ Deployed automatically to GitHub Pages from `master`
 - **3D** — the same graph in space, stratified by birth year or by generation,
   with an optional time axis.
 
-**Focus.** A whole GEDCOM is an unreadable cloud, so the 2D view centres on one
-person and draws their relatives out to a chosen distance — direct line, siblings,
+**Focus.** The 2D view shows the whole file by default. Focusing narrows it to one
+person and their relatives out to a chosen distance — direct line, siblings,
 and cousins to a configurable degree. The panel shows how many people are on
 screen and how many are hidden. `+N` chips mark where a branch was cut; clicking
 one opens the next generation.
@@ -108,6 +108,7 @@ loaded as native ES modules (`js/package.json` only marks the directory as
 | `js/render-3d.js` | the 3D scene, camera, labels and time axis |
 | `js/panels.js` | detail panel and all the editing forms |
 | `js/import.js` | the import wizard: text parsing, OCR, AI extraction, merge review |
+| `js/stats.js` | the statistics panel — figures about the tree as a whole |
 | `js/relations.js` | highlighting and the "how are these two related" tool |
 | `js/colors.js` | surname palette and node/link colouring |
 | `js/gedcom-io.js` | file loading, saving, autosave, the working-file handle |
@@ -126,7 +127,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Seven suites, no framework — plain `node` scripts with `assert`:
+Eight suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -135,6 +136,7 @@ Seven suites, no framework — plain `node` scripts with `assert`:
 | `import.test.js` | linking imported people to existing records |
 | `deceased.test.js` | auto-marking long-dead people |
 | `hover.test.js` | quick-add buttons and node box labels |
+| `stats.test.js` | the statistics figures and how they are rendered |
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
 | `workfile.test.js` | reopening and saving back over the same file |
 

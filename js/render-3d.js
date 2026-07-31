@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { _compute3DLinkColor, _nameTextColor, compute3DNodeColor } from './colors.js';
-import { _defaultFocusRoot, computeActiveData, updateFocusUI } from './graph-data.js';
+import { computeActiveData, updateFocusUI } from './graph-data.js';
 import { _isMobile, closeDetailPanel, minimizeDetailPanel, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _famNodeVal, _tryPickRelationPerson, applyHighlight, updateHLButtons } from './relations.js';
 import { buildAndRunSimulation, initSVG, linkColor, linkWidth, onHover, onOut, onSimEnd, renderGraph, zoomToFit } from './render-2d.js';
@@ -38,12 +38,13 @@ export function setView(view) {
   } else {
     if (state.graph3d) state.graph3d.pauseAnimation();
 
-    // A 2D view of a big tree with no focus is an unreadable dust cloud, so
-    // never enter one: fall back to the selected person, else the best hub.
-    // Trees that fit inside the budget need no focus at all.
-    if (!state.focusRootId && state.individuals.size > state.focusLimit) {
-      state.focusRootId = state.selectedIndiId || _defaultFocusRoot();
-    }
+    // No focus is picked on the way in. Switching to 2D used to quietly appoint
+    // one — the selected person, or the best-connected hub — on the grounds that
+    // an unfocused force layout is a dust cloud. But the chart layout is the
+    // default now, and that draws a whole file as a readable, if wide, tree; and
+    // a filter the reader never asked for is worse than a big picture, because
+    // nothing on screen says people are missing. Focus stays something you turn
+    // on deliberately.
 
     if (changed) {
       computeActiveData();
