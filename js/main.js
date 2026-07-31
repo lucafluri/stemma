@@ -344,7 +344,19 @@ function _onLanguageChanged() {
 // don't do that implicitly, so it's done explicitly here for the whole
 // module graph rather than trying to enumerate just the subset actually
 // referenced from HTML -- missing even one silently breaks a button.
-Object.assign(window, ColorsMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod,
+//
+// Deferred to a microtask rather than run inline here: this module graph is
+// full of import cycles (e.g. render-2d.js imports from main.js), and which
+// modules have *finished* evaluating by the time this line runs depends on
+// which module the browser/loader treated as the entry point. Since
+// index.html always loads main.js itself as the entry, that's a non-issue in
+// the browser -- main.js's own body is guaranteed to run only after every
+// module it (transitively) imports has finished, cycles included -- but
+// importing any other module first (as e.g. a test or dev tool might) can
+// observe some of these namespaces mid-initialization. Queuing a microtask
+// runs this after the *whole* graph's synchronous evaluation has settled,
+// regardless of which module happened to be the entry point.
+queueMicrotask(() => Object.assign(window, ColorsMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod,
   RelationsMod, Render2dMod, Render3dMod, TreeLayoutMod, {
     state,
     toggleSidebar,
@@ -352,4 +364,4 @@ Object.assign(window, ColorsMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod
     _initTouchDragGuard,
     wasTouchDrag,
     _onLanguageChanged,
-  });
+  }));

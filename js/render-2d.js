@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { contrastTextColor, nodeBaseColor, refreshNodeColors } from './colors.js';
 import { PHYSICS_DEFAULTS } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
-import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
+import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
 import { closeDetailPanel, quickAddChildFromHover, quickAddFromHover, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _tryPickRelationPerson, applyHighlight } from './relations.js';
@@ -449,6 +449,21 @@ export function buildAndRunSimulation(opts = {}) {
       if (yr > eMax) eMax = yr;
     }
     state._birthYearRange = { min: eMin, max: eMax };
+  }
+
+  // A recorded marriage date can fall outside every member's own birth-year
+  // range (e.g. a couple with a marriage date but no birth dates on file), so
+  // widen the range once more to include where FAM nodes will actually be
+  // pinned -- otherwise they'd be stratified past either end of the timeline.
+  const famYears = state.nodes
+    .filter(n => n.type === 'FAM')
+    .map(n => famAvgYear(n.data))
+    .filter(yr => yr != null);
+  if (famYears.length) {
+    state._birthYearRange = {
+      min: Math.min(state._birthYearRange.min, ...famYears),
+      max: Math.max(state._birthYearRange.max, ...famYears),
+    };
   }
 
   // Classical chart: positions are computed outright, so there is nothing to

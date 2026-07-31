@@ -470,7 +470,19 @@ export function computeGenerationDepths() {
   return depth;
 }
 
+// The marriage date is a recorded fact about the family itself, not an
+// estimate averaged from its members — prefer it when it's there.
+function famMarriageYear(fam) {
+  for (const m of fam.marriages || []) {
+    const y = m.date && m.date.match(/\b(\d{4})\b/);
+    if (y) return +y[1];
+  }
+  return null;
+}
+
 export function famAvgYear(fam) {
+  const marrYear = famMarriageYear(fam);
+  if (marrYear) return marrYear;
   const ys = [fam.husb, fam.wife, ...fam.chil]
     .filter(Boolean)
     .map(id => state._estimatedYears?.get(id) ?? state.individuals.get(id)?.birthYear)
