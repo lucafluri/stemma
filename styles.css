@@ -170,6 +170,21 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+.sidebar-num {
+  width: 60px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: #f2f2f2;
+  background: #1e1e1e;
+  border: 1px solid #484848;
+  border-radius: 3px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-num:focus {
+  outline: none;
+  border-color: #f2f2f2;
+}
 
 #surname-list {
   overflow-y: auto;
@@ -810,6 +825,21 @@ body {
   font-variant-numeric: tabular-nums;
   min-width: 34px;
   text-align: right;
+}
+.phys-num {
+  width: 56px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: #f2f2f2;
+  background: #1e1e1e;
+  border: 1px solid #484848;
+  border-radius: 3px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.phys-num:focus {
+  outline: none;
+  border-color: #7e8fa8;
 }
 .phys-slider {
   width: 100%;

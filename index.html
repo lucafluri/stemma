@@ -129,7 +129,7 @@
         </label>
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
           <span data-i18n="sidebar.timeSpread">Zeitachsen-Spreizung</span>
-          <span id="time-spread-val">750</span>
+          <input type="number" id="time-spread-num" class="sidebar-num" min="0" max="5000" step="10" value="750">
         </div>
         <input type="range" id="time-spread-slider" min="0" max="1200" step="10" value="750"
                style="width:100%;accent-color:#f2f2f2;cursor:pointer">
@@ -271,7 +271,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.spouse">Ehepaar</span>
-            <span class="phys-value" id="pv-spouse-dist">31</span>
+            <input type="number" class="phys-num" id="pn-spouse-dist" min="0" max="500" step="1" value="31">
           </div>
           <input class="phys-slider" type="range" id="ps-spouse-dist" min="10" max="200" step="1" value="31">
         </div>
@@ -279,7 +279,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.parentChild">Eltern–Kind</span>
-            <span class="phys-value" id="pv-parent-dist">53</span>
+            <input type="number" class="phys-num" id="pn-parent-dist" min="0" max="500" step="1" value="53">
           </div>
           <input class="phys-slider" type="range" id="ps-parent-dist" min="10" max="200" step="1" value="53">
         </div>
@@ -289,7 +289,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.spouse">Ehepaar</span>
-            <span class="phys-value" id="pv-spouse-str">1.00</span>
+            <input type="number" class="phys-num" id="pn-spouse-str" min="0" max="2" step="0.01" value="1.00">
           </div>
           <input class="phys-slider" type="range" id="ps-spouse-str" min="0.01" max="1" step="0.01" value="1">
         </div>
@@ -297,7 +297,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.parentChild">Eltern–Kind</span>
-            <span class="phys-value" id="pv-parent-str">0.78</span>
+            <input type="number" class="phys-num" id="pn-parent-str" min="0" max="2" step="0.01" value="0.78">
           </div>
           <input class="phys-slider" type="range" id="ps-parent-str" min="0.01" max="1" step="0.01" value="0.78">
         </div>
@@ -307,7 +307,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.person">Person</span>
-            <span class="phys-value" id="pv-charge-indi">600</span>
+            <input type="number" class="phys-num" id="pn-charge-indi" min="0" max="5000" step="5" value="600">
           </div>
           <input class="phys-slider" type="range" id="ps-charge-indi" min="0" max="600" step="5" value="600">
         </div>
@@ -315,7 +315,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.family">Familie</span>
-            <span class="phys-value" id="pv-charge-fam">200</span>
+            <input type="number" class="phys-num" id="pn-charge-fam" min="0" max="5000" step="5" value="200">
           </div>
           <input class="phys-slider" type="range" id="ps-charge-fam" min="0" max="200" step="5" value="200">
         </div>
@@ -323,7 +323,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.range">Reichweite</span>
-            <span class="phys-value" id="pv-charge-dist">1000</span>
+            <input type="number" class="phys-num" id="pn-charge-dist" min="0" max="10000" step="10" value="1000">
           </div>
           <input class="phys-slider" type="range" id="ps-charge-dist" min="50" max="1000" step="10" value="1000">
         </div>
@@ -333,7 +333,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.collisionRadius">Kollisionsradius</span>
-            <span class="phys-value" id="pv-collide">50</span>
+            <input type="number" class="phys-num" id="pn-collide" min="0" max="200" step="1" value="50">
           </div>
           <input class="phys-slider" type="range" id="ps-collide" min="5" max="50" step="1" value="50">
         </div>
@@ -341,7 +341,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.timeStratification">Zeitl. Schichtung</span>
-            <span class="phys-value" id="pv-ystr">0.00</span>
+            <input type="number" class="phys-num" id="pn-ystr" min="0" max="2" step="0.01" value="0.00">
           </div>
           <input class="phys-slider" type="range" id="ps-ystr" min="0" max="1" step="0.01" value="0">
         </div>
@@ -349,7 +349,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.centering">Zentrierung</span>
-            <span class="phys-value" id="pv-center">0.000</span>
+            <input type="number" class="phys-num" id="pn-center" min="0" max="1" step="0.005" value="0.000">
           </div>
           <input class="phys-slider" type="range" id="ps-center" min="0" max="0.3" step="0.005" value="0">
         </div>
@@ -357,7 +357,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.damping">Dämpfung</span>
-            <span class="phys-value" id="pv-vdecay">0.20</span>
+            <input type="number" class="phys-num" id="pn-vdecay" min="0" max="1" step="0.01" value="0.20">
           </div>
           <input class="phys-slider" type="range" id="ps-vdecay" min="0.05" max="0.98" step="0.01" value="0.20">
         </div>
@@ -365,7 +365,7 @@
         <div class="phys-row">
           <div class="phys-row-head">
             <span class="phys-label" data-i18n="physics.cooling">Abkühlung</span>
-            <span class="phys-value" id="pv-alphadecay">0.005</span>
+            <input type="number" class="phys-num" id="pn-alphadecay" min="0" max="0.5" step="0.001" value="0.005">
           </div>
           <input class="phys-slider" type="range" id="ps-alphadecay" min="0.005" max="0.10" step="0.001" value="0.005">
         </div>

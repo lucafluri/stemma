@@ -166,18 +166,33 @@ document.addEventListener('DOMContentLoaded', () => {
   updateViewToggleUI();
   updateFocusUI();
 
-  for (const { sid, vid, key, fmt } of SLIDER_MAP) {
-    const el = document.getElementById(sid);
-    if (!el) continue;
-    el.addEventListener('input', () => {
-      const v = parseFloat(el.value);
-      state.physicsParams[key] = v;
-      const vl = document.getElementById(vid);
-      if (vl) vl.textContent = fmt(v);
-      // Coalesced to one apply per frame, and no Y repin: no physics slider
-      // changes what the stratification pins depend on.
-      schedulePhysicsParams({ repin: false });
-    });
+  for (const { sid, nid, key, fmt } of SLIDER_MAP) {
+    const slider = document.getElementById(sid);
+    const numIn  = document.getElementById(nid);
+    if (!slider && !numIn) continue;
+
+    if (slider) {
+      slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        state.physicsParams[key] = v;
+        if (numIn) numIn.value = fmt(v);
+        // Coalesced to one apply per frame, and no Y repin: no physics slider
+        // changes what the stratification pins depend on.
+        schedulePhysicsParams({ repin: false });
+      });
+    }
+
+    if (numIn) {
+      numIn.addEventListener('input', () => {
+        const raw = numIn.value;
+        if (raw === '' || raw === '-') return;
+        const v = parseFloat(raw);
+        if (!Number.isFinite(v)) return;
+        state.physicsParams[key] = v;
+        if (slider) slider.value = v;
+        schedulePhysicsParams({ repin: false });
+      });
+    }
   }
 
   // Familien-Knoten toggle
@@ -223,16 +238,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 3D: time axis spread slider
-  document.getElementById('time-spread-slider').addEventListener('input', function () {
-    state._3dYHalfSpan = +this.value;
-    document.getElementById('time-spread-val').textContent = this.value;
+  // 3D: time axis spread slider + number input
+  const spreadSlider = document.getElementById('time-spread-slider');
+  const spreadNum    = document.getElementById('time-spread-num');
+
+  function updateSpread(v) {
+    state._3dYHalfSpan = v;
+    if (spreadSlider) spreadSlider.value = v;
+    if (spreadNum) spreadNum.value = v;
     if (state.graph3d && state.stratify3D !== 'off') {
       applyTimelineYFix();          // recalculate Y pins with new halfSpan
       state.graph3d.d3ReheatSimulation();
       build3DTimeline();            // rebuild rings at new positions
     }
-  });
+  }
+
+  if (spreadSlider) {
+    spreadSlider.addEventListener('input', () => updateSpread(+spreadSlider.value));
+  }
+  if (spreadNum) {
+    spreadNum.addEventListener('input', () => {
+      const raw = spreadNum.value;
+      if (raw === '' || raw === '-') return;
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v)) return;
+      updateSpread(v);
+    });
+  }
 
   // 3D: show/hide visual timeline axis (independent of Y stratification)
   document.getElementById('show-timeline-toggle').addEventListener('change', function () {

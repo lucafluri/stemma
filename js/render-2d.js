@@ -1014,26 +1014,27 @@ export function export2DSVG() {
 }
 
 export const SLIDER_MAP = [
-  { sid: 'ps-spouse-dist',  vid: 'pv-spouse-dist',  key: 'spouseDist',     fmt: v => Math.round(v) },
-  { sid: 'ps-parent-dist',  vid: 'pv-parent-dist',  key: 'parentDist',     fmt: v => Math.round(v) },
-  { sid: 'ps-spouse-str',   vid: 'pv-spouse-str',   key: 'spouseStrength', fmt: v => v.toFixed(2) },
-  { sid: 'ps-parent-str',   vid: 'pv-parent-str',   key: 'parentStrength', fmt: v => v.toFixed(2) },
-  { sid: 'ps-charge-indi',  vid: 'pv-charge-indi',  key: 'chargeIndi',     fmt: v => Math.round(v) },
-  { sid: 'ps-charge-fam',   vid: 'pv-charge-fam',   key: 'chargeFam',      fmt: v => Math.round(v) },
-  { sid: 'ps-charge-dist',  vid: 'pv-charge-dist',  key: 'chargeDistMax',  fmt: v => Math.round(v) },
-  { sid: 'ps-collide',      vid: 'pv-collide',       key: 'collideRadius',  fmt: v => Math.round(v) },
-  { sid: 'ps-ystr',         vid: 'pv-ystr',          key: 'yStrength',      fmt: v => v.toFixed(2) },
-  { sid: 'ps-center',       vid: 'pv-center',        key: 'centerStrength', fmt: v => v.toFixed(3) },
-  { sid: 'ps-vdecay',       vid: 'pv-vdecay',        key: 'velocityDecay',  fmt: v => v.toFixed(2) },
-  { sid: 'ps-alphadecay',  vid: 'pv-alphadecay',    key: 'alphaDecay',     fmt: v => v.toFixed(3) },
+  { sid: 'ps-spouse-dist',  nid: 'pn-spouse-dist',  key: 'spouseDist',     fmt: v => Math.round(v) },
+  { sid: 'ps-parent-dist',  nid: 'pn-parent-dist',  key: 'parentDist',     fmt: v => Math.round(v) },
+  { sid: 'ps-spouse-str',   nid: 'pn-spouse-str',   key: 'spouseStrength', fmt: v => v.toFixed(2) },
+  { sid: 'ps-parent-str',   nid: 'pn-parent-str',   key: 'parentStrength', fmt: v => v.toFixed(2) },
+  { sid: 'ps-charge-indi',  nid: 'pn-charge-indi',  key: 'chargeIndi',     fmt: v => Math.round(v) },
+  { sid: 'ps-charge-fam',   nid: 'pn-charge-fam',   key: 'chargeFam',      fmt: v => Math.round(v) },
+  { sid: 'ps-charge-dist',  nid: 'pn-charge-dist',  key: 'chargeDistMax',  fmt: v => Math.round(v) },
+  { sid: 'ps-collide',      nid: 'pn-collide',      key: 'collideRadius',  fmt: v => Math.round(v) },
+  { sid: 'ps-ystr',         nid: 'pn-ystr',         key: 'yStrength',      fmt: v => v.toFixed(2) },
+  { sid: 'ps-center',       nid: 'pn-center',       key: 'centerStrength', fmt: v => v.toFixed(3) },
+  { sid: 'ps-vdecay',       nid: 'pn-vdecay',       key: 'velocityDecay',  fmt: v => v.toFixed(2) },
+  { sid: 'ps-alphadecay',   nid: 'pn-alphadecay',   key: 'alphaDecay',     fmt: v => v.toFixed(3) },
 ];
 
 export function syncPhysicsUI() {
-  for (const { sid, vid, key, fmt } of SLIDER_MAP) {
-    const el = document.getElementById(sid);
-    const vl = document.getElementById(vid);
-    if (el) el.value = state.physicsParams[key];
-    if (vl) vl.textContent = fmt(state.physicsParams[key]);
+  for (const { sid, nid, key, fmt } of SLIDER_MAP) {
+    const slider = document.getElementById(sid);
+    const numIn  = document.getElementById(nid);
+    const v = state.physicsParams[key];
+    if (slider) slider.value = v;
+    if (numIn) numIn.value = fmt(v);
   }
 }
 

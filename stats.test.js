@@ -95,6 +95,45 @@ const p = (id, o = {}) => Object.assign({
     assert.strictEqual(s.lifespan.oldest.name, 'ok');
   });
 
+  await test('children who died under 5 are not averaged into lifespan', async () => {
+    const s = load(new Map([
+      ['adult', p('adult', { birthYear: 1900, death: { date: '1970' }, deceased: true })],  // 70
+      ['child', p('child', { birthYear: 1900, death: { date: '1902' }, deceased: true })],  // 2
+      ['baby',  p('baby',  { birthYear: 1900, death: { date: '1900' }, deceased: true })],  // 0
+    ]));
+    assert.strictEqual(s.lifespan.n, 1, 'only the adult counts');
+    assert.strictEqual(s.lifespan.mean, 70);
+    assert.strictEqual(s.lifespan.childDeaths, 2);
+    assert.strictEqual(s.lifespan.childRate, 2 / 3);
+  });
+
+  console.log('\nmarriage and parent age');
+
+  await test('average age at first marriage is computed from birth and marriage years', async () => {
+    const fams = new Map([
+      ['F1', { id: 'F1', husb: 'h', wife: 'w', chil: [], marriages: [{ date: '1920' }] }],
+    ]);
+    const s = load(new Map([
+      ['h', p('h', { sex: 'M', birthYear: 1890, fams: ['F1'] })],  // 30
+      ['w', p('w', { sex: 'F', birthYear: 1895, fams: ['F1'] })],  // 25
+    ]), fams);
+    assert.strictEqual(s.marriageAge.n, 2);
+    assert.strictEqual(s.marriageAge.mean, 27.5);
+  });
+
+  await test('average parent age at child birth uses known parent and child birth years', async () => {
+    const fams = new Map([
+      ['F1', { id: 'F1', husb: 'h', wife: 'w', chil: ['c'], marriages: [] }],
+    ]);
+    const s = load(new Map([
+      ['h', p('h', { sex: 'M', birthYear: 1890 })],
+      ['w', p('w', { sex: 'F', birthYear: 1895 })],
+      ['c', p('c', { birthYear: 1920, famc: ['F1'] })],
+    ]), fams);
+    assert.strictEqual(s.parentAge.n, 2);
+    assert.strictEqual(s.parentAge.mean, 27.5);
+  });
+
   console.log('\nfamilies');
 
   await test('the children average covers families that have children', async () => {
@@ -153,6 +192,16 @@ const p = (id, o = {}) => Object.assign({
     ]));
     assert.deepStrictEqual(s.top.surnames.map(x => x[0]), ['Aebi', 'Zwahlen'],
       'equal counts should fall back to alphabetical');
+  });
+
+  await test('causes of death are ranked by frequency', async () => {
+    const s = load(new Map([
+      ['a', p('a', { birthYear: 1900, death: { date: '1960', caus: 'Heart failure' }, deceased: true })],
+      ['b', p('b', { birthYear: 1900, death: { date: '1970', caus: 'Heart failure' }, deceased: true })],
+      ['c', p('c', { birthYear: 1900, death: { date: '1980', caus: 'Cancer' },       deceased: true })],
+    ]));
+    assert.deepStrictEqual(s.top.causes[0], ['Heart failure', 2]);
+    assert.deepStrictEqual(s.top.causes[1], ['Cancer', 1]);
   });
 
   console.log('\nrendering');

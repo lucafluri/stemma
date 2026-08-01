@@ -34,8 +34,10 @@ export function computeStats() {
   if (!people.length) return null;
 
   const sex = { M: 0, F: 0, U: 0 };
-  const surnames = new Map(), givenNames = new Map(), places = new Map(), occupations = new Map();
-  const lifespans = [];            // only where both years are recorded
+  const surnames = new Map(), givenNames = new Map(), places = new Map(), occupations = new Map(), causes = new Map();
+  const allDeathAges = [];         // every recorded death age, for child mortality
+  const lifespans = [];            // recorded death ages of 5 or older
+  let childDeaths = 0;
   let deceased = 0, withBirth = 0, withDeath = 0, withPlace = 0, withOccupation = 0;
   let oldest = null;
 
@@ -54,12 +56,22 @@ export function computeStats() {
       occupations.set(key, (occupations.get(key) || 0) + 1);
     }
 
-    // A lifespan needs both ends recorded. Negative or absurd spans are data
-    // errors — a transcription slip, or two people merged into one — and
-    // averaging them in would quietly drag the figure around.
-    if (b && d && d >= b && d - b <= 120) {
-      lifespans.push(d - b);
-      if (!oldest || d - b > oldest.age) oldest = { age: d - b, name: p.displayName || p.id, born: b, died: d };
+    // A lifespan needs both ends recorded, must be an actual death, and is not
+    // counted for the average if the person died in early childhood. Child
+    // deaths are tracked separately because they would otherwise pull the
+    // "average age" figure down without the reader noticing.
+    // Negative or absurd spans are data errors — a transcription slip, or two
+    // people merged into one — and averaging them in would quietly drag the
+    // figure around.
+    if (p.deceased && b && d && d >= b && d - b <= 120) {
+      const age = d - b;
+      allDeathAges.push(age);
+      if (age >= 5) {
+        lifespans.push(age);
+        if (!oldest || age > oldest.age) oldest = { age, name: p.displayName || p.id, born: b, died: d };
+      } else {
+        childDeaths++;
+      }
     }
     if ((p.surn || '').trim()) {
       const s = p.surn.trim();
@@ -73,6 +85,8 @@ export function computeStats() {
       const v = (pl || '').trim();
       if (v) places.set(v, (places.get(v) || 0) + 1);
     }
+    const c = (p.death?.caus || '').trim();
+    if (c) causes.set(c, (causes.get(c) || 0) + 1);
   }
 
   // ── Families ──
@@ -89,6 +103,45 @@ export function computeStats() {
   }
   const divorced = fams.filter(f => f.div).length;
   const marriageYears = fams.flatMap(f => (f.marriages || []).map(m => year(m.date))).filter(Boolean);
+
+  // ── Marriage age and generation gap ──
+  const marriageAges = [];
+  for (const p of people) {
+    const b = p.birthYear || year(p.birth?.date);
+    if (!b) continue;
+    let firstYear = null;
+    for (const famId of p.fams || []) {
+      const f = state.families.get(famId);
+      if (!f) continue;
+      for (const m of f.marriages || []) {
+        const y = year(m.date);
+        if (y && (firstYear == null || y < firstYear)) firstYear = y;
+      }
+    }
+    if (firstYear != null && firstYear >= b && firstYear - b <= 120) {
+      marriageAges.push(firstYear - b);
+    }
+  }
+
+  const parentAges = [];
+  for (const f of fams) {
+    const parents = [f.husb, f.wife]
+      .filter(id => id && state.individuals.has(id))
+      .map(id => state.individuals.get(id));
+    if (!parents.length) continue;
+    for (const cid of f.chil || []) {
+      const child = state.individuals.get(cid);
+      if (!child) continue;
+      const cb = child.birthYear || year(child.birth?.date);
+      if (!cb) continue;
+      for (const par of parents) {
+        const pb = par.birthYear || year(par.birth?.date);
+        if (pb && cb >= pb && cb - pb <= 100) {
+          parentAges.push(cb - pb);
+        }
+      }
+    }
+  }
 
   // ── Time span and generations ──
   const birthYears = people.map(p => p.birthYear || year(p.birth?.date)).filter(Boolean);
@@ -120,7 +173,12 @@ export function computeStats() {
       mean: mean(lifespans),
       median: median(lifespans),
       oldest,
+      childDeaths,
+      childRate: allDeathAges.length ? childDeaths / allDeathAges.length : null,
     },
+
+    marriageAge: { n: marriageAges.length, mean: mean(marriageAges) },
+    parentAge: { n: parentAges.length, mean: mean(parentAges) },
 
     children: {
       meanAll: mean(childCounts),
@@ -150,6 +208,7 @@ export function computeStats() {
       givenNames: topN(givenNames, 5),
       places:     topN(places, 5),
       occupations: topN(occupations, 3),
+      causes:     topN(causes, 3),
     },
   };
 }
@@ -201,6 +260,15 @@ export function renderStats() {
     s.lifespan.oldest ? statRow(t('stats.oldest'),
       `${s.lifespan.oldest.age} ${t('stats.years')}`,
       `${s.lifespan.oldest.name} (${s.lifespan.oldest.born}–${s.lifespan.oldest.died})`) : '',
+    s.lifespan.childDeaths ? statRow(t('stats.childMortality'),
+      s.lifespan.childDeaths.toLocaleString(),
+      t('stats.childMortalityHint', { rate: pct(s.lifespan.childRate) })) : '',
+    s.marriageAge.n ? statRow(t('stats.avgMarriageAge'),
+      num(s.marriageAge.mean) + ' ' + t('stats.years'),
+      t('stats.avgMarriageAgeHint', { n: s.marriageAge.n })) : '',
+    s.parentAge.n ? statRow(t('stats.avgParentAge'),
+      num(s.parentAge.mean) + ' ' + t('stats.years'),
+      t('stats.avgParentAgeHint', { n: s.parentAge.n })) : '',
 
     `<div class="stat-sep"></div>`,
     statRow(t('stats.families'), s.families.toLocaleString()),
@@ -226,6 +294,7 @@ export function renderStats() {
     statList(t('stats.topGiven'), s.top.givenNames),
     statList(t('stats.topPlaces'), s.top.places),
     statList(t('stats.topOccupations'), s.top.occupations),
+    statList(t('stats.topCauses'), s.top.causes),
   ].filter(Boolean).join('');
 }
 

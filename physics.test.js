@@ -116,6 +116,18 @@ async function test(name, fn) {
     assert.strictEqual(repins, 1, '...but a rebuild still must, or new nodes float free');
   });
 
+  console.log('\nnumber inputs');
+
+  await test('syncPhysicsUI keeps the number input in sync with the slider', async () => {
+    state.physicsParams.chargeIndi = 500;
+    r2d.syncPhysicsUI();
+    const numIn = document.getElementById('pn-charge-indi');
+    const slider = document.getElementById('ps-charge-indi');
+    assert.ok(numIn, 'number input should exist in the DOM');
+    assert.strictEqual(numIn.value, '500');
+    assert.strictEqual(slider.value, '500');
+  });
+
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
