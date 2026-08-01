@@ -56,10 +56,26 @@ one opens the next generation.
 spouses and children from the buttons there. Name, place and occupation fields
 suggest values already in the tree as you type.
 
-**Import.** GEDCOM, JSON and YAML load directly. Plain text and images
-(scanned charts) go through a review wizard that parses them into people you can
-check and correct before merging — optionally with OCR (Tesseract) or the
-Anthropic API.
+**Import.** GEDCOM, JSON and YAML load directly into an empty tree. Onto a tree
+that already has people in it — and for plain text or images of scanned charts,
+optionally read with OCR (Tesseract) or the Anthropic API — the file goes
+through a review step instead.
+
+That step is a diff table, one row per record in the incoming file: what is new,
+what fills a gap, what disagrees, and what the tree already holds identically.
+Where the two sources disagree the row shows both answers side by side and
+clicking picks the winner; expanding a row opens the full editing card. Chips
+above filter to one kind, and bulk approve/skip acts on whatever is filtered.
+
+Children of a couple the tree already records are added to that family rather
+than to a duplicate of it. Every proposed person is checked for whether it would
+actually hang off the existing tree afterwards, and the ones that would not are
+flagged and filterable. A person nothing in the file ties to the tree is offered
+a *link* (same person) or *attach* (make them somebody's child); a person whose
+tie is merely sitting in a row that has not been approved yet says so instead,
+and the flag clears the moment that other row is approved. While **only import
+connected data** is on — it is by default — applying stops rather than parking a
+second, detached tree beside the first.
 
 **Export.** GEDCOM, JSON or YAML, either the whole tree or just the people
 currently on screen. The 2D chart also exports as PNG or SVG.
@@ -128,13 +144,14 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Ten suites, no framework — plain `node` scripts with `assert`:
+Eleven suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
 | `gedcom.test.js` | parsing, serialisation, round-trips, subset export |
 | `focus.test.js` | the focus filter and the whole 2D chart layout |
-| `import.test.js` | linking imported people to existing records |
+| `import.test.js` | linking imported people to existing records, the merge diff, and whether an import lands connected |
+| `merge.test.js` | the review screen: warnings that follow the approvals, and the apply guard |
 | `deceased.test.js` | auto-marking long-dead people |
 | `hover.test.js` | the text on a person's box |
 | `stats.test.js` | the statistics figures and how they are rendered |

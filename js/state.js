@@ -116,11 +116,18 @@ export const state = {
   _relPersonA: null,
   _relPersonB: null,
   _importActions: [],
+  _importView: 'table',      // 'table' (diff) | 'cards'
+  _importFilter: 'all',      // all | new | changed | same | marriage | unconnected
+  _importConn: new Map(),       // actionId → would this new person hang off the tree, if the batch were approved
+  _importConnStrict: new Map(), // …and given only what is actually approved right now
+  _importRequireConnected: true,  // block apply while approved people would float free
+  _importExpanded: new Set(),     // action ids whose full editing card is open
   _importJsonPersons: null,  // set when a .json/.ged/.yaml file is loaded
   _importLoadedFile: null,  // raw File handle, for "replace dataset" path
   _importImageData: null,  // { base64, mediaType } for AI fallback
   _tesseractLoading: null,
   _currentMatchActionId: null,
+  _imMatchMode: 'link',      // 'link' = same person, 'parent' = attach as their child
   _currentMatchCandidates: [],
   _acEl: null,  // singleton dropdown element
   _acInput: null,  // currently active input

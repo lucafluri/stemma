@@ -1780,7 +1780,7 @@ body.relation-picking * { cursor: crosshair !important; }
   background: #101010;
   border: 1px solid #363636;
   border-radius: 10px;
-  width: min(800px, 96vw);
+  width: min(1180px, 96vw);   /* the diff table wants the room */
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -1823,6 +1823,9 @@ body.relation-picking * { cursor: crosshair !important; }
   padding: 14px 18px;
   gap: 10px;
 }
+/* The panel is sized for the review table; a drop zone that wide reads as a
+   mistake, so step 1 keeps its old measure. */
+#import-step-input { max-width: 800px; width: 100%; margin: 0 auto; }
 .import-hint {
   margin: 0;
   font-size: 12.5px;
@@ -2065,6 +2068,189 @@ body.relation-picking * { cursor: crosshair !important; }
   gap: 8px;
   padding-right: 4px;
   padding-bottom: 6px;
+}
+
+/* Filter chips + view switch */
+.import-spacer { flex: 1; }
+.import-view-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #1c1c1c;
+  border: 1px solid #333333;
+  color: #8e8e8e;
+}
+.import-view-btn--on { background: #343434; border-color: #4d4d4d; color: #dfdfdf; }
+
+.import-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0 6px;
+}
+.import-filter-chip {
+  padding: 3px 10px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  cursor: pointer;
+  background: #191919;
+  border: 1px solid #303030;
+  color: #8a8a8a;
+}
+.import-filter-chip b { color: #cdcdcd; }
+.import-filter-chip:hover { background: #262626; }
+.import-filter-chip--on { background: #383838; border-color: #565656; color: #e2e2e2; }
+.import-filter-chip--warn   { border-color: #5a4a1e; color: #c9a94e; }
+.import-filter-chip--warn b { color: #d8bb63; }
+
+.import-connect-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 12px;
+  color: #9a9a9a;
+  cursor: pointer;
+  user-select: none;
+}
+
+.import-empty-filter {
+  padding: 24px 8px;
+  text-align: center;
+  color: #777777;
+  font-size: 13px;
+}
+
+/* Diff table */
+.import-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.import-diff-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #191919;
+  color: #8c8c8c;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #333333;
+}
+.import-dth-exp    { width: 26px; }
+.import-dth-status { width: 68px; }
+
+.import-drow > td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #232323;
+  vertical-align: top;
+}
+.import-drow--approved > td { background: #161616; }
+.import-drow--skipped  > td { background: #0c0c0c; opacity: 0.55; }
+.import-drow--loose    > td { box-shadow: inset 3px 0 0 -1px #7a6320; }
+.import-drow:hover > td { background: #1d1d1d; }
+
+.import-dexp {
+  background: none;
+  border: none;
+  color: #8a8a8a;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.import-dexp:hover { color: #dddddd; }
+
+.import-dcell-name { min-width: 150px; }
+.import-dname  { color: #dcdcdc; font-weight: 600; }
+.import-dyears { color: #7c7c7c; font-size: 11px; }
+
+.import-dcell-diff { width: 46%; }
+.import-dpair {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+  flex-wrap: wrap;
+}
+.import-dpair--pick { cursor: pointer; border-radius: 3px; }
+.import-dpair--pick:hover { background: #262626; }
+.import-dlabel {
+  min-width: 92px;
+  color: #808080;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.import-dold, .import-dnew {
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  color: #6d6d6d;
+}
+.import-darrow { color: #5a5a5a; }
+.import-dside--on { color: #e0e0e0; background: #2b2b2b; border-color: #454545; }
+.import-dnew.import-dside--on { border-color: #5c5c5c; }
+.import-dsame { color: #6f6f6f; font-style: italic; }
+.import-dnote { color: #9a9a9a; font-size: 11.5px; padding-bottom: 2px; }
+
+.import-badge--same { background: #151515; color: #7a7a7a; border: 1px solid #262626; }
+
+.import-dlinked { color: #b0b0b0; }
+.import-dnewtag {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a8a8a;
+}
+.import-dbtn {
+  background: #222222;
+  border: 1px solid #383838;
+  color: #a0a0a0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+.import-dbtn:hover { background: #303030; color: #e0e0e0; }
+.import-dbtn--link { border-color: #5a4a1e; color: #c9a94e; margin-left: 0; margin-top: 3px; }
+
+.import-conn { font-size: 11px; display: inline-block; margin-top: 2px; }
+.import-conn--ok      { color: #6b6b6b; }
+.import-conn--warn    { color: #c9a94e; font-weight: 600; }
+.import-conn--pending { color: #8f9fbf; font-weight: 600; }
+.import-drow--loose.import-drow--approved > td { box-shadow: inset 3px 0 0 -1px #7a6320; }
+
+.import-dstatus {
+  background: #1e1e1e;
+  border: 1px solid #333333;
+  color: #909090;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 7px;
+}
+.import-dstatus:hover { background: #2c2c2c; color: #e0e0e0; }
+.import-dstatus.import-btn--active { background: #414141; border-color: #5a5a5a; color: #f0f0f0; }
+
+.import-drow-details > td { padding: 0 8px 10px 34px; background: #101010; border-bottom: 1px solid #232323; }
+.import-drow-details .import-action-card { flex-shrink: 1; }
+
+.import-same-body { padding: 10px 12px; font-size: 12.5px; color: #9a9a9a; }
+.import-match-hint { color: #c9a94e; font-size: 12px; padding-top: 6px; }
+
+/* Six columns do not fit a phone; let the table scroll sideways rather than
+   squeezing the diff into something unreadable. */
+@media (max-width: 768px) {
+  #import-actions-list { overflow-x: auto; }
+  .import-diff-table   { min-width: 620px; }
+  .import-dlabel       { min-width: 70px; }
+  .import-dcell-diff   { width: auto; }
 }
 
 /* Action cards */
