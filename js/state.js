@@ -95,7 +95,11 @@ export const state = {
   _isNewRecord: false, // true while editing a freshly created INDI/FAM
   linkColors: { ...LINK_COLOR_DEFAULTS },
   nodeColors: { ...NODE_COLOR_DEFAULTS },
-  famNodeSize: parseInt(localStorage.getItem('famNodeSize')) || 1,
+  // 7 is the reference size the 3D sphere volume is scaled against (see
+  // _famNodeVal); `|| 1` here meant a fresh install started at 1 — a marker one
+  // pixel across — and made 0 (the slider's own minimum) unselectable.
+  famNodeSize: Number.isFinite(parseInt(localStorage.getItem('famNodeSize')))
+    ? parseInt(localStorage.getItem('famNodeSize')) : 7,
   _panelSwipe: null,  // { startY, startTranslate }
   _touchDragged: false,
   _touchStartPos: null,
@@ -147,3 +151,10 @@ if (_lsSurnameColors) {
 }
 state.colorBySurname = localStorage.getItem('colorBySurname') !== 'false'; // default true
 if (!Number.isFinite(state.cousinDegree)) state.cousinDegree = 1;
+
+// Every other display setting survives a reload; these did not, so a tuned 3D
+// scene reset itself every time the page was opened.
+try {
+  const saved = JSON.parse(localStorage.getItem('appearance3d') || '{}');
+  Object.assign(state._3dAppearance, saved);
+} catch (e) { /* ignore */ }

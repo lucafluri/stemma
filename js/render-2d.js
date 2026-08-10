@@ -141,48 +141,6 @@ export function initSVG() {
       }
     });
 
-  // Auto-recenter if graph centroid is way off-screen (prevents getting "lost")
-  setInterval(() => {
-    if (!state.svgSel || !state.nodes.length) return;
-    const W = document.getElementById('graph-svg')?.clientWidth || 800;
-    const H = document.getElementById('graph-svg')?.clientHeight || 600;
-    const transform = d3.zoomTransform(state.svgSel.node());
-
-    // Check if any nodes are visible in current viewport
-    let anyVisible = false;
-    const margin = 100; // Allow some overflow
-    for (const n of state.nodes) {
-      if (n.x == null || n.y == null) continue;
-      const screenX = transform.x + n.x * transform.k;
-      const screenY = transform.y + n.y * transform.k;
-      if (screenX > -margin && screenX < W + margin &&
-          screenY > -margin && screenY < H + margin) {
-        anyVisible = true;
-        break;
-      }
-    }
-
-    // If nothing is visible, auto-recenter
-    if (!anyVisible && state.nodes.length > 0) {
-      zoomToFit();
-    }
-  }, 2000); // Check every 2 seconds
-
-  // Keyboard shortcuts for zoom
-  document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === '0') {
-      e.preventDefault();
-      resetView();
-    } else if (e.key === '+' || e.key === '=') {
-      e.preventDefault();
-      state.svgSel.transition().duration(200).call(state.zoomBehavior.scaleBy, 1.3);
-    } else if (e.key === '-') {
-      e.preventDefault();
-      state.svgSel.transition().duration(200).call(state.zoomBehavior.scaleBy, 1 / 1.3);
-    }
-  });
-
   state.svgSel.call(state.zoomBehavior);
 
   // Click on SVG background → deselect
@@ -200,6 +158,50 @@ export function initSVG() {
     positionTooltip(evt);
   });
 }
+
+// Both of these used to live inside initSVG(), which runs again on every file
+// load — so opening a second file left two auto-recenter timers running and two
+// keyboard handlers on the document, and "+" zoomed twice as far per press.
+// Module scope runs once, whatever happens to the SVG afterwards.
+
+// If the whole graph has drifted off screen there is no way back by dragging —
+// you cannot aim at something you cannot see. Bring it back.
+const _recenterTimer = setInterval(() => {
+  if (!state.svgSel || !state.nodes.length) return;
+  const svgEl = document.getElementById('graph-svg');
+  const W = svgEl?.clientWidth  || 800;
+  const H = svgEl?.clientHeight || 600;
+  const transform = d3.zoomTransform(state.svgSel.node());
+
+  const margin = 100; // a node just off the edge still counts as findable
+  const anyVisible = state.nodes.some(n => {
+    if (n.x == null || n.y == null) return false;
+    const x = transform.x + n.x * transform.k;
+    const y = transform.y + n.y * transform.k;
+    return x > -margin && x < W + margin && y > -margin && y < H + margin;
+  });
+
+  if (!anyVisible) zoomToFit();
+}, 2000);
+// In a browser setInterval returns a number and this is a no-op; under Node
+// (the test suite imports this module) it returns a handle whose mere existence
+// would hold the process open after the tests have finished.
+_recenterTimer?.unref?.();
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select')) return;
+  if (!state.svgSel || !state.zoomBehavior) return;
+  if (e.key === '0') {
+    e.preventDefault();
+    resetView();
+  } else if (e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    svgZoomBy(1.3);
+  } else if (e.key === '-') {
+    e.preventDefault();
+    svgZoomBy(1 / 1.3);
+  }
+});
 
 export function renderGraph() {
   perf.start('[rg] clear');       state.gMain.selectAll('*').remove();                    perf.end('[rg] clear');
@@ -549,7 +551,7 @@ export function buildAndRunSimulation(opts = {}) {
     const HEADLESS_DECAY = 0.05;
     state.simulation.stop().alphaDecay(HEADLESS_DECAY);
     const totalTicks = Math.ceil(Math.log(state.simulation.alphaMin() / state.simulation.alpha()) / Math.log(1 - HEADLESS_DECAY));
-    console.log(`[sim] headless: ${state.nodes.length} nodes, ${state.links.length} links, ${totalTicks} ticks`);
+    perf.log(`[sim] headless: ${state.nodes.length} nodes, ${state.links.length} links, ${totalTicks} ticks`);
     perf.start('[sim] headless ticks');
     for (let i = 0; i < totalTicks; i++) state.simulation.tick();
     perf.end('[sim] headless ticks');
@@ -643,6 +645,17 @@ export function _settleBarRun(durationMs) {
 
 export function autoSettle() {
   if (state._autoSettleTimer) { clearTimeout(state._autoSettleTimer); state._autoSettleTimer = null; }
+
+  // The classical chart has no simulation to anneal — its positions are computed
+  // outright. The button still has an honest job there: recompute the layout and
+  // frame it, which is what "reload the graph" means when there is no physics.
+  // Without this it ran a progress bar over three seconds of nothing.
+  if (useTreeLayout()) {
+    applyTreeLayout();
+    tick();
+    frameTreeChart();
+    return;
+  }
 
   // alphaDecay=0.04 → sim dies in ~170 ticks ≈ 2.8s at 60fps
   const SETTLE_MS = 3000;
@@ -901,13 +914,19 @@ export function renderPresetList() {
 export function toggleNodeDrag() {
   state._nodeDragEnabled = !state._nodeDragEnabled;
   if (state.graph3d) state.graph3d.enableNodeDrag(state._nodeDragEnabled);
+  syncNodeDragBtn();
+}
+
+// Writing the label replaces the <span data-i18n> the markup shipped with, so
+// switching language afterwards left this one button in the old language.
+// Called from _onLanguageChanged too, which is what puts it right.
+export function syncNodeDragBtn() {
   const btn = document.getElementById('node-drag-btn');
-  if (btn) {
-    btn.textContent = state._nodeDragEnabled
-      ? '🔓 ' + t('sidebar.dragOn')
-      : '🔒 ' + t('sidebar.dragOff');
-    btn.style.opacity = state._nodeDragEnabled ? '1' : '0.6';
-  }
+  if (!btn) return;
+  btn.textContent = state._nodeDragEnabled
+    ? '🔓 ' + t('sidebar.dragOn')
+    : '🔒 ' + t('sidebar.dragOff');
+  btn.style.opacity = state._nodeDragEnabled ? '1' : '0.6';
 }
 
 export const EXPORT_MARGIN = 40;
@@ -999,7 +1018,7 @@ export function export2DImage() {
       a.href = url;
       a.download = _baseFilename() + '_2d.png';
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);   // see _downloadBlob
     }, 'image/png');
   };
   img.onerror = () => alert(t('focus.exportFailed'));

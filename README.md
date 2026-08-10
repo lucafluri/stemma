@@ -46,6 +46,13 @@ Deployed automatically to GitHub Pages from `master`
 - **3D** — the same graph in space, stratified by birth year or by generation,
   with an optional time axis.
 
+**Starting out.** With nothing loaded the canvas offers the two things that are
+actually possible — open a file, or create the first person — and the sidebar
+stays out of the way until there is a tree for it to act on. Controls that
+cannot do anything in the current mode (physics under the classical chart, the
+3D appearance panel in 2D, the image exports in 3D) hide rather than sit there
+inert.
+
 **Focus.** The 2D view shows the whole file by default. Focusing narrows it to one
 person and their relatives out to a chosen distance — direct line, siblings,
 and cousins to a configurable degree. The panel shows how many people are on
@@ -144,7 +151,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Eleven suites, no framework — plain `node` scripts with `assert`:
+Twelve suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -158,6 +165,7 @@ Eleven suites, no framework — plain `node` scripts with `assert`:
 | `autocomplete.test.js` | name suggestions and which form fields get them |
 | `physics.test.js` | what dragging a physics slider costs |
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
+| `ui.test.js` | which controls are offered, and when — the empty state, and hiding controls that would act on nothing |
 | `workfile.test.js` | reopening and saving back over the same file |
 
 `test-setup.js` builds a jsdom window from `index.html` with stubs for the

@@ -214,6 +214,13 @@ const I18N = {
       zoomOut: 'Verkleinern (-)',
       zoomFit: 'Alles anzeigen',
     },
+    empty: {
+      title: 'Noch kein Stammbaum',
+      body: 'Öffne eine GEDCOM-, JSON- oder YAML-Datei, oder fang mit einer einzelnen Person an und baue von dort weiter.',
+      import: 'Datei importieren',
+      newPerson: 'Neue Person anlegen',
+      hint: 'Alles bleibt im Browser — es wird nichts hochgeladen.',
+    },
     detail: {
       empty: '—',
       edit: 'Bearbeiten',
@@ -788,6 +795,13 @@ const I18N = {
       zoomIn: 'Zoom in (+)',
       zoomOut: 'Zoom out (-)',
       zoomFit: 'Fit all',
+    },
+    empty: {
+      title: 'No family tree yet',
+      body: 'Open a GEDCOM, JSON or YAML file — or start with a single person and build outwards from there.',
+      import: 'Import a file',
+      newPerson: 'Add a person',
+      hint: 'Everything stays in your browser — nothing is uploaded.',
     },
     detail: {
       empty: '—',

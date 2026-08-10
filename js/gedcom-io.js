@@ -94,6 +94,7 @@ export function _fullRebuildGraph(opts = {}) {
   applyHighlight();
   if (state.currentView === '3d' && state.selectedIndiId) _setOrbitTarget3D(state.selectedIndiId);
   updateFocusUI();
+  showDataUI();   // deleting the last record has to put the empty state back
   perf.end('[rebuild] total');
 }
 
@@ -186,13 +187,7 @@ export function _loadDatasetFile(file, handle = null) {
 
       state._firstLoad = true;
       buildAndRunSimulation();
-      document.getElementById('dl-wrap').style.display = 'flex';
-      document.getElementById('center-view-btn').style.display = 'inline-block';
-      document.getElementById('center-view-btn').disabled = false;
-      document.getElementById('center-person-btn').style.display = 'inline-block';
-      document.getElementById('relation-tool-btn').style.display = 'inline-block';
-      document.getElementById('relation-tool-btn').disabled = false;
-      document.getElementById('view-toggle-btn').disabled = false;
+      showDataUI();
       window._gedcomFilename = file.name;
       _setDirty(false);
       updateFileButtons();
@@ -215,6 +210,31 @@ export function _loadDatasetFile(file, handle = null) {
     document.getElementById('status').textContent = t('errors.readError');
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+// Everything that only makes sense once there are people to look at: the export
+// menu, the view and framing buttons, and — inversely — the empty-state card
+// over the canvas. Driven off `individuals.size` rather than "a file was just
+// opened", so deleting the last person puts the empty state back instead of
+// leaving a set of buttons that act on nothing.
+//
+// Both routes into a populated tree (opening a file, adding the first person by
+// hand) used to spell out the same six lines and had already drifted apart.
+export function showDataUI() {
+  const has = state.individuals.size > 0;
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.style.display = has ? 'none' : 'flex';
+  document.getElementById('main-layout')?.classList.toggle('no-data', !has);
+  const menuBtn = document.getElementById('sidebar-toggle-btn');
+  if (menuBtn) menuBtn.style.display = has ? '' : 'none';   // it would open an empty drawer
+
+  document.getElementById('dl-wrap').style.display = has ? 'flex' : 'none';
+  for (const id of ['center-view-btn', 'center-person-btn', 'relation-tool-btn']) {
+    document.getElementById(id).style.display = has ? 'inline-block' : 'none';
+  }
+  document.getElementById('center-view-btn').disabled = !has;
+  document.getElementById('relation-tool-btn').disabled = !has;
+  document.getElementById('view-toggle-btn').disabled = !has;
 }
 
 // ── The working file ────────────────────────────────────────────────────────
@@ -439,7 +459,10 @@ export function _downloadBlob(content, filename, mime) {
   a.href     = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking in the same tick races the download the click just started —
+  // Chromium happens to get away with it, Firefox drops the file. One turn of
+  // the event loop is enough for the browser to have taken hold of the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function _baseFilename() {

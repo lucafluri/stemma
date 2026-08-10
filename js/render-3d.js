@@ -84,10 +84,26 @@ export function updateViewToggleUI() {
     'sort-time-3d-row':  'block',
     'show-names-3d-row': 'flex',
     'time-spread-row':   state.stratify3D !== 'off' ? 'block' : 'none',
+    'appearance-panel':  'block',   // background, lights, sphere size: 3D only
   };
   for (const [id, shown] of Object.entries(rows)) {
     const el = document.getElementById(id);
     if (el) el.style.display = in3d ? shown : 'none';
+  }
+
+  // ...and the mirror image: things that only exist in the 2D view.
+  for (const [id, shown] of Object.entries({ 'export-2d-row': 'block', 'tree-layout-row': 'flex' })) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = in3d ? 'none' : shown;
+  }
+
+  // Physics and node dragging act on a force simulation. The classical chart
+  // computes its positions outright and has none, so in that mode both were
+  // controls that visibly did nothing — a whole panel of them.
+  const simLive = in3d || !state.treeLayout;
+  for (const id of ['physics-panel', 'node-drag-btn']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = simLive ? 'block' : 'none';
   }
 
   const btn = document.getElementById('view-toggle-btn');

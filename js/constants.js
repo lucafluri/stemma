@@ -11,6 +11,7 @@ const _perfOn = (() => {
 export const perf = {
   start: _perfOn ? label => console.time(label)    : () => {},
   end:   _perfOn ? label => console.timeEnd(label) : () => {},
+  log:   _perfOn ? (...a) => console.log(...a)     : () => {},
 };
 
 export const PHYSICS_DEFAULTS = {

@@ -57,7 +57,7 @@
         <span id="focus-current-name" class="focus-none" data-i18n="focus.none">Keine Person</span>
         <button id="focus-clear-btn" onclick="clearFocus()" data-i18n-title="focus.clear" title="Fokus aufheben" style="display:none">&#x2715;</button>
       </div>
-      <label class="focus-layout-toggle" data-i18n-title="focus.treeTitle" title="Klassisches Stammbaum-Diagramm statt Kraft-Layout — auch ohne gewählte Person">
+      <label class="focus-layout-toggle" id="tree-layout-row" data-i18n-title="focus.treeTitle" title="Klassisches Stammbaum-Diagramm statt Kraft-Layout — auch ohne gewählte Person">
         <input type="checkbox" id="tree-layout-toggle" checked onchange="setTreeLayout(this.checked)">
         <span data-i18n="focus.tree">Stammbaum-Diagramm</span>
       </label>
@@ -96,12 +96,16 @@
       </div>
       <datalist id="gen-range-ticks" style="display:none"></datalist>
       <div id="focus-hidden-info" style="display:none"></div>
-      <button class="sidebar-btn" onclick="export2DImage()" style="margin-top:6px"
-              data-i18n-title="focus.exportPNGTitle" title="Das ganze Diagramm als PNG speichern, unabhängig vom Zoom">&#x1F4E5;
-        <span data-i18n="focus.exportPNG">Als Bild speichern</span></button>
-      <button class="sidebar-btn" onclick="export2DSVG()"
-              data-i18n-title="focus.exportSVGTitle" title="Das ganze Diagramm als Vektorgrafik speichern — zum Drucken">&#x1F4D0;
-        <span data-i18n="focus.exportSVG">Als SVG speichern</span></button>
+      <!-- Both only ever export the 2D chart; in 3D they used to be offered and
+           then answer with an alert. updateViewToggleUI() hides the group. -->
+      <div id="export-2d-row">
+        <button class="sidebar-btn" onclick="export2DImage()" style="margin-top:6px"
+                data-i18n-title="focus.exportPNGTitle" title="Das ganze Diagramm als PNG speichern, unabhängig vom Zoom">&#x1F4E5;
+          <span data-i18n="focus.exportPNG">Als Bild speichern</span></button>
+        <button class="sidebar-btn" onclick="export2DSVG()"
+                data-i18n-title="focus.exportSVGTitle" title="Das ganze Diagramm als Vektorgrafik speichern — zum Drucken">&#x1F4D0;
+          <span data-i18n="focus.exportSVG">Als SVG speichern</span></button>
+      </div>
       <div class="focus-hint" data-i18n="focus.hint">Person auswählen → &bdquo;Fokus&ldquo; im Detailfenster</div>
     </div>
 
@@ -398,6 +402,21 @@
       <svg id="graph-svg"></svg>
     </div>
     <div id="graph-3d-container" style="display:none"></div>
+
+    <!-- Sits over whichever view is up, so it does not depend on which one that
+         is; hidden by showDataUI() as soon as the tree has anybody in it. -->
+    <div id="empty-state">
+      <div class="empty-card">
+        <div class="empty-icon">&#127795;</div>
+        <h2 data-i18n="empty.title">Noch kein Stammbaum</h2>
+        <p data-i18n="empty.body">Öffne eine GEDCOM-, JSON- oder YAML-Datei, oder fang mit einer einzelnen Person an und baue von dort weiter.</p>
+        <div class="empty-actions">
+          <button class="empty-btn empty-btn--primary" onclick="openImport()">&#x1F4E5; <span data-i18n="empty.import">Datei importieren</span></button>
+          <button class="empty-btn" onclick="addNewPerson()">&#xff0b; <span data-i18n="empty.newPerson">Neue Person anlegen</span></button>
+        </div>
+        <div class="empty-hint" data-i18n="empty.hint">Alles bleibt im Browser — es wird nichts hochgeladen.</div>
+      </div>
+    </div>
   </div>
 
   <div id="detail-panel">
@@ -494,8 +513,9 @@
         <button onclick="_aiToggleKeyVisibility()" data-i18n-title="import.show" title="Anzeigen">&#x1F441;</button>
         <button onclick="_aiSaveKey()" data-i18n-title="import.save" title="Speichern">&#x1F4BE;</button>
         <select id="ai-model-select">
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-haiku-4-5">Haiku 4.5</option>
+          <option value="claude-sonnet-5" selected>Sonnet 5</option>
+          <option value="claude-opus-5">Opus 5</option>
         </select>
         <span id="ai-key-status"></span>
       </div>

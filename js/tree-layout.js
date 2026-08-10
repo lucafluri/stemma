@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { _defaultFocusRoot, _refocus, computeActiveData, computeGenerationDepths, estimateBirthYear } from './graph-data.js';
 import { row } from './panels.js';
 import { NODE_BOX_H, NODE_BOX_RX, NODE_BOX_W, onSimEnd, tick } from './render-2d.js';
+import { updateViewToggleUI } from './render-3d.js';
 
 export const FAM_MARKER_MIN = 4;
 
@@ -853,6 +854,7 @@ export function setTreeLayout(on) {
   // which relatives a focus means, so both views rebuild.
   if (!state.treeLayout) releaseTreePins();
   _refocus();
+  updateViewToggleUI();   // the physics controls appear/disappear with the layout
 }
 
 export function yearTo3DY(yr) {

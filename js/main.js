@@ -9,11 +9,11 @@ import * as Render3dMod from './render-3d.js';
 import * as StatsMod from './stats.js';
 import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
-import { _fullRebuildGraph, _tryRestoreAutosave, updateFileButtons } from './gedcom-io.js';
+import { _fullRebuildGraph, _tryRestoreAutosave, showDataUI, updateFileButtons } from './gedcom-io.js';
 import { focusOnPerson, updateFocusUI } from './graph-data.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
-import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, renderPresetList, resetView, schedulePhysicsParams, toggleNodeDrag, zoomToFit } from './render-2d.js';
+import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, renderPresetList, resetView, schedulePhysicsParams, syncNodeDragBtn, toggleNodeDrag, zoomToFit } from './render-2d.js';
 import { build3DTimeline, toggleView, updateViewToggleUI } from './render-3d.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
@@ -165,6 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (tlt) tlt.checked = state.treeLayout;
   updateViewToggleUI();
   updateFocusUI();
+  showDataUI();   // sets the first-run state; the autosave restore above may already have replaced it
 
   for (const { sid, nid, key, fmt } of SLIDER_MAP) {
     const slider = document.getElementById(sid);
@@ -312,59 +313,55 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ── 3D appearance controls ──
-  document.getElementById('ap-bg-color')?.addEventListener('input', function () {
-    state._3dAppearance.bgColor = this.value;
-    if (state.graph3d) state.graph3d.backgroundColor(this.value);
-  });
-
-  document.getElementById('ap-node-opacity')?.addEventListener('input', function () {
-    state._3dAppearance.nodeOpacity = +this.value;
-    document.getElementById('ap-node-opacity-val').textContent = (+this.value).toFixed(2);
-    if (state.graph3d) state.graph3d.nodeOpacity(+this.value);
-  });
-
-  document.getElementById('ap-link-opacity')?.addEventListener('input', function () {
-    state._3dAppearance.linkOpacity = +this.value;
-    document.getElementById('ap-link-opacity-val').textContent = (+this.value).toFixed(2);
-    if (state.graph3d) state.graph3d.linkOpacity(+this.value);
-  });
-
-  document.getElementById('ap-ambient')?.addEventListener('input', function () {
-    state._3dAppearance.ambientLight = +this.value;
-    document.getElementById('ap-ambient-val').textContent = (+this.value).toFixed(1);
-    if (state._3dAmbientLight) state._3dAmbientLight.intensity = +this.value;
-  });
-
-  document.getElementById('ap-point')?.addEventListener('input', function () {
-    state._3dAppearance.pointLight = +this.value;
-    document.getElementById('ap-point-val').textContent = (+this.value).toFixed(1);
-    if (state._3dPointLight) state._3dPointLight.intensity = +this.value;
-  });
-
-  document.getElementById('ap-link-width')?.addEventListener('input', function () {
-    state._3dAppearance.linkWidth = +this.value;
-    document.getElementById('ap-link-width-val').textContent = (+this.value).toFixed(1);
-    if (state.graph3d) state.graph3d.linkWidth(+this.value);
-  });
-
-  document.getElementById('ap-node-size')?.addEventListener('input', function () {
-    state._3dAppearance.nodeRelSize = +this.value;
-    document.getElementById('ap-node-size-val').textContent = (+this.value).toFixed(1);
-    if (state.graph3d) state.graph3d.nodeRelSize(+this.value);
-  });
-
-  document.getElementById('ap-font-size')?.addEventListener('input', function () {
-    state._3dFontSize = +this.value;
-    document.getElementById('ap-font-size-val').textContent = this.value;
-    update3DNames();
-  });
+  // Driven off one table rather than eight near-identical listeners, so that
+  // initialising the inputs *from* state costs nothing extra. That was the bug:
+  // the markup's defaults (0.85 opacity, 2.4 link width, …) were a different set
+  // of numbers than the ones actually being rendered, so the panel lied until
+  // you touched a slider — and then the first touch jumped the scene.
+  for (const c of AP_CONTROLS) {
+    const el = document.getElementById(c.id);
+    if (!el) continue;
+    el.value = apValue(c);
+    if (c.dp != null) _apShowValue(c, apValue(c));
+    el.addEventListener('input', function () {
+      const v = c.dp == null ? this.value : parseFloat(this.value);
+      if (c.dp != null && !Number.isFinite(v)) return;
+      if (c.top) state[c.key] = v; else state._3dAppearance[c.key] = v;
+      _apShowValue(c, v);
+      c.apply(v);
+      localStorage.setItem('appearance3d', JSON.stringify(state._3dAppearance));
+    });
+  }
 });
+
+// `top` marks the one value that lives on state directly rather than inside
+// state._3dAppearance; `dp` is the decimal places of the little number beside
+// the slider (absent = it is a colour input with no readout).
+const AP_CONTROLS = [
+  { id: 'ap-bg-color',     key: 'bgColor',                apply: v => state.graph3d?.backgroundColor(v) },
+  { id: 'ap-node-opacity', key: 'nodeOpacity',  dp: 2,    apply: v => state.graph3d?.nodeOpacity(v) },
+  { id: 'ap-link-opacity', key: 'linkOpacity',  dp: 2,    apply: v => state.graph3d?.linkOpacity(v) },
+  { id: 'ap-ambient',      key: 'ambientLight', dp: 1,    apply: v => { if (state._3dAmbientLight) state._3dAmbientLight.intensity = v; } },
+  { id: 'ap-point',        key: 'pointLight',   dp: 1,    apply: v => { if (state._3dPointLight)   state._3dPointLight.intensity   = v; } },
+  { id: 'ap-link-width',   key: 'linkWidth',    dp: 1,    apply: v => state.graph3d?.linkWidth(v) },
+  { id: 'ap-node-size',    key: 'nodeRelSize',  dp: 1,    apply: v => state.graph3d?.nodeRelSize(v) },
+  { id: 'ap-font-size',    key: '_3dFontSize',  dp: 0, top: true, apply: () => update3DNames() },
+];
+
+function apValue(c) { return c.top ? state[c.key] : state._3dAppearance[c.key]; }
+
+function _apShowValue(c, v) {
+  if (c.dp == null) return;
+  const out = document.getElementById(c.id + '-val');
+  if (out) out.textContent = Number(v).toFixed(c.dp);
+}
 
 // These labels are built in JS, so data-i18n can't retranslate them.
 function _onLanguageChanged() {
   updateViewToggleUI();
   updateFocusUI();
   updateHLButtons();
+  syncNodeDragBtn();
   // The axis labels are drawn into textures, not DOM, so applyTranslations
   // cannot reach them -- "Gen 1" would stay in the old language until something
   // else happened to rebuild the axis.

@@ -84,6 +84,22 @@ body {
 #main-layout.panel-open {
   grid-template-columns: 220px 1fr 300px;
 }
+/* Nothing in the sidebar does anything to a tree with nobody in it — searching,
+   surname filters, fitting, highlighting, physics all act on an empty set. So
+   the first thing a new arrival sees is the canvas and the empty-state card,
+   not two dozen dead controls. showDataUI() adds and removes the class.
+
+   Collapsed to a zero-width column rather than `display: none` — taking a grid
+   item out of the flow shifts everything after it one column to the left, which
+   handed the canvas's 1fr to the detail panel. */
+#main-layout.no-data { grid-template-columns: 0px 1fr 0px; }
+#main-layout.no-data > #sidebar {
+  padding: 0;
+  border-right: none;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* ── SIDEBAR ── */
 #sidebar {
@@ -499,6 +515,66 @@ body {
 }
 #graph-container { display: none; }
 #graph-3d-container { display: block; }
+
+/* ── EMPTY STATE ──
+   Shown over whichever view is up until the tree has somebody in it. The two
+   things a new arrival can actually do, said once, instead of an empty black
+   rectangle and a sentence in the status bar. */
+#empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #0a0a0a;
+  z-index: 5;
+}
+.empty-card {
+  max-width: 420px;
+  text-align: center;
+  color: #cccccc;
+}
+.empty-icon { font-size: 44px; line-height: 1; margin-bottom: 12px; }
+.empty-card h2 {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+.empty-card p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #9a9a9a;
+}
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.empty-btn {
+  background: #2e2e2e;
+  color: #dddddd;
+  border: 1px solid #484848;
+  border-radius: 5px;
+  padding: 9px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.empty-btn:hover { background: #383838; color: #ffffff; }
+.empty-btn--primary {
+  background: #3a5f8a;
+  border-color: #4a7bb0;
+  color: #ffffff;
+}
+.empty-btn--primary:hover { background: #46709e; }
+.empty-hint {
+  margin-top: 16px;
+  font-size: 11px;
+  color: #6a6a6a;
+}
 
 #graph-svg {
   width: 100%;

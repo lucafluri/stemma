@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { _fullRebuildGraph, _gedcomDateValue, _gedcomDateWidget, _resetGedcomDateWidget, _safeId, escAttr, escHtml, escJs } from './gedcom-io.js';
+import { _fullRebuildGraph, _gedcomDateValue, _gedcomDateWidget, _resetGedcomDateWidget, _safeId, escAttr, escHtml, escJs, showDataUI } from './gedcom-io.js';
 import { _updateCenterPersonBtn } from './graph-data.js';
 import { resetHighlight, updateHLButtons } from './relations.js';
 import { flashNode } from './render-2d.js';
@@ -780,11 +780,9 @@ export function commitIndiEdit() {
       }
     }
   }
-  const hadRemovals = state._removedRelations.length > 0;
   state._removedRelations = [];
 
   // ── Process pending relationships ──
-  const needsRebuild = state._pendingRelations.length > 0 || hadRemovals;
   for (const rel of state._pendingRelations) _applyRelation(state._editingId, rel);
   state._pendingRelations = [];
 
@@ -792,15 +790,10 @@ export function commitIndiEdit() {
   state._editingId = null; state._editingType = null;
 
   state._isNewRecord = false;
-  if (needsRebuild) {
-    document.getElementById('dl-wrap').style.display = 'flex';
-    document.getElementById('center-view-btn').style.display = 'inline-block';
-    document.getElementById('center-view-btn').disabled = false;
-    document.getElementById('center-person-btn').style.display = 'inline-block';
-    document.getElementById('relation-tool-btn').style.display = 'inline-block';
-    document.getElementById('relation-tool-btn').disabled = false;
-    document.getElementById('view-toggle-btn').disabled = false;
-  }
+  // Unconditional, not gated on needsRebuild: saving a first person who has no
+  // relations yet still means the tree is no longer empty, and it used to leave
+  // the export and view buttons hidden until you happened to add a relative.
+  showDataUI();
   _fullRebuildGraph({ warm: true });
   showIndiDetail(id);
 }
