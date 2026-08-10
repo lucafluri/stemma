@@ -29,6 +29,8 @@ export const state = {
   selectedIndiId: null,    // currently shown in detail panel
   hlMode: null,            // null | 'ancestors' | 'descendants' | 'both'
   hlSet: new Set(),       // highlighted node ids
+  _relHighlightActive: false,
+  _relLastPath: null,     // { idA, idB, path, edges } for relation highlight
   _hlAncestorCount: 0,  // individual ancestors (excl. self)
   _hlDescendantCount: 0,  // individual descendants (excl. self)
   surnameColors: new Map(),   // surname -> color string

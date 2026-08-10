@@ -97,6 +97,7 @@ export function applyHighlight() {
 export function resetHighlight() {
   state.hlMode = null;
   state.hlSet  = new Set();
+  state._relHighlightActive = false;
   state._hlAncestorCount   = 0;
   state._hlDescendantCount = 0;
   applyHighlight();
@@ -271,25 +272,90 @@ export function relSelectPerson(slot, id) {
 export function _computeAndShowRelation() {
   const idA = state._relPersonA, idB = state._relPersonB;
   const result = document.getElementById('rel-result');
-  if (!idA || !idB) { result.textContent = ''; return; }
-  if (idA === idB)  { result.textContent = t('relationTool.samePerson'); return; }
+  const commonEl = document.getElementById('rel-common');
+  const hlBtn = document.getElementById('rel-highlight');
+
+  const hideExtras = () => {
+    if (commonEl) commonEl.style.display = 'none';
+    if (hlBtn) hlBtn.style.display = 'none';
+  };
+  const showCommon = (commonId) => {
+    if (!commonEl || !commonId) { commonEl && (commonEl.style.display = 'none'); return; }
+    const p = state.individuals.get(commonId);
+    const text = p ? `${t('relationTool.via')} ${escHtml(_relPersonLabel(commonId))}` : '';
+    commonEl.innerHTML = text;
+    commonEl.style.display = text ? '' : 'none';
+  };
+
+  if (state._relHighlightActive) {
+    resetHighlight();
+    state._relHighlightActive = false;
+  }
+
+  if (!idA || !idB) { result.innerHTML = ''; hideExtras(); return; }
+  if (idA === idB) { result.innerHTML = _relLine('🧑', t('relationTool.samePerson')); hideExtras(); return; }
 
   const indiA = state.individuals.get(idA);
   const indiB = state.individuals.get(idB);
-  if (!indiA || !indiB) { result.textContent = t('relationTool.personNotFound'); return; }
+  if (!indiA || !indiB) { result.innerHTML = _relLine('❓', t('relationTool.personNotFound')); hideExtras(); return; }
 
-  // --- Check spouse ---
-  for (const famId of indiA.fams) {
-    const fam = state.families.get(famId);
-    if (!fam) continue;
-    if (fam.husb === idB || fam.wife === idB) {
-      result.innerHTML = _relLine('💍', t('relationTool.spouse'));
-      return;
+  let icon, label, common = null;
+  const blood = _bloodRelationLabel(idA, idB);
+  if (blood) {
+    icon = blood.icon;
+    label = blood.label;
+    common = blood.common;
+    state._relLastPath = null;
+  } else {
+    const bfs = _bfsRelation(idA, idB);
+    if (bfs) {
+      icon = bfs.icon;
+      label = bfs.label;
+      common = bfs.common;
+      state._relLastPath = { idA, idB, path: bfs.path, edges: bfs.edges };
+    } else {
+      icon = '❓';
+      label = t('relationTool.noConnection');
+      state._relLastPath = null;
     }
   }
 
-  // --- Collect ancestors with generation depth ---
-  // Returns Map<id, number>  (0 = self, 1 = parent, …)
+  result.innerHTML = _relLine(icon, label);
+  showCommon(common);
+
+  if (hlBtn) {
+    hlBtn.style.display = (state._relLastPath || blood) ? '' : 'none';
+  }
+}
+
+export function _relLine(icon, text) {
+  return `<span class="rel-icon">${icon}</span><span class="rel-text">${text}</span>`;
+}
+
+export function _sexIcon(indi) {
+  return indi.sex === 'M' ? '👨' : indi.sex === 'F' ? '👩' : '🧑';
+}
+
+function _nGreatLabel(base, n) {
+  return n > 1 ? t('relationTool.nGreat', { n }) + ' ' + base : base;
+}
+
+export function _bloodRelationLabel(idA, idB) {
+  if (idA === idB) return { label: t('relationTool.samePerson'), common: idA, icon: '🧑' };
+
+  const indiA = state.individuals.get(idA);
+  const indiB = state.individuals.get(idB);
+  if (!indiA || !indiB) return { label: t('relationTool.personNotFound'), common: null, icon: '❓' };
+
+  // Spouse
+  for (const famId of indiA.fams) {
+    const fam = state.families.get(famId);
+    if (fam && (fam.husb === idB || fam.wife === idB)) {
+      return { label: t('relationTool.spouse'), common: null, icon: '💍' };
+    }
+  }
+
+  // Returns Map<id, number> (0 = self, 1 = parent, ...)
   function ancestors(startId) {
     const map = new Map([[startId, 0]]);
     const queue = [[startId, 0]];
@@ -314,19 +380,17 @@ export function _computeAndShowRelation() {
   const ancA = ancestors(idA);
   const ancB = ancestors(idB);
 
-  // --- Direct descendant / ancestor ---
+  // Direct ancestor / descendant
   if (ancA.has(idB)) {
     const g = ancA.get(idB);
-    result.innerHTML = _relLine(_sexIcon(indiB), _ancestorLabel(g, indiB.sex));
-    return;
+    return { label: _ancestorLabel(g, indiB.sex), common: idB, icon: _sexIcon(indiB) };
   }
   if (ancB.has(idA)) {
     const g = ancB.get(idA);
-    result.innerHTML = _relLine(_sexIcon(indiA), _descendantLabel(g, indiA.sex));
-    return;
+    return { label: _descendantLabel(g, indiB.sex), common: idA, icon: _sexIcon(indiB) };
   }
 
-  // --- Find lowest common ancestor(s) ---
+  // Lowest common ancestor(s)
   let bestGenA = Infinity, bestGenB = Infinity, lcas = [];
   for (const [id, gA] of ancA) {
     if (!ancB.has(id)) continue;
@@ -339,16 +403,10 @@ export function _computeAndShowRelation() {
     }
   }
 
-  if (!lcas.length) {
-    // Fall back to BFS path for step/in-law relations
-    result.innerHTML = _relLine('🔗', _bfsPathLabel(idA, idB));
-    return;
-  }
+  if (!lcas.length) return null;
 
-  // --- Classify via LCA ---
-  // siblings: genA=1, genB=1
+  // Siblings
   if (bestGenA === 1 && bestGenB === 1) {
-    // full vs half sibling: check if they share both parents
     const parentsA = new Set();
     for (const famId of indiA.famc) {
       const fam = state.families.get(famId);
@@ -361,58 +419,61 @@ export function _computeAndShowRelation() {
     }
     const shared = [...parentsA].filter(p => parentsB.has(p)).length;
     const label = shared >= 2 ? _siblingLabel(indiB.sex) : _halfSiblingLabel(indiB.sex);
-    result.innerHTML = _relLine(_sexIcon(indiB), label);
-    return;
+    return { label, common: lcas[0], icon: _sexIcon(indiB) };
   }
 
-  // aunt/uncle: genA=1, genB=2 (B is grandparent of A's parent)
-  if (bestGenA === 1 && bestGenB === 2) {
-    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? t('relationTool.uncle') : indiB.sex === 'F' ? t('relationTool.aunt') : t('relationTool.uncleAunt'));
-    return;
-  }
-  if (bestGenA === 2 && bestGenB === 1) {
-    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? t('relationTool.nephew') : indiA.sex === 'F' ? t('relationTool.niece') : t('relationTool.nephewNiece'));
-    return;
-  }
-
-  // great-aunt/uncle
-  if (bestGenA === 1 && bestGenB === 3) {
-    result.innerHTML = _relLine(_sexIcon(indiB), indiB.sex === 'M' ? t('relationTool.greatUncle') : indiB.sex === 'F' ? t('relationTool.greatAunt') : t('relationTool.greatUncleAunt'));
-    return;
-  }
-  if (bestGenA === 3 && bestGenB === 1) {
-    result.innerHTML = _relLine(_sexIcon(indiA), indiA.sex === 'M' ? t('relationTool.greatNephew') : indiA.sex === 'F' ? t('relationTool.greatNiece') : t('relationTool.greatNephewNiece'));
-    return;
+  // B is A's uncle / aunt (B is a child of the LCA, A is further down)
+  if (bestGenB === 1 && bestGenA >= 2) {
+    const n = bestGenA - 2;
+    let base = indiB.sex === 'M' ? t('relationTool.uncle')
+             : indiB.sex === 'F' ? t('relationTool.aunt')
+             : t('relationTool.uncleAunt');
+    if (n > 0) {
+      const greatBase = indiB.sex === 'M' ? t('relationTool.greatUncle')
+                      : indiB.sex === 'F' ? t('relationTool.greatAunt')
+                      : t('relationTool.greatUncleAunt');
+      base = _nGreatLabel(greatBase, n);
+    }
+    return { label: base, common: lcas[0], icon: _sexIcon(indiB) };
   }
 
-  // cousins: both ≥ 2 from LCA
-  const degree  = Math.min(bestGenA, bestGenB) - 1;   // 1st cousin = degree 1
+  // B is A's nephew / niece (A is a child of the LCA, B is further down)
+  if (bestGenA === 1 && bestGenB >= 2) {
+    const n = bestGenB - 2;
+    let base = indiB.sex === 'M' ? t('relationTool.nephew')
+             : indiB.sex === 'F' ? t('relationTool.niece')
+             : t('relationTool.nephewNiece');
+    if (n > 0) {
+      const greatBase = indiB.sex === 'M' ? t('relationTool.greatNephew')
+                      : indiB.sex === 'F' ? t('relationTool.greatNiece')
+                      : t('relationTool.greatNephewNiece');
+      base = _nGreatLabel(greatBase, n);
+    }
+    return { label: base, common: lcas[0], icon: _sexIcon(indiB) };
+  }
+
+  // Cousins
+  const degree = Math.min(bestGenA, bestGenB) - 1;
   const removed = Math.abs(bestGenA - bestGenB);
-  result.innerHTML = _relLine('👥', _cousinLabel(degree, removed, indiB.sex));
-}
-
-export function _relLine(icon, text) {
-  return `<span class="rel-icon">${icon}</span><span class="rel-text">${text}</span>`;
-}
-
-export function _sexIcon(indi) {
-  return indi.sex === 'M' ? '👨' : indi.sex === 'F' ? '👩' : '🧑';
+  return { label: _cousinLabel(degree, removed, indiB.sex), common: lcas[0], icon: '👥' };
 }
 
 export function _ancestorLabel(gen, sex) {
   const m = sex === 'M', f = sex === 'F';
   if (gen === 1) return m ? t('relationTool.father') : f ? t('relationTool.mother') : t('relationTool.parent');
   if (gen === 2) return m ? t('relationTool.grandfather') : f ? t('relationTool.grandmother') : t('relationTool.grandparent');
-  const prefix = t('relationTool.greatPrefix').repeat(gen - 2);
-  return prefix + (m ? t('relationTool.greatGrandfather') : f ? t('relationTool.greatGrandmother') : t('relationTool.greatGrandparent'));
+  const n = gen - 2;
+  const base = m ? t('relationTool.greatGrandfather') : f ? t('relationTool.greatGrandmother') : t('relationTool.greatGrandparent');
+  return _nGreatLabel(base, n);
 }
 
 export function _descendantLabel(gen, sex) {
   const m = sex === 'M', f = sex === 'F';
   if (gen === 1) return m ? t('relationTool.son') : f ? t('relationTool.daughter') : t('relationTool.child');
   if (gen === 2) return m ? t('relationTool.grandson') : f ? t('relationTool.granddaughter') : t('relationTool.grandchild');
-  const prefix = t('relationTool.greatPrefix').repeat(gen - 2);
-  return prefix + (m ? t('relationTool.greatGrandson') : f ? t('relationTool.greatGranddaughter') : t('relationTool.greatGrandchild'));
+  const n = gen - 2;
+  const base = m ? t('relationTool.greatGrandson') : f ? t('relationTool.greatGranddaughter') : t('relationTool.greatGrandchild');
+  return _nGreatLabel(base, n);
 }
 
 export function _siblingLabel(sex) {
@@ -430,8 +491,92 @@ export function _cousinLabel(degree, removed, sex) {
   return removed > 0 ? t('relationTool.cousinRemoved', { base, removed }) : base;
 }
 
-export function _bfsPathLabel(idA, idB) {
-  // Build full undirected adjacency including spouses
+function _spouseTerm(indi) {
+  if (indi.sex === 'F') return t('relationTool.wife');
+  if (indi.sex === 'M') return t('relationTool.husband');
+  return t('relationTool.spouse');
+}
+
+function _familyBetween(aId, bId, type) {
+  const a = state.individuals.get(aId);
+  if (!a) return null;
+  if (type === 'spouse') {
+    for (const famId of a.fams) {
+      const fam = state.families.get(famId);
+      if (fam && (fam.husb === bId || fam.wife === bId)) return famId;
+    }
+  } else if (type === 'parent') {
+    for (const famId of a.famc) {
+      const fam = state.families.get(famId);
+      if (fam && (fam.husb === bId || fam.wife === bId)) return famId;
+    }
+  } else if (type === 'child') {
+    for (const famId of a.fams) {
+      const fam = state.families.get(famId);
+      if (fam && fam.chil.includes(bId)) return famId;
+    }
+  }
+  return null;
+}
+
+function _pathRelationLabel(idA, idB, path, edges) {
+  const steps = edges.length;
+  if (steps === 0) return t('relationTool.samePerson');
+  if (steps === 1 && edges[0] === 'spouse') return t('relationTool.spouse');
+
+  const indiB = state.individuals.get(idB);
+
+  // B is the spouse of someone on A's side
+  if (edges[steps - 1] === 'spouse') {
+    const pId = path[steps - 1];
+    const blood = _bloodRelationLabel(idA, pId);
+    const rel = (blood && blood.label && blood.label !== t('relationTool.personNotFound') && blood.label !== t('relationTool.noConnection') && blood.label !== t('relationTool.samePerson'))
+      ? blood.label
+      : _relPersonLabel(pId);
+    return `${_spouseTerm(indiB)} ${t('relationTool.of')} ${rel}`;
+  }
+
+  // B is a relative of A's spouse
+  if (edges[0] === 'spouse') {
+    const sId = path[1];
+    const blood = _bloodRelationLabel(sId, idB);
+    if (blood && blood.label && blood.label !== t('relationTool.personNotFound') && blood.label !== t('relationTool.noConnection') && blood.label !== t('relationTool.samePerson')) {
+      return `${blood.label} ${t('relationTool.ofSpouse')}`;
+    }
+  }
+
+  // A spouse edge somewhere in the middle
+  const spouseIdx = edges.indexOf('spouse');
+  if (spouseIdx !== -1) {
+    const pivotId = path[spouseIdx];
+    const afterSpouseId = path[spouseIdx + 1];
+    const blood = _bloodRelationLabel(afterSpouseId, idB);
+    const rel = (blood && blood.label && blood.label !== t('relationTool.personNotFound') && blood.label !== t('relationTool.noConnection') && blood.label !== t('relationTool.samePerson'))
+      ? blood.label
+      : _relPersonLabel(afterSpouseId);
+    return `${rel} ${t('relationTool.of')} ${_relPersonLabel(pivotId)}`;
+  }
+
+  return t('relationTool.stepsAway', { steps });
+}
+
+function _pathCommon(path, edges) {
+  const lastSpouseIdx = edges.lastIndexOf('spouse');
+  if (lastSpouseIdx !== -1) {
+    return lastSpouseIdx === edges.length - 1
+      ? path[lastSpouseIdx]
+      : path[lastSpouseIdx + 1];
+  }
+  // Pure blood path: the "peak" where we stop going up and start down
+  let peakIdx = 0;
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] === 'parent') peakIdx = i + 1;
+    else break;
+  }
+  return path[peakIdx] ?? null;
+}
+
+function _bfsRelation(idA, idB) {
   const adj = new Map();
   const edge = (a, b, type) => {
     if (!adj.has(a)) adj.set(a, []);
@@ -451,24 +596,70 @@ export function _bfsPathLabel(idA, idB) {
       if (sp) edge(id, sp, 'spouse');
     }
   }
+
   const visited = new Map([[idA, null]]);
   const queue = [idA];
   while (queue.length) {
     const cur = queue.shift();
     if (cur === idB) {
-      // Reconstruct path
       const path = [];
+      const edges = [];
       let c = cur;
-      while (c) { path.unshift(c); c = visited.get(c)?.from; }
-      const steps = path.length - 1;
-      return steps > 0 ? t('relationTool.stepsAway', { steps }) : t('relationTool.connected');
+      while (c) {
+        path.unshift(c);
+        const info = visited.get(c);
+        if (info) {
+          edges.unshift(info.type);
+          c = info.from;
+        } else {
+          c = null;
+        }
+      }
+      const label = _pathRelationLabel(idA, idB, path, edges);
+      const common = _pathCommon(path, edges);
+      const indiB = state.individuals.get(idB);
+      return { path, edges, label, common, icon: _sexIcon(indiB) };
     }
     for (const nb of (adj.get(cur) || [])) {
       if (!visited.has(nb.id)) {
-        visited.set(nb.id, { from: cur });
+        visited.set(nb.id, { from: cur, type: nb.type });
         queue.push(nb.id);
       }
     }
   }
-  return t('relationTool.noConnection');
+  return null;
+}
+
+export function _bfsPathLabel(idA, idB) {
+  const rel = _bfsRelation(idA, idB);
+  return rel ? rel.label : t('relationTool.noConnection');
+}
+
+export function relHighlightPath() {
+  const idA = state._relPersonA, idB = state._relPersonB;
+  if (!idA || !idB) return;
+
+  if (state._relHighlightActive) {
+    resetHighlight();
+    state._relHighlightActive = false;
+    return;
+  }
+
+  let pathData = state._relLastPath;
+  if (!pathData || pathData.idA !== idA || pathData.idB !== idB) {
+    const bfs = _bfsRelation(idA, idB);
+    if (!bfs) return;
+    pathData = { idA, idB, path: bfs.path, edges: bfs.edges };
+  }
+
+  const set = new Set(pathData.path);
+  for (let i = 0; i < pathData.edges.length; i++) {
+    const famId = _familyBetween(pathData.path[i], pathData.path[i + 1], pathData.edges[i]);
+    if (famId) set.add(famId);
+  }
+
+  state.hlMode = null;
+  state.hlSet = set;
+  state._relHighlightActive = true;
+  applyHighlight();
 }
