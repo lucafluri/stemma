@@ -120,7 +120,16 @@ export function updateViewToggleUI() {
 // eats a third of the width of a phone held upright — the graph ends up framed
 // into the middle of the screen with margins nobody asked for.
 export function fit3D(ms = 800) {
-  state.graph3d?.zoomToFit(ms, _isMobile() ? 20 : 60);
+  if (!state.graph3d) return;
+  // A single node has no extent to fit, and zoomToFit answers that by putting
+  // the camera practically inside the sphere — which is exactly what someone
+  // starting a tree from scratch would see as their first frame. Back off to a
+  // fixed, sensible distance until there is a second person to frame against.
+  if (state.nodes.length === 1) {
+    state.graph3d.cameraPosition({ x: 0, y: 0, z: 260 }, { x: 0, y: 0, z: 0 }, ms);
+    return;
+  }
+  state.graph3d.zoomToFit(ms, _isMobile() ? 20 : 60);
 }
 
 export function resize3D() {

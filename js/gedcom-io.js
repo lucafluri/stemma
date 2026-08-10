@@ -4,6 +4,7 @@ import { buildSurnameColorMap, buildSurnameList } from './colors.js';
 import { DECEASED_AGE_THRESHOLD, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
 import { applyFilter, autoSettle, buildAndRunSimulation, initSVG, renderGraph } from './render-2d.js';
+import { refreshStats } from './stats.js';
 import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, initGraph3D, update3DNames, updateViewToggleUI } from './render-3d.js';
 
 export function _setDirty(v) {
@@ -80,12 +81,21 @@ export function _fullRebuildGraph(opts = {}) {
   perf.start('[rebuild] simulation');      buildAndRunSimulation({ warm });         perf.end('[rebuild] simulation');
   // For 3D: push data directly instead of calling applyFilter() which would
   // run buildAndRunSimulation() a second time (doubles the sim cost).
-  if (state.currentView === '3d' && state.graph3d) {
+  if (state.currentView === '3d') {
     perf.start('[rebuild] 3d data push');
-    _push3DData();
-    apply3DPhysics();
-    build3DTimeline();
-    update3DNames();
+    if (!state.graph3d) {
+      // Nothing has built the scene yet. That happens when the tree was created
+      // from scratch rather than loaded from a file — the file loader is what
+      // used to call this, so building the very first person on an empty page
+      // in the 3D view drew nothing at all, for good: the person existed and
+      // was listed in the sidebar, and the canvas stayed black.
+      initGraph3D();
+    } else {
+      _push3DData();
+      apply3DPhysics();
+      build3DTimeline();
+      update3DNames();
+    }
     perf.end('[rebuild] 3d data push');
   }
   // renderGraph() rebuilds all DOM/3D nodes from scratch, dropping highlight
@@ -95,6 +105,7 @@ export function _fullRebuildGraph(opts = {}) {
   if (state.currentView === '3d' && state.selectedIndiId) _setOrbitTarget3D(state.selectedIndiId);
   updateFocusUI();
   showDataUI();   // deleting the last record has to put the empty state back
+  refreshStats(); // ...and an open statistics panel must not keep the old figures
   perf.end('[rebuild] total');
 }
 
@@ -188,6 +199,7 @@ export function _loadDatasetFile(file, handle = null) {
       state._firstLoad = true;
       buildAndRunSimulation();
       showDataUI();
+      refreshStats();
       window._gedcomFilename = file.name;
       _setDirty(false);
       updateFileButtons();

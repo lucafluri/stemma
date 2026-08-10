@@ -93,6 +93,11 @@ body {
    item out of the flow shifts everything after it one column to the left, which
    handed the canvas's 1fr to the detail panel. */
 #main-layout.no-data { grid-template-columns: 0px 1fr 0px; }
+/* ...but the detail panel still has to open, because "add the first person" is
+   one of the two things the empty state offers, and that form lives in it.
+   Without this the panel opened into a zero-width column: the form was built
+   and focusable but nothing was on screen, so the button looked broken. */
+#main-layout.no-data.panel-open { grid-template-columns: 0px 1fr 300px; }
 #main-layout.no-data > #sidebar {
   padding: 0;
   border-right: none;
@@ -3065,6 +3070,12 @@ body.relation-picking * { cursor: crosshair !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The count is the point of the row, so a long name has to eat into its own
+   ellipsis rather than push the number off the edge. `.stat-hint` carries
+   `overflow: hidden`, which lets a flex item shrink below its content width —
+   the ranks past fifth are exactly where the long place names live, so this
+   showed up the moment the lists went to ten. */
+.stat-list li .stat-hint { flex: none; max-width: none; }
 .stat-empty { font-size: 11px; color: #6a6a6a; padding: 6px 0; }
 /* Sex split as one bar, so the shape of the tree reads before the numbers do. */
 .stat-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 4px 0 8px; }

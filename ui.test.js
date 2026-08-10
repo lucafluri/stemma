@@ -107,6 +107,22 @@ const shown = id => {
     assert(shown('physics-panel'));
   });
 
+  console.log('\nstarting a tree from scratch');
+
+  await test('the first person created on an empty page gets a 3D scene built for them', async () => {
+    // Only the file loader used to call initGraph3D(), so a tree begun by hand
+    // in the 3D view had nowhere to be drawn: the person existed and was listed
+    // in the sidebar, and the canvas stayed black however long you waited.
+    const { _fullRebuildGraph } = await import(url('gedcom-io.js'));
+    state.individuals.clear();
+    state.families.clear();
+    state.currentView = '3d';
+    state.graph3d = null;
+    state.individuals.set(...person('@I1@'));
+    _fullRebuildGraph({ warm: true });
+    assert.ok(state.graph3d, 'the 3D graph should have been created on the first rebuild');
+  });
+
   console.log('\ncontrols that match their state');
 
   await test('the 3D sliders open on the values actually being rendered', async () => {

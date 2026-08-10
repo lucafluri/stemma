@@ -318,6 +318,10 @@ export function closeDetailPanel() {
   resetHighlight();
   if (state.currentView === '3d') _setOrbitTarget3D(null);
   _hideReopenPill();
+  // Cancelling the very first person discards the stub, which leaves the tree
+  // empty again — the empty state has to come back rather than leaving a blank
+  // canvas with no way on from it.
+  showDataUI();
 }
 
 export function minimizeDetailPanel() {
@@ -1485,6 +1489,11 @@ export function addNewPerson() {
   state._isNewRecord  = true;
   state._editingId    = id;
   state._editingType  = 'INDI';
+  // Filling in the first person while the canvas still insists there is no tree
+  // yet reads as a contradiction. closeDetailPanel() puts it back if this is
+  // cancelled; committing hides it for good.
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.style.display = 'none';
   document.getElementById('detail-name').textContent = t('detail.newPerson');
   document.getElementById('detail-edit-bar').style.display  = 'none';
   document.getElementById('detail-buttons').style.display   = 'none';

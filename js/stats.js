@@ -1,5 +1,6 @@
 import { state } from './state.js';
-import { escHtml } from './gedcom-io.js';
+import { familyNamesOf } from './colors.js';
+import { escAttr, escHtml } from './gedcom-io.js';
 import { computeGenerationDepths } from './graph-data.js';
 
 // Figures about the tree as a whole.
@@ -73,10 +74,11 @@ export function computeStats() {
         childDeaths++;
       }
     }
-    if ((p.surn || '').trim()) {
-      const s = p.surn.trim();
-      surnames.set(s, (surnames.get(s) || 0) + 1);
-    }
+    // Both the surname carried and the maiden name, from the same definition
+    // the sidebar legend uses — counting only `surn` here made this list
+    // disagree with that one about the size of every family a woman married
+    // into or out of.
+    for (const s of familyNamesOf(p)) surnames.set(s, (surnames.get(s) || 0) + 1);
     // First given name only: "Hans Peter" and "Hans" are the same name being
     // handed down, which is the thing worth seeing.
     const g = (p.givn || '').trim().split(/\s+/)[0];
@@ -203,10 +205,14 @@ export function computeStats() {
       occupation: withOccupation / people.length,
     },
 
+    // Names and places are the lists worth reading down: five entries only ever
+    // showed the handful of families and villages anyone already knew about.
+    // Occupations and causes of death stay short — they are free text, so their
+    // tail is mostly one-offs and spelling variants rather than a ranking.
     top: {
-      surnames:   topN(surnames, 5),
-      givenNames: topN(givenNames, 5),
-      places:     topN(places, 5),
+      surnames:   topN(surnames, 10),
+      givenNames: topN(givenNames, 10),
+      places:     topN(places, 10),
       occupations: topN(occupations, 3),
       causes:     topN(causes, 3),
     },
@@ -227,8 +233,11 @@ function statRow(label, value, hint) {
 
 function statList(label, entries) {
   if (!entries.length) return '';
+  // The name carries its own title: a 220px sidebar clips "Tettnang,
+  // Bodenseekreis, Tübingen…" to the point of being unreadable, and hovering is
+  // the only way back to it.
   const items = entries.map(([name, n]) =>
-    `<li><span>${escHtml(name)}</span><span class="stat-hint">${n}</span></li>`).join('');
+    `<li><span title="${escAttr(name)}">${escHtml(name)}</span><span class="stat-hint">${n}</span></li>`).join('');
   return `<div class="stat-group"><div class="stat-group-title">${escHtml(label)}</div><ul class="stat-list">${items}</ul></div>`;
 }
 
@@ -298,10 +307,16 @@ export function renderStats() {
   ].filter(Boolean).join('');
 }
 
-// Recomputing walks the whole tree, so it is done when the panel is actually
-// opened rather than on every edit — and again on open after that, so it is
-// never showing figures from before the last change.
-export function toggleStatsPanel(evt) {
-  const panel = document.getElementById('stats-panel');
-  if (panel?.open) renderStats();
+// Recomputing walks the whole tree, so it is only ever done for a panel that is
+// actually open — but it must be done for *every* change to the tree, not only
+// when the panel is opened. Rendering on open alone is what let the figures sit
+// there going stale while the sidebar's family-name list, which is rebuilt on
+// every change, moved on without them: the same family then had two different
+// sizes on screen at once, a few centimetres apart.
+export function refreshStats() {
+  if (document.getElementById('stats-panel')?.open) renderStats();
+}
+
+export function toggleStatsPanel() {
+  refreshStats();
 }

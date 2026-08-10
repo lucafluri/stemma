@@ -67,12 +67,27 @@ export const PALETTE = [
   '#d37295','#a0cbe8','#fabfd2','#8cd17d','#b6992d'
 ];
 
+// Every family name a person belongs to: the surname they carry, and the one
+// they were born with where the record keeps both. A married woman belongs to
+// two families, and that is the whole reason the maiden name is recorded — so
+// she is counted under each.
+//
+// This is the single definition of "which family names is this person part of".
+// The sidebar legend, the surname filter and the statistics panel all read it,
+// because they used to each answer the question their own way: the legend
+// counted both names, the statistics counted only the married surname, and the
+// two lists then disagreed about how big a family was. Trimming is part of the
+// definition too — " Fluri" and "Fluri" are one family, and used to be two rows.
+export function familyNamesOf(indi) {
+  return new Set([indi.surn, indi.maidenName].map(s => (s || '').trim()).filter(Boolean));
+}
+
 export function buildSurnameColorMap() {
   // 1. Count surname frequencies
   const counts = new Map();
   let noSurnCount = 0;
   for (const [, indi] of state.individuals) {
-    const names = new Set([indi.surn, indi.maidenName].filter(Boolean));
+    const names = familyNamesOf(indi);
     if (!names.size) noSurnCount++;
     for (const name of names) counts.set(name, (counts.get(name) || 0) + 1);
   }
@@ -179,7 +194,11 @@ export function buildSurnameColorMap() {
 }
 
 export function indiColor(indi) {
-  if (state.colorBySurname && indi.surn) return surnameColor(indi.surn);
+  // Trimmed to match the keys the colour map is built under, or a name with a
+  // stray space falls through to a hash colour that its own legend row does not
+  // use.
+  const surn = (indi.surn || '').trim();
+  if (state.colorBySurname && surn) return surnameColor(surn);
   if (indi.sex === 'M') return state.nodeColors.male;
   if (indi.sex === 'F') return state.nodeColors.female;
   return state.nodeColors.unknown;
@@ -204,7 +223,7 @@ export function contrastTextColor(hex) {
 }
 
 export function hasEnabledFamilyName(indi) {
-  const names = new Set([indi.surn, indi.maidenName].filter(Boolean));
+  const names = familyNamesOf(indi);
   if (!names.size) return state.surnameEnabled.get(null) !== false;
   return [...names].some(name => state.surnameEnabled.get(name) !== false);
 }

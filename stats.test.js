@@ -186,6 +186,37 @@ const p = (id, o = {}) => Object.assign({
     assert.deepStrictEqual(s.top.surnames[0], ['Fluri', 2]);
   });
 
+  await test('a married woman counts towards the family she was born into as well', async () => {
+    // She is a Meier by birth and a Fluri by marriage, and belongs to both
+    // lines — which is the entire reason the maiden name is recorded.
+    const s = load(new Map([
+      ['a', p('a', { surn: 'Fluri' })],
+      ['b', p('b', { surn: 'Fluri', maidenName: 'Meier' })],
+    ]));
+    assert.deepStrictEqual(s.top.surnames, [['Fluri', 2], ['Meier', 1]]);
+  });
+
+  await test('the statistics and the sidebar legend report the same family sizes', async () => {
+    // They each used to count their own way — the legend both names, the
+    // statistics only the married surname — so the same family had two
+    // different sizes depending on which list you read.
+    const { buildSurnameColorMap } = await import(url('colors.js'));
+    const people = new Map([
+      ['a', p('a', { surn: 'Fluri' })],
+      ['b', p('b', { surn: 'Fluri', maidenName: 'Meier' })],
+      ['c', p('c', { surn: ' Fluri ' })],          // stray whitespace is the same family
+      ['d', p('d', { surn: 'Meier' })],
+      ['e', p('e', { surn: '' })],                  // no family name at all
+    ]);
+    const s = load(people);
+    state.individuals = people;
+    const legend = new Map(buildSurnameColorMap().filter(([name]) => name !== null));
+    for (const [name, n] of s.top.surnames) {
+      assert.strictEqual(legend.get(name), n, `${name}: legend and statistics disagree`);
+    }
+    assert.strictEqual(legend.get('Fluri'), 3, 'the untrimmed name belongs to the same row');
+  });
+
   await test('ties in a top list are ordered predictably, not by chance', async () => {
     const s = load(new Map([
       ['a', p('a', { surn: 'Zwahlen' })], ['b', p('b', { surn: 'Aebi' })],
@@ -220,6 +251,44 @@ const p = (id, o = {}) => Object.assign({
     assert.ok(html.includes('Fluri'), 'the top surname should appear');
     assert.ok(/\b70\b/.test(html), 'the lifespan should appear');
     assert.ok(html.includes('stat-bar'), 'the sex split bar should be drawn');
+  });
+
+  await test('an open panel follows the tree instead of freezing on what it opened with', async () => {
+    // This is what made the statistics disagree with the sidebar's family-name
+    // list: that list is rebuilt on every change, while the panel was rendered
+    // only when it was opened — so after any edit the same family had two
+    // different sizes on screen at once.
+    const { refreshStats } = await import(url('stats.js'));
+    const panel = global.document.getElementById('stats-panel');
+
+    load(new Map([['a', p('a', { surn: 'Fluri' })]]));
+    panel.open = true;
+    refreshStats();
+    assert.ok(body().textContent.includes('Fluri'), 'precondition: the panel is showing');
+
+    load(new Map([['a', p('a', { surn: 'Fluri' })], ['b', p('b', { surn: 'Meier' })]]));
+    refreshStats();
+    assert.ok(body().textContent.includes('Meier'), 'a person added while it is open must appear');
+
+    // ...and a closed panel still costs nothing to leave alone.
+    panel.open = false;
+    const before = body().innerHTML;
+    load(new Map([['c', p('c', { surn: 'Zwahlen' })]]));
+    refreshStats();
+    assert.strictEqual(body().innerHTML, before, 'a closed panel should not be re-rendered');
+  });
+
+  await test('a long name keeps its count and stays readable on hover', async () => {
+    // Ranks six to ten are where the long place names live, and a name long
+    // enough to be ellipsised used to squeeze the number off the right edge.
+    const place = 'Tettnang, Bodenseekreis, Tübingen, Baden-Württemberg, DE';
+    load(new Map([['a', p('a', { birth: { date: '', plac: place } })]]));
+    renderStats();
+    const li = [...body().querySelectorAll('.stat-list li')]
+      .find(el => el.textContent.includes('Tettnang'));
+    assert.ok(li, 'the place should be listed');
+    assert.strictEqual(li.children[0].getAttribute('title'), place, 'the full name belongs in the title');
+    assert.strictEqual(li.children[1].textContent, '1', 'the count must survive next to it');
   });
 
   await test('an empty tree says so instead of rendering nothing', async () => {
