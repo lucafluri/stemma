@@ -161,7 +161,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Fifteen suites, no framework — plain `node` scripts with `assert`:
+Sixteen suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -180,6 +180,7 @@ Fifteen suites, no framework — plain `node` scripts with `assert`:
 | `relations.test.js` | the relation tool's path-based labels, including in-laws reached through a spouse edge |
 | `import-ui.test.js` | the review screen itself — the diff table, the filter chips and their counts |
 | `session.test.js` | what the browser keeps between visits: where the API key may live, and the unsaved-work warning |
+| `wiring.test.js` | that every inline `onclick` in `index.html` resolves to a real function |
 
 `test-setup.js` builds a jsdom window from `index.html` with stubs for the
 libraries that arrive via `<script>` (d3, THREE, ForceGraph3D), which is enough
