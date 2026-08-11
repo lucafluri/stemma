@@ -61,7 +61,7 @@ const shown = id => {
     assert(!shown('empty-state'), 'empty state should be gone');
     assert(shown('dl-wrap'), 'export should be offered');
     assert(!document.getElementById('view-toggle-btn').disabled);
-    assert(!document.getElementById('relation-tool-btn').disabled);
+    assert(shown('tools-wrap'), 'the whole-tree tools should be reachable');
   });
 
   await test('deleting the last person brings the empty state back', async () => {

@@ -3,6 +3,7 @@ import * as GedcomIoMod from './gedcom-io.js';
 import * as GraphDataMod from './graph-data.js';
 import * as ImportMod from './import.js';
 import * as PanelsMod from './panels.js';
+import * as PlacesMod from './places.js';
 import * as RelationsMod from './relations.js';
 import * as Render2dMod from './render-2d.js';
 import * as Render3dMod from './render-3d.js';
@@ -17,6 +18,22 @@ import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle
 import { build3DTimeline, toggleView, updateViewToggleUI } from './render-3d.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
+
+// The topbar "Tools" menu. Same shape as the export split button's dropdown:
+// a one-shot outside-click listener closes it, so nothing has to be torn down
+// when it goes away by being used.
+export function toggleToolsMenu(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('tools-dropdown');
+  const open = dd.classList.toggle('open');
+  document.getElementById('tools-btn')?.setAttribute('aria-expanded', String(open));
+  if (open) document.addEventListener('click', closeToolsMenu, { once: true });
+}
+
+export function closeToolsMenu() {
+  document.getElementById('tools-dropdown')?.classList.remove('open');
+  document.getElementById('tools-btn')?.setAttribute('aria-expanded', 'false');
+}
 
 export function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('sidebar-open');
@@ -396,9 +413,11 @@ function _onLanguageChanged() {
 // runs this after the *whole* graph's synchronous evaluation has settled,
 // regardless of which module happened to be the entry point.
 queueMicrotask(() => Object.assign(window, ColorsMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod,
-  RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
+  PlacesMod, RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
     state,
     toggleSidebar,
+    toggleToolsMenu,
+    closeToolsMenu,
     _initPanelSwipe,
     _initTouchDragGuard,
     wasTouchDrag,

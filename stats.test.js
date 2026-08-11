@@ -178,12 +178,42 @@ const p = (id, o = {}) => Object.assign({
     // "Hans Peter" and "Hans" are the same name being handed down, which is the
     // thing the list is for.
     const s = load(new Map([
-      ['a', p('a', { givn: 'Hans', surn: 'Fluri' })],
-      ['b', p('b', { givn: 'Hans Peter', surn: 'Fluri' })],
-      ['c', p('c', { givn: 'Anna', surn: 'Meier' })],
+      ['a', p('a', { givn: 'Hans', surn: 'Fluri', sex: 'M' })],
+      ['b', p('b', { givn: 'Hans Peter', surn: 'Fluri', sex: 'M' })],
+      ['c', p('c', { givn: 'Anna', surn: 'Meier', sex: 'F' })],
     ]));
-    assert.deepStrictEqual(s.top.givenNames[0], ['Hans', 2]);
+    assert.deepStrictEqual(s.top.givenM[0], ['Hans', 2]);
     assert.deepStrictEqual(s.top.surnames[0], ['Fluri', 2]);
+  });
+
+  await test('the given-name ranking is kept per sex, ten of each', async () => {
+    // Pooled, a tree with more men than women shows a list of men's names with
+    // the odd woman's name in it, and neither pattern is readable.
+    const s = load(new Map([
+      ['a', p('a', { givn: 'Hans',  sex: 'M' })],
+      ['b', p('b', { givn: 'Hans',  sex: 'M' })],
+      ['c', p('c', { givn: 'Hans',  sex: 'M' })],
+      ['d', p('d', { givn: 'Anna',  sex: 'F' })],
+      ['e', p('e', { givn: 'Anna',  sex: 'F' })],
+      ['f', p('f', { givn: 'Marie', sex: 'F' })],
+    ]));
+    assert.deepStrictEqual(s.top.givenM, [['Hans', 3]]);
+    assert.deepStrictEqual(s.top.givenF, [['Anna', 2], ['Marie', 1]]);
+    assert.deepStrictEqual(s.top.givenU, []);
+  });
+
+  await test('a name is only counted under the sex actually recorded', async () => {
+    // Andrea is a man's name in Italy and a woman's in Germany — pooling them
+    // would report a count that belongs to neither list.
+    const s = load(new Map([
+      ['a', p('a', { givn: 'Andrea', sex: 'M' })],
+      ['b', p('b', { givn: 'Andrea', sex: 'F' })],
+      ['c', p('c', { givn: 'Andrea' })],
+    ]));
+    assert.deepStrictEqual(s.top.givenM, [['Andrea', 1]]);
+    assert.deepStrictEqual(s.top.givenF, [['Andrea', 1]]);
+    assert.deepStrictEqual(s.top.givenU, [['Andrea', 1]],
+      'people with no recorded sex still have to appear somewhere');
   });
 
   await test('a married woman counts towards the family she was born into as well', async () => {

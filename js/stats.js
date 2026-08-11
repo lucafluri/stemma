@@ -35,7 +35,12 @@ export function computeStats() {
   if (!people.length) return null;
 
   const sex = { M: 0, F: 0, U: 0 };
-  const surnames = new Map(), givenNames = new Map(), places = new Map(), occupations = new Map(), causes = new Map();
+  const surnames = new Map(), places = new Map(), occupations = new Map(), causes = new Map();
+  // Given names are tallied per sex rather than into one list. Pooled, the
+  // ranking is really two rankings interleaved by how many men and women the
+  // tree happens to hold, and the naming pattern within each — which is what
+  // anyone reads this list for — is not visible in it.
+  const givenBySex = { M: new Map(), F: new Map(), U: new Map() };
   const allDeathAges = [];         // every recorded death age, for child mortality
   const lifespans = [];            // recorded death ages of 5 or older
   let childDeaths = 0;
@@ -43,7 +48,8 @@ export function computeStats() {
   let oldest = null;
 
   for (const p of people) {
-    sex[p.sex === 'M' || p.sex === 'F' ? p.sex : 'U']++;
+    const sexKey = p.sex === 'M' || p.sex === 'F' ? p.sex : 'U';
+    sex[sexKey]++;
     if (p.deceased) deceased++;
 
     const b = p.birthYear || year(p.birth?.date);
@@ -82,7 +88,10 @@ export function computeStats() {
     // First given name only: "Hans Peter" and "Hans" are the same name being
     // handed down, which is the thing worth seeing.
     const g = (p.givn || '').trim().split(/\s+/)[0];
-    if (g) givenNames.set(g, (givenNames.get(g) || 0) + 1);
+    if (g) {
+      const m = givenBySex[sexKey];
+      m.set(g, (m.get(g) || 0) + 1);
+    }
     for (const pl of [p.birth?.plac, p.death?.plac]) {
       const v = (pl || '').trim();
       if (v) places.set(v, (places.get(v) || 0) + 1);
@@ -211,7 +220,13 @@ export function computeStats() {
     // tail is mostly one-offs and spelling variants rather than a ranking.
     top: {
       surnames:   topN(surnames, 10),
-      givenNames: topN(givenNames, 10),
+      // Ten each, not ten between them.
+      givenM:     topN(givenBySex.M, 10),
+      givenF:     topN(givenBySex.F, 10),
+      // Only worth a list when the tree actually has people of unrecorded sex;
+      // leaving their names out entirely would quietly shrink the totals a
+      // reader is comparing against the sex breakdown above.
+      givenU:     topN(givenBySex.U, 10),
       places:     topN(places, 10),
       occupations: topN(occupations, 3),
       causes:     topN(causes, 3),
@@ -300,7 +315,9 @@ export function renderStats() {
 
     `<div class="stat-sep"></div>`,
     statList(t('stats.topSurnames'), s.top.surnames),
-    statList(t('stats.topGiven'), s.top.givenNames),
+    statList(t('stats.topGivenM'), s.top.givenM),
+    statList(t('stats.topGivenF'), s.top.givenF),
+    statList(t('stats.topGivenU'), s.top.givenU),
     statList(t('stats.topPlaces'), s.top.places),
     statList(t('stats.topOccupations'), s.top.occupations),
     statList(t('stats.topCauses'), s.top.causes),

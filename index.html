@@ -30,8 +30,16 @@
   </div>
   <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span data-i18n="topbar.center">Zentrieren</span></button>
   <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span data-i18n="topbar.centerPerson">Person</span></button>
-  <button id="relation-tool-btn" onclick="openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen" disabled>&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
-  <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language" style="margin-left:auto;background:#161616;color:#e0e0e0;border:1px solid #2e2e2e;border-radius:4px;padding:2px 6px;font-size:12px">
+  <!-- Things you reach for occasionally, rather than while looking at the
+       tree. One slot in the bar instead of one per tool. -->
+  <div id="tools-wrap" style="display:none">
+    <button id="tools-btn" onclick="toggleToolsMenu(event)" data-i18n-title="topbar.toolsTitle" title="Werkzeuge" aria-haspopup="true" aria-expanded="false">&#x1F527; <span data-i18n="topbar.tools">Werkzeuge</span> <span class="tools-caret">&#x25BE;</span></button>
+    <div id="tools-dropdown">
+      <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
+      <button onclick="closeToolsMenu();openPlacesTool()" data-i18n-title="topbar.placesTitle" title="Ortsnamen vereinheitlichen">&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></button>
+    </div>
+  </div>
+  <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language">
     <option value="de" data-i18n="language.de">Deutsch</option>
     <option value="en" data-i18n="language.en">English</option>
   </select>
@@ -277,7 +285,7 @@
     </details>
 
     <details id="physics-panel">
-      <summary data-i18n="physics.title">Physik <i class="phys-arrow">&#9654;</i></summary>
+      <summary data-i18n="physics.title">Physik</summary>
       <div class="phys-group">
 
         <div class="phys-section-label" data-i18n="physics.bondDistance">Bindungsabstand</div>
@@ -494,6 +502,51 @@
   <button id="rel-highlight" class="rel-hl-btn" type="button" onclick="relHighlightPath()" data-i18n="relationTool.highlightPath" style="display:none">Highlight path</button>
 </div>
 <div id="tooltip"></div>
+
+<!-- ── Place-name cleanup ──────────────────────────────────────────────── -->
+<div id="places-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="places.title" aria-label="Ortsnamen">
+  <div id="places-backdrop" onclick="closePlacesTool()"></div>
+  <div id="places-panel">
+    <div id="places-header">
+      <h2>&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></h2>
+      <button id="places-close-btn" onclick="closePlacesTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+    <p class="pl-hint" data-i18n="places.hint">Gruppen von Schreibweisen, die denselben Ort meinen. Oben steht die Schreibweise, die übernommen wird — sie lässt sich frei ändern. Nur angehakte Varianten werden umbenannt.</p>
+    <div id="places-summary"></div>
+    <div id="places-bulk">
+      <input type="text" id="places-filter" oninput="filterPlacesTool()" autocomplete="off"
+             data-i18n-placeholder="places.filter" placeholder="Ort suchen…">
+      <button class="pl-bulk-btn" onclick="setAllPlaceVariants(true)" data-i18n="places.tickAll">Alle anhaken</button>
+      <button class="pl-bulk-btn" onclick="setAllPlaceVariants(false)" data-i18n="places.untickAll">Alle abwählen</button>
+    </div>
+    <div id="places-groups"></div>
+
+    <!-- Every place in the file, grouped or not. Its own scroll area rather
+         than a box inside the group list: nested scrollers left it a few rows
+         tall and unusable on the tree it matters most for. -->
+    <div id="places-all-section">
+      <div class="pl-others-head">
+        <span class="pl-others-title" data-i18n="places.allPlaces">Alle Orte</span>
+        <span class="pl-count" id="places-all-count"></span>
+      </div>
+      <p class="pl-hint" data-i18n="places.allPlacesHint">Beliebige Orte ankreuzen und zusammenführen — auch solche, die schon in einer Gruppe stehen. Ein Ort aus einer Gruppe nimmt seine Gruppe mit.</p>
+      <div id="places-all"></div>
+      <div class="pl-merge-row">
+        <select id="places-merge-target" class="sidebar-select" data-i18n-aria="places.mergeInto" aria-label="Ziel der Zusammenführung"></select>
+        <button class="pl-bulk-btn" onclick="mergeSelectedPlaces()" data-i18n="places.mergeSelected">Ausgewählte zusammenführen</button>
+      </div>
+    </div>
+
+    <label id="places-tidy-row" data-i18n-title="places.tidyTitle" title="Mehrfache Leerzeichen entfernen und Kommas einheitlich als „Ort, Land“ schreiben — bei allen Orten.">
+      <input type="checkbox" id="places-tidy" checked>
+      <span data-i18n="places.tidy">Abstände und Kommas überall vereinheitlichen</span>
+    </label>
+    <div class="import-step-footer">
+      <button class="import-action-btn import-action-btn--primary" onclick="applyPlacesTool()">&#x2713; <span data-i18n="places.apply">Änderungen anwenden</span></button>
+      <button class="import-action-btn" onclick="closePlacesTool()" data-i18n="import.cancel">Abbrechen</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Unified Import Modal ────────────────────────────────────────────── -->
 <div id="import-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Import">

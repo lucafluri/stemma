@@ -280,11 +280,13 @@ export function showDataUI() {
   if (menuBtn) menuBtn.style.display = has ? '' : 'none';   // it would open an empty drawer
 
   document.getElementById('dl-wrap').style.display = has ? 'flex' : 'none';
-  for (const id of ['center-view-btn', 'center-person-btn', 'relation-tool-btn']) {
+  for (const id of ['center-view-btn', 'center-person-btn']) {
     document.getElementById(id).style.display = has ? 'inline-block' : 'none';
   }
   document.getElementById('center-view-btn').disabled = !has;
-  document.getElementById('relation-tool-btn').disabled = !has;
+  // Both tools behind it act on the whole tree, so the menu is all-or-nothing.
+  // Hiding the wrapper takes an open dropdown with it — it is a child.
+  document.getElementById('tools-wrap').style.display = has ? 'flex' : 'none';
   document.getElementById('view-toggle-btn').disabled = !has;
 }
 

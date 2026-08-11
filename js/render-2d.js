@@ -294,7 +294,7 @@ export function renderGraph() {
     .attr('height', NODE_BOX_H + 8)
     .attr('rx', NODE_BOX_RX + 3)
     .attr('fill', 'none')
-    .attr('stroke', '#f2f2f2')
+    // Colour lives in styles.css (.focus-ring) so it follows --accent.
     .attr('stroke-width', 1.5)
     .attr('pointer-events', 'none');
 
@@ -967,8 +967,11 @@ export const EXPORT_MAX_PIXELS = 40e6;  // browsers refuse to rasterise much bey
 
 export const EXPORT_MAX_EDGE = 16384;   // ...and refuse any single dimension past this
 
+// The exported SVG is standalone — it cannot reach styles.css, so anything
+// styled by class there has to be repeated here.
 export const EXPORT_SVG_CSS = `
   .node-label { text-anchor: middle; dominant-baseline: auto; }
+  .focus-ring { stroke: #7aa2f7; }
 `;
 
 export function _exportScale(w, h) {
