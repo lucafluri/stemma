@@ -101,7 +101,7 @@ export function showIndiDetail(id) {
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
-  document.getElementById('detail-buttons').style.display = 'flex';
+  document.getElementById('detail-buttons').style.display = '';
   openPanel();
   updateHLButtons();
   flashNode(id);
@@ -293,7 +293,7 @@ export function showFamDetail(id) {
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
-  document.getElementById('detail-buttons').style.display = 'flex';
+  document.getElementById('detail-buttons').style.display = '';
   openPanel();
   updateHLButtons();
 }

@@ -793,12 +793,20 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
   background: var(--c-2);
   border-left: 1px solid var(--c-4);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   padding: 12px;
   font-size: 13px;
   min-width: 0;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+#detail-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 
 #detail-panel h2 {
@@ -843,29 +851,38 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
 .clickable-name:hover { text-decoration: underline; }
 
 
-/* Two columns: five short verbs stacked full-width read as a menu, not as the
-   quick toggles they are, and pushed the rest of the panel off screen. */
+/* Two rows: three highlight-mode toggles on top, focus/clear actions below.
+   This keeps all five buttons visible without scrolling and gives each row
+   enough width for its label. */
 #detail-buttons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 5px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--c-4);
+  flex-shrink: 0;
 }
-#detail-buttons > #btn-clear-hl,
+#detail-buttons > #btn-ancestors,
+#detail-buttons > #btn-descendants,
+#detail-buttons > #btn-both { grid-column: span 2; }
+#detail-buttons > #btn-focus-2d,
+#detail-buttons > #btn-clear-hl { grid-column: span 3; }
 #detail-buttons > #hl-count-info { grid-column: 1 / -1; }
 
 .highlight-btn {
   background: var(--c-3);
   color: var(--c-10);
   border: 1px solid var(--c-5);
-  padding: 7px 10px;
+  padding: 7px 6px;
   cursor: pointer;
   border-radius: var(--r-sm);
   font-size: 12px;
   text-align: center;
   width: 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 .highlight-btn:hover:not(:disabled) { background: var(--c-5); color: var(--c-12); border-color: var(--c-7); }
 .highlight-btn.active { background: var(--accent); color: var(--c-1); border-color: var(--accent); }
@@ -1764,15 +1781,25 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
     height: 20px;
   }
 
-  /* Highlight buttons: side-by-side on mobile to save space */
+  /* Highlight buttons: two rows on mobile */
   #detail-buttons {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 5px;
+    flex-shrink: 0;
   }
 
-  #btn-clear-hl {
-    grid-column: 1 / -1;
+  #detail-buttons > #btn-ancestors,
+  #detail-buttons > #btn-descendants,
+  #detail-buttons > #btn-both { grid-column: span 2; }
+  #detail-buttons > #btn-focus-2d,
+  #detail-buttons > #btn-clear-hl { grid-column: span 3; }
+  #detail-buttons > #hl-count-info { grid-column: 1 / -1; }
+
+  .highlight-btn {
+    min-width: 0;
+    overflow-wrap: break-word;
+    white-space: normal;
   }
 
   /* Clickable names — bigger touch targets */
