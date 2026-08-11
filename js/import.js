@@ -1192,6 +1192,11 @@ export function importReplaceDataset() {
   _loadDatasetFile(file, handle);
 }
 
+// Left on the CDN, unlike the other bundled libraries: Tesseract pulls its own
+// worker script, wasm binary and language data files at runtime — vendoring
+// just the entry script would not make OCR import work offline, only move
+// where one of several remote fetches comes from. It is also loaded on demand
+// (OCR import only), not on every page load.
 export function _loadTesseract() {
   if (window.Tesseract) return Promise.resolve(window.Tesseract);
   if (state._tesseractLoading) return state._tesseractLoading;

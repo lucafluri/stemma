@@ -140,11 +140,18 @@ document.addEventListener('keydown', e => {
     case 'c': case 'C': centerView();             break;
     case 'p': case 'P': centerOnPerson();         break;
     case 'e': case 'E': startEdit();              break;
-    case 'r': case 'R': resetHighlight();         break;
+    case 'r':
+      resetHighlight();
+      break;
+    case 'R':
+      // Shift+R reheats the simulation; plain R (or caps lock) still clears
+      // the highlight — '+' used to double as reheat, fighting its own zoom.
+      if (e.shiftKey && state.currentView === '2d' && state.simulation) reheatSimulation();
+      else resetHighlight();
+      break;
     case 'v': case 'V': toggleView();             break;
     case 'g': case 'G': if (state.selectedIndiId) focusOnPerson(state.selectedIndiId); break;
     case 'Escape':      closeDetailPanel();       break;
-    case '+': case '=': if (state.currentView === '2d' && state.simulation) reheatSimulation(); break;
   }
 });
 
@@ -163,6 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // updateFocusUI() below, since they depend on the loaded file.
   const tlt = document.getElementById('tree-layout-toggle');
   if (tlt) tlt.checked = state.treeLayout;
+  const sft = document.getElementById('spouse-family-toggle');
+  if (sft) sft.checked = state.includeSpouseFamily;
   updateViewToggleUI();
   updateFocusUI();
   showDataUI();   // sets the first-run state; the autosave restore above may already have replaced it
@@ -195,12 +204,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
-
-  // Familien-Knoten toggle
-  document.getElementById('fam-nodes-toggle').addEventListener('change', function () {
-    state.showFamNodes = this.checked;
-    applyFilter();
-  });
 
   // Color-by-surname toggle
   const colorBySurnameToggle = document.getElementById('color-by-surname');

@@ -39,15 +39,26 @@ export function _tryRestoreAutosave() {
   try { data = JSON.parse(raw); } catch (e) { localStorage.removeItem('gedcomAutosave'); return; }
   const when = new Date(data.ts).toLocaleString(currentLang === 'de' ? 'de-CH' : 'en-US');
   const label = data.filename || t('autosave.unnamed');
-  if (confirm(t('autosave.found', { name: label, date: when }))) {
+
+  const bar = document.getElementById('autosave-bar');
+  if (!bar) return;   // headless/test environment with no DOM shell
+  document.getElementById('autosave-bar-text').textContent = t('autosave.found', { name: label, date: when });
+  bar.style.display = 'flex';
+
+  const restoreBtn = document.getElementById('autosave-restore-btn');
+  const discardBtn = document.getElementById('autosave-discard-btn');
+  restoreBtn.onclick = () => {
+    bar.style.display = 'none';
     // Autosave content is always GEDCOM — force .ged so a .json/.yaml original
     // filename doesn't route it into the JSON/YAML importer
     const fname = (data.filename || t('autosave.restoredName')).replace(/\.(ged|json|ya?ml)$/i, '') + '.ged';
     _loadDatasetFile(new File([data.ged], fname));
     _autosave(); // loading marks the session clean, but this data is still unsaved to disk
-  } else {
+  };
+  discardBtn.onclick = () => {
+    bar.style.display = 'none';
     localStorage.removeItem('gedcomAutosave');
-  }
+  };
 }
 
 export function parseGEDCOM(raw) {
@@ -128,6 +139,10 @@ export function _autoMarkDeceasedByAge() {
   // Computing the estimates walks the whole tree, so only pay for it if somebody
   // actually lacks a year.
   let est = null;
+  // Rebuilt on every call (i.e. every rebuild) rather than accumulated, so a
+  // person who gains a recorded year, or is edited back off the deceased list,
+  // drops out of the save notice instead of lingering there forever.
+  state._autoDeceasedEstimated = [];
   for (const [id, indi] of state.individuals) {
     if (indi.deceased) continue;
     if (indi.birthYear) {
@@ -136,8 +151,23 @@ export function _autoMarkDeceasedByAge() {
     }
     est ??= computeEstimatedYears();
     const guess = est.get(id);
-    if (guess && guess <= cutoffYear) indi.deceased = true;
+    if (guess && guess <= cutoffYear) {
+      indi.deceased = true;
+      // This one is written to disk on save from a guessed year, not a
+      // recorded one — worth telling the user, not just inferring quietly.
+      state._autoDeceasedEstimated.push({ id, name: indi.displayName || indi.name || id, year: guess });
+    }
   }
+}
+
+// A one-line addition to the save/export status text naming anyone whose
+// `1 DEAT Y` is about to be written from a guessed birth year rather than a
+// recorded one — see the comment on _autoMarkDeceasedByAge above.
+export function _estimatedDeceasedNote() {
+  const list = state._autoDeceasedEstimated;
+  if (!list || !list.length) return '';
+  const names = list.map(p => `${p.name} (~${p.year})`).join(', ');
+  return ' ' + t('topbar.estimatedDeceasedNote', { count: list.length, names });
 }
 
 // `handle` is the File System Access handle the file came from, when it came
@@ -341,7 +371,7 @@ export async function saveToFile() {
     await _saveRecentHandle(handle);
     _setDirty(false);
     updateFileButtons();
-    document.getElementById('status').textContent = t('topbar.savedTo', { name });
+    document.getElementById('status').textContent = t('topbar.savedTo', { name }) + _estimatedDeceasedNote();
   } catch (err) {
     if (err.name === 'AbortError') return;
     document.getElementById('status').textContent = t('errors.saveError', { msg: err.message });
@@ -485,16 +515,22 @@ export function downloadGEDCOM() {
   const text = serializeGEDCOM();
   _downloadBlob('﻿' + text, _baseFilename() + '_edited.ged', 'text/plain;charset=utf-8');
   _setDirty(false);
+  const note = _estimatedDeceasedNote();
+  if (note) document.getElementById('status').textContent = note.trim();
 }
 
 export function downloadJSON() {
   const text = GEDCOMModule.exportJSON(state.individuals, state.families);
   _downloadBlob(text, _baseFilename() + '.famtree.json', 'application/json;charset=utf-8');
+  const note = _estimatedDeceasedNote();
+  if (note) document.getElementById('status').textContent = note.trim();
 }
 
 export function downloadYAML() {
   const text = GEDCOMModule.exportYAML(state.individuals, state.families);
   _downloadBlob(text, _baseFilename() + '.famtree.yaml', 'text/yaml;charset=utf-8');
+  const note = _estimatedDeceasedNote();
+  if (note) document.getElementById('status').textContent = note.trim();
 }
 
 // The people the chart is currently drawing, as standalone individuals/families

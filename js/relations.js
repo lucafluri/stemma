@@ -545,16 +545,19 @@ function _pathRelationLabel(idA, idB, path, edges) {
     }
   }
 
-  // A spouse edge somewhere in the middle
+  // A spouse edge somewhere in the middle: B is a blood relative of whoever
+  // married into A's side at that point, not of A. "rel" is that relative's
+  // blood relation to B, so the "of" has to name the spouse it was computed
+  // from — naming the node before the spouse edge instead said "sister of
+  // A" for A's own sister-in-law, which reads as a blood sibling of A.
   const spouseIdx = edges.indexOf('spouse');
   if (spouseIdx !== -1) {
-    const pivotId = path[spouseIdx];
     const afterSpouseId = path[spouseIdx + 1];
     const blood = _bloodRelationLabel(afterSpouseId, idB);
     const rel = (blood && blood.label && blood.label !== t('relationTool.personNotFound') && blood.label !== t('relationTool.noConnection') && blood.label !== t('relationTool.samePerson'))
       ? blood.label
       : _relPersonLabel(afterSpouseId);
-    return `${rel} ${t('relationTool.of')} ${_relPersonLabel(pivotId)}`;
+    return `${rel} ${t('relationTool.of')} ${_relPersonLabel(afterSpouseId)}`;
   }
 
   return t('relationTool.stepsAway', { steps });

@@ -581,6 +581,47 @@ body {
   color: #6a6a6a;
 }
 
+/* ── AUTOSAVE BAR ──
+   Sits over whichever view is up, same as #empty-state. Replaces a blocking
+   confirm() on load: it names the session and lets it be dismissed instead of
+   forcing an answer before the graph is drawn. */
+#autosave-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 10px 14px;
+  background: #232323;
+  border: 1px solid #484848;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: #dddddd;
+}
+#autosave-bar-text { white-space: normal; }
+.autosave-bar-btn {
+  background: #2e2e2e;
+  color: #dddddd;
+  border: 1px solid #484848;
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.autosave-bar-btn:hover { background: #383838; color: #ffffff; }
+.autosave-bar-btn--primary {
+  background: #3a5f8a;
+  border-color: #4a7bb0;
+  color: #ffffff;
+}
+.autosave-bar-btn--primary:hover { background: #46709e; }
+
 #graph-svg {
   width: 100%;
   height: 100%;

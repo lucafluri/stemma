@@ -5,10 +5,13 @@ A browser-based family tree viewer and editor for GEDCOM files. Loads a `.ged`
 force-directed graph in 2D, and as an orbitable graph in 3D — and lets you edit
 people, families and relationships and save the result back out.
 
-No build step and nothing to install. It is a static page; the only runtime
-dependencies are four `<script>` tags pointing at CDNs — d3, three.js,
-OrbitControls and 3d-force-graph — plus Tesseract, fetched on demand if you use
-OCR.
+No build step and nothing to install. It is a static page; the four runtime
+dependencies — d3, three.js, OrbitControls and 3d-force-graph — are vendored
+into `vendor/` and loaded as plain `<script>` tags, so the app starts offline
+and does not depend on a CDN being up or trustworthy. The one exception is
+Tesseract, fetched from a CDN on demand if you use OCR import — it pulls its
+own worker and wasm files at runtime, so vendoring just the entry script would
+not have made that path work offline either.
 
 **Everything stays in your browser.** The file you open is never uploaded. The
 one exception is the optional AI import, which sends the text or image you give
@@ -38,7 +41,8 @@ Deployed automatically to GitHub Pages from `master`
 
 ## What it does
 
-**Two views.** `V` switches between them.
+**Two views.** `V` switches between them. A fresh visit opens in 3D; from the
+second visit on, the view you last used is remembered.
 
 - **2D** — a classical family tree chart (generations on rows, marriage markers
   between couples, sibling bars bracketing children), or a force-directed graph
@@ -58,6 +62,12 @@ person and their relatives out to a chosen distance — direct line, siblings,
 and cousins to a configurable degree. The panel shows how many people are on
 screen and how many are hidden. `+N` chips mark where a branch was cut; clicking
 one opens the next generation.
+
+**Auto-deceased.** Anyone born (or, lacking a recorded date, *estimated* from
+relatives' years) more than 110 years ago is marked deceased. On the next save
+that writes `1 DEAT Y` into the file — including for people whose year was only
+a guess. When that happens, the status line after saving/exporting names who and
+their estimated year, so it is never a silent edit.
 
 **Editing.** Click a person or family to open the detail panel; add parents,
 spouses and children from the buttons there. Name, place and occupation fields
@@ -106,8 +116,8 @@ downloading a copy.
 | `G` | focus the chart on the selected person |
 | `E` | edit the selected record |
 | `R` | clear ancestor/descendant highlighting |
+| `Shift+R` | reheat the 2D simulation |
 | `A` / `N` | show / hide all surnames |
-| `+` | reheat the 2D simulation |
 | `0` `+` `-` | reset zoom, zoom in, zoom out |
 | `Esc` | close the detail panel |
 
@@ -151,7 +161,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Twelve suites, no framework — plain `node` scripts with `assert`:
+Thirteen suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -167,6 +177,7 @@ Twelve suites, no framework — plain `node` scripts with `assert`:
 | `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
 | `ui.test.js` | which controls are offered, and when — the empty state, and hiding controls that would act on nothing |
 | `workfile.test.js` | reopening and saving back over the same file |
+| `relations.test.js` | the relation tool's path-based labels, including in-laws reached through a spouse edge |
 
 `test-setup.js` builds a jsdom window from `index.html` with stubs for the
 libraries that arrive via `<script>` (d3, THREE, ForceGraph3D), which is enough

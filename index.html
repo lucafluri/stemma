@@ -61,24 +61,38 @@
         <input type="checkbox" id="tree-layout-toggle" checked onchange="setTreeLayout(this.checked)">
         <span data-i18n="focus.tree">Stammbaum-Diagramm</span>
       </label>
-      <div class="focus-limit-row">
-        <span data-i18n="focus.limit">Max. Personen</span>
-        <span id="focus-limit-val">120</span>
+      <!-- Both act on the focus walk (computeFocusSet) — with nobody focused
+           there is nothing for them to limit, so they only make sense once a
+           person is picked. -->
+      <div id="focus-limit-group">
+        <div class="focus-limit-row">
+          <span data-i18n="focus.limit">Max. Personen</span>
+          <span id="focus-limit-val">120</span>
+        </div>
+        <input type="range" id="focus-limit-slider" min="10" max="600" step="10" value="120"
+               oninput="setFocusLimit(this.value)">
       </div>
-      <input type="range" id="focus-limit-slider" min="10" max="600" step="10" value="120"
-             oninput="setFocusLimit(this.value)">
-      <div class="focus-limit-row" data-i18n-title="focus.cousinsTitle"
-           title="Wie weit das Diagramm Seitenlinien verfolgt.">
-        <span data-i18n="focus.cousins">Cousins/Cousinen</span>
-        <span id="cousin-degree-val">1. Grades</span>
+      <!-- Tree layout only: the focus walk includes a spouse's own box but not
+           their parents/siblings, unless this is on. -->
+      <label class="focus-layout-toggle" id="spouse-family-row" data-i18n-title="focus.spouseFamilyTitle"
+             title="Auch die Eltern und Geschwister der eingeheirateten Partner anzeigen.">
+        <input type="checkbox" id="spouse-family-toggle" onchange="setIncludeSpouseFamily(this.checked)">
+        <span data-i18n="focus.spouseFamily">Familie der Partner einbeziehen</span>
+      </label>
+      <div id="cousin-degree-group">
+        <div class="focus-limit-row" data-i18n-title="focus.cousinsTitle"
+             title="Wie weit das Diagramm Seitenlinien verfolgt.">
+          <span data-i18n="focus.cousins">Cousins/Cousinen</span>
+          <span id="cousin-degree-val">1. Grades</span>
+        </div>
+        <input type="range" id="cousin-degree-slider" min="0" max="4" step="1" value="1"
+               list="cousin-degree-ticks" oninput="setCousinDegree(this.value)">
+        <datalist id="cousin-degree-ticks">
+          <option value="0" label="0"></option><option value="1" label="1"></option>
+          <option value="2" label="2"></option><option value="3" label="3"></option>
+          <option value="4" label="4"></option>
+        </datalist>
       </div>
-      <input type="range" id="cousin-degree-slider" min="0" max="4" step="1" value="1"
-             list="cousin-degree-ticks" oninput="setCousinDegree(this.value)">
-      <datalist id="cousin-degree-ticks">
-        <option value="0" label="0"></option><option value="1" label="1"></option>
-        <option value="2" label="2"></option><option value="3" label="3"></option>
-        <option value="4" label="4"></option>
-      </datalist>
       <div class="focus-limit-row" id="gen-range-row" data-i18n-title="focus.genRangeTitle"
            title="Nur diese Generationen zeigen — 0 ist die jüngste." style="display:none">
         <span data-i18n="focus.genRange">Generationen</span>
@@ -112,10 +126,6 @@
     <div id="surname-list"></div>
     <div id="surname-shown-count" style="display:none"></div>
     <div id="sidebar-buttons">
-      <label class="sidebar-toggle" style="display:none">
-        <input type="checkbox" id="fam-nodes-toggle" checked>
-        <span data-i18n="sidebar.famNodes">Familien-Knoten anzeigen</span>
-      </label>
       <div class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px;display:block">
         <div style="font-size:11px;color:#888;margin-bottom:3px" data-i18n="sidebar.stratify3d">Stapeln nach (3D)</div>
         <select id="stratify-3d-select" class="sidebar-select"
@@ -417,6 +427,15 @@
         <div class="empty-hint" data-i18n="empty.hint">Alles bleibt im Browser — es wird nichts hochgeladen.</div>
       </div>
     </div>
+
+    <!-- Replaces a blocking confirm() on load: naming the unsaved session and
+         letting it be dismissed instead of forcing an answer before anything
+         is drawn. Hidden unless _tryRestoreAutosave() finds something. -->
+    <div id="autosave-bar" style="display:none">
+      <span id="autosave-bar-text"></span>
+      <button id="autosave-restore-btn" class="autosave-bar-btn autosave-bar-btn--primary" data-i18n="autosave.restore">Wiederherstellen</button>
+      <button id="autosave-discard-btn" class="autosave-bar-btn" data-i18n="autosave.discard">Verwerfen</button>
+    </div>
   </div>
 
   <div id="detail-panel">
@@ -577,10 +596,13 @@
 
 
 <script src="config.local.js" onerror=""></script>
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.137.5/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.137.5/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.5/dist/3d-force-graph.min.js"></script>
+<!-- Vendored rather than loaded from a CDN: the app needs to start offline,
+     and a compromised CDN would otherwise run arbitrary code against your
+     genealogy data (and your API key, if AI import is in use). -->
+<script src="vendor/d3.v7.min.js"></script>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+<script src="vendor/3d-force-graph.min.js"></script>
 <script src="gedcom.js"></script>
 <script src="i18n.js"></script>
 <script type="module" src="js/main.js"></script>

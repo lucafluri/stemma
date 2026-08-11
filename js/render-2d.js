@@ -118,6 +118,8 @@ export function initSVG() {
       // Otherwise allow normal transform (including zooming away from limits)
       return transform;
     })
+    .on('start', () => { _userPanning = true; })
+    .on('end', () => { _userPanning = false; _lastUserPanEnd = Date.now(); })
     .on('zoom', evt => {
       // Store current transform before applying
       _lastTransform = evt.transform;
@@ -164,10 +166,19 @@ export function initSVG() {
 // keyboard handlers on the document, and "+" zoomed twice as far per press.
 // Module scope runs once, whatever happens to the SVG afterwards.
 
+// Whether a drag/zoom gesture is in flight, and when the last one ended — set
+// from the zoomBehavior 'start'/'end' handlers in initSVG(). The auto-recenter
+// below must not fight a pan the user is still mid-gesture on, or immediately
+// yank the view back the moment they let go.
+let _userPanning = false;
+let _lastUserPanEnd = 0;
+
 // If the whole graph has drifted off screen there is no way back by dragging —
-// you cannot aim at something you cannot see. Bring it back.
+// you cannot aim at something you cannot see. Bring it back — but not while the
+// user is panning on purpose, and not in the couple of seconds right after.
 const _recenterTimer = setInterval(() => {
   if (!state.svgSel || !state.nodes.length) return;
+  if (_userPanning || Date.now() - _lastUserPanEnd < 2000) return;
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl?.clientWidth  || 800;
   const H = svgEl?.clientHeight || 600;

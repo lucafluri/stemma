@@ -86,7 +86,12 @@ export function isFamVisible(id) {
   if (!fam) return true;
   const members = [fam.husb, fam.wife, ...fam.chil].filter(Boolean);
   if (!members.length) return true;
-  return members.some(pid => isIndiVisible(pid));
+  // A family with only one member on record (no spouse, no children) still
+  // earns its box on that one person alone. Above that, a generation band or
+  // surname filter cutting it to a single survivor left a diamond connected
+  // to nobody — a family needs two kept people to still be joining anything.
+  const need = Math.min(2, members.length);
+  return members.filter(pid => isIndiVisible(pid)).length >= need;
 }
 
 export function isNodeVisible(n) {
@@ -172,7 +177,9 @@ export function computeLineageSet() {
 
   // One more hop: the spouse of every blood relative kept above gets a box
   // right next to them — but their own parents/siblings are not walked, so
-  // this never grows the chart past "married in, one column wide."
+  // this never grows the chart past "married in, one column wide" — unless
+  // the reader asked for the in-laws too.
+  const spouses = [];
   for (const id of [...people]) {
     for (const famId of (state.individuals.get(id)?.fams || [])) {
       const fam = state.families.get(famId);
@@ -182,6 +189,33 @@ export function computeLineageSet() {
       people.add(sp);
       fams.add(famId);
       state._lineageGen.set(sp, state._lineageGen.get(id));
+      spouses.push(sp);
+    }
+  }
+
+  // Immediate family of the spouse: their parents and siblings, one
+  // generation up and back down — not their grandparents or cousins, that
+  // would just be the whole lineage walk again from a second root.
+  if (state.includeSpouseFamily) {
+    for (const sp of spouses) {
+      for (const famId of (state.individuals.get(sp)?.famc || [])) {
+        const fam = state.families.get(famId);
+        if (!fam) continue;
+        let famUsed = false;
+        for (const p of [fam.husb, fam.wife]) {
+          if (!p || !state.individuals.has(p) || people.has(p) || !room()) continue;
+          people.add(p);
+          state._lineageGen.set(p, state._lineageGen.get(sp) - 1);
+          famUsed = true;
+        }
+        for (const cid of fam.chil) {
+          if (cid === sp || !state.individuals.has(cid) || people.has(cid) || !room()) continue;
+          people.add(cid);
+          state._lineageGen.set(cid, state._lineageGen.get(sp));
+          famUsed = true;
+        }
+        if (famUsed) fams.add(famId);
+      }
     }
   }
 
@@ -644,37 +678,10 @@ export function computeActiveData() {
   const focusIds = computeFocusSet();
   if (focusIds) for (const id of [...visIds]) if (!focusIds.has(id)) visIds.delete(id);
 
-  if (state.showFamNodes) {
-    // Bipartite mode: INDI + FAM nodes
-    state.nodes = state.allNodes.filter(n => visIds.has(n.id));
-    state.links = state.allLinks
-      .filter(l => visIds.has(l._src) && visIds.has(l._tgt))
-      .map(l => ({ source: l._src, target: l._tgt, ltype: l.ltype }));
-  } else {
-    // Direct mode: only INDI nodes, direct spouse + parent-child links
-    state.nodes = state.allNodes.filter(n => n.type === 'INDI' && visIds.has(n.id));
-    const indiIds = new Set(state.nodes.map(n => n.id));
-    state.links = [];
-    const spousePairs = new Set();   // prevent duplicate spouse links for remarried couples
-    for (const [, fam] of state.families) {
-      const hasHusb = fam.husb && indiIds.has(fam.husb);
-      const hasWife = fam.wife && indiIds.has(fam.wife);
-      // Spouse line (deduplicated)
-      if (hasHusb && hasWife) {
-        const key = [fam.husb, fam.wife].sort().join('|');
-        if (!spousePairs.has(key)) {
-          spousePairs.add(key);
-          state.links.push({ source: fam.husb, target: fam.wife, ltype: 'spouse' });
-        }
-      }
-      // Parent → child lines, shaded by parent sex
-      for (const cid of fam.chil) {
-        if (!indiIds.has(cid)) continue;
-        if (hasHusb) state.links.push({ source: fam.husb, target: cid, ltype: 'father' });
-        if (hasWife) state.links.push({ source: fam.wife, target: cid, ltype: 'mother' });
-      }
-    }
-  }
+  state.nodes = state.allNodes.filter(n => visIds.has(n.id));
+  state.links = state.allLinks
+    .filter(l => visIds.has(l._src) && visIds.has(l._tgt))
+    .map(l => ({ source: l._src, target: l._tgt, ltype: l.ltype }));
 
   updateSurnameShownCount();
 }
@@ -746,6 +753,12 @@ export function updateCousinDegreeUI() {
       tick.appendChild(o);
     }
   }
+}
+
+export function setIncludeSpouseFamily(on) {
+  state.includeSpouseFamily = !!on;
+  localStorage.setItem('includeSpouseFamily', state.includeSpouseFamily ? '1' : '0');
+  if (state.focusRootId) _refocus();
 }
 
 export function maxFocusLimit() {
@@ -852,9 +865,20 @@ export function updateFocusUI() {
   const nameEl   = document.getElementById('focus-current-name');
   const hiddenEl = document.getElementById('focus-hidden-info');
   const clearBtn = document.getElementById('focus-clear-btn');
+  // Both sliders act on the focus walk — with nobody focused there is nothing
+  // for them to limit.
+  const limitGroup  = document.getElementById('focus-limit-group');
+  const cousinGroup = document.getElementById('cousin-degree-group');
+  const spouseFamRow = document.getElementById('spouse-family-row');
+  const focused = !!(state.focusRootId && state.individuals.has(state.focusRootId));
+  if (limitGroup)  limitGroup.style.display  = focused ? '' : 'none';
+  if (cousinGroup) cousinGroup.style.display = focused ? '' : 'none';
+  // Only computeLineageSet() (tree layout) draws a spouse's parents/siblings
+  // any differently — the force layout already walks that far unconditionally.
+  if (spouseFamRow) spouseFamRow.style.display = (focused && state.treeLayout) ? '' : 'none';
   if (!nameEl) return;
 
-  if (state.focusRootId && state.individuals.has(state.focusRootId)) {
+  if (focused) {
     nameEl.textContent = state.individuals.get(state.focusRootId).displayName || state.focusRootId;
     nameEl.classList.remove('focus-none');
     if (clearBtn) clearBtn.style.display = '';

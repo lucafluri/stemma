@@ -58,6 +58,10 @@ export const state = {
   cousinDegree: parseInt(localStorage.getItem('cousinDegree')),
   genRange: null,   // { min, max } | null
   treeLayout: localStorage.getItem('treeLayout') !== '0',
+  // Tree-layout focus normally stops at the focus person's blood relatives —
+  // a spouse gets a box but their own parents/siblings are not walked. This
+  // pulls those in too, one hop, when the reader wants the in-laws on screen.
+  includeSpouseFamily: localStorage.getItem('includeSpouseFamily') === '1',
   _lineageGen: null,   // id -> chart row, filled by computeLineageSet()
   _treeBusY: null,   // FAM id, "fam>child" and "parent~child" -> y of the sibling bar
   _treeOmitted: null,  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch markers
@@ -66,7 +70,6 @@ export const state = {
   _genRange3D: null,  // { min, max } generation depth, same purpose
   _3dMousePos: { x: 0, y: 0 },
   _3dGestureDragged: false,  // the pointer travelled, so the click that follows is not a tap
-  showFamNodes: true,   // show FAM diamond nodes (vs direct parent-child links)
   stratify3D: localStorage.getItem('stratify3D') || 'time',
   showTimeline3D: true,   // show the visual timeline axis (spine + rings)
   // Labels default off on a phone. Every one of them is its own canvas texture,

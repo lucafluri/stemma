@@ -97,14 +97,16 @@ export function updateViewToggleUI() {
     if (el) el.style.display = in3d ? 'none' : shown;
   }
 
-  // Physics and node dragging act on a force simulation. The classical chart
-  // computes its positions outright and has none, so in that mode both were
-  // controls that visibly did nothing — a whole panel of them.
+  // Physics acts on a force simulation. The classical chart computes its
+  // positions outright and has none, so in that mode the panel was controls
+  // that visibly did nothing.
   const simLive = in3d || !state.treeLayout;
-  for (const id of ['physics-panel', 'node-drag-btn']) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = simLive ? 'block' : 'none';
-  }
+  const physicsPanel = document.getElementById('physics-panel');
+  if (physicsPanel) physicsPanel.style.display = simLive ? 'block' : 'none';
+
+  // Node dragging is 2D-force-only — the 3D drag handler does not work.
+  const dragBtn = document.getElementById('node-drag-btn');
+  if (dragBtn) dragBtn.style.display = (!in3d && !state.treeLayout) ? 'block' : 'none';
 
   const btn = document.getElementById('view-toggle-btn');
   if (btn) {
@@ -208,7 +210,7 @@ export function initGraph3D() {
       if (state._3dGestureDragged) return;
       _isMobile() ? minimizeDetailPanel() : closeDetailPanel();
     })
-    .enableNodeDrag(state._nodeDragEnabled);
+    .enableNodeDrag(false);   // broken in 3D — orbit controls fight the drag handler
 
   // Delay setup so the library's internal controls finish initialising first
   setTimeout(() => {
