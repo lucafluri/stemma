@@ -211,13 +211,18 @@ depends on where the page is served from, since the risk does:
 - **`localhost` or `file://`** — `localStorage`, so it is still there next time.
 - **any other origin** (a GitHub Pages deployment, a LAN address) —
   `sessionStorage`, so it goes when the tab does. A key left in `localStorage`
-  by an earlier visit is moved across and cleared on first load.
+  by an earlier visit is moved across and taken off disk on load, whether or
+  not you go near the AI import that session.
 
-This is a limit on how long an exposed key lasts, not a fix for the exposure:
-the request still goes from the page to `api.anthropic.com` with
-`anthropic-dangerous-direct-browser-access`, so anything running on the page
-can read the key while it is in use. Set `window.AI_PROXY_URL` to route
-through a proxy that holds the key server-side if that matters to you.
+This limits how long an exposed key lasts. It is not a fix for the exposure
+itself: the request still goes from the page to `api.anthropic.com` with
+`anthropic-dangerous-direct-browser-access`, so **anything running on the page
+can read the key while it is in use** — including Tesseract, which is still
+fetched from a CDN. `sessionStorage` is no harder to read than `localStorage`
+for script already on the page; the difference is only how long it survives.
+
+If that matters to you, set `window.AI_PROXY_URL` to a proxy that holds the
+key server-side, and do not paste a key into a public deployment at all.
 
 `localStorage.perfLog = '1'` turns on render and rebuild timings in the console.
 

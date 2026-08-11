@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { perf } from './constants.js';
 import { _fullRebuildGraph, _loadDatasetFile, escHtml, escJs, fileAccessSupported } from './gedcom-io.js';
 import { row } from './panels.js';
 import { tick } from './render-2d.js';
@@ -2646,18 +2647,26 @@ export function _aiKeyIsLocalOrigin() {
   return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
 }
 
+// A key persisted by an earlier visit (or by a build without this rule) is
+// carried over to the session store once and then cleared. Called on load
+// rather than only when the AI import is opened: somebody who pasted a key
+// once and never used the feature again would otherwise keep it on disk
+// indefinitely, which is the half of the problem that actually matters.
+// Idempotent, so the import flow can call it again without thinking.
+export function _aiMigrateStrayKey() {
+  if (_aiKeyIsLocalOrigin()) return false;
+  const stale = localStorage.getItem('ai_api_key');
+  if (!stale) return false;
+  if (!sessionStorage.getItem('ai_api_key')) sessionStorage.setItem('ai_api_key', stale);
+  localStorage.removeItem('ai_api_key');
+  return true;
+}
+
 // Off localhost the key is held for the session only, so closing the tab
-// takes it with you. A key persisted by an earlier visit is carried over once
-// and then cleared — otherwise turning this on would stop new exposure while
-// leaving the existing one sitting there, which is the half of the problem
-// that actually matters.
+// takes it with you.
 export function _aiKeyStore() {
   if (_aiKeyIsLocalOrigin()) return localStorage;
-  const stale = localStorage.getItem('ai_api_key');
-  if (stale) {
-    if (!sessionStorage.getItem('ai_api_key')) sessionStorage.setItem('ai_api_key', stale);
-    localStorage.removeItem('ai_api_key');
-  }
+  _aiMigrateStrayKey();
   return sessionStorage;
 }
 
@@ -2776,7 +2785,10 @@ List children only under the marriage they belong to. Each marriage is a separat
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  console.log('[KI Import] response:', data);
+  // The response carries the names, dates and places just extracted, so this
+  // is somebody's family in the console on every import. Useful when the
+  // extraction goes wrong, not something to print unasked.
+  perf.log('[KI Import] response:', data);
 
   const toolBlock = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'record_persons');
   if (!toolBlock) throw new Error(t('errors.aiNoToolCall', { reason: data.stop_reason || '?' }));

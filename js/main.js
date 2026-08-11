@@ -161,6 +161,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // offer is the whole point of it surviving the reload.
   updateFileButtons();
   _tryRestoreAutosave();
+  // Not gated on the AI import ever being opened — a key left on disk by an
+  // earlier visit to a public deployment has to go whether or not this
+  // session goes near the feature.
+  ImportMod._aiMigrateStrayKey();
 
   // Touch support
   _initPanelSwipe();

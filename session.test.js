@@ -71,6 +71,26 @@ const atOrigin = url => dom.reconfigure({ url });
     assert.strictEqual(sessionStorage.getItem('ai_api_key'), 'sk-ant-stale');
   });
 
+  await test('the stray key is cleared on load, not only when AI import is opened', () => {
+    clearStores();
+    atOrigin('https://example.github.io/tree/');
+    localStorage.setItem('ai_api_key', 'sk-ant-never-used-again');
+    // Nothing here goes near the import dialog — this is what a visitor who
+    // pasted a key once, months ago, and never used the feature again does.
+    Imp._aiMigrateStrayKey();
+    assert.strictEqual(localStorage.getItem('ai_api_key'), null,
+      'a key nobody touches this session still has to come off disk');
+  });
+
+  await test('on localhost that same load leaves the stored key alone', () => {
+    clearStores();
+    atOrigin('http://localhost/');
+    localStorage.setItem('ai_api_key', 'sk-ant-mine');
+    assert.strictEqual(Imp._aiMigrateStrayKey(), false);
+    assert.strictEqual(localStorage.getItem('ai_api_key'), 'sk-ant-mine',
+      'remembering it is the whole point on your own machine');
+  });
+
   await test('a file:// page counts as local', () => {
     atOrigin('file:///C:/tree/index.html');
     assert.strictEqual(Imp._aiKeyIsLocalOrigin(), true, 'nobody else can serve script to it');
