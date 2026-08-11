@@ -275,6 +275,16 @@ export function computeLineageSet() {
 }
 
 export function computeFocusSet() {
+  // The chart rows in state._lineageGen are numbered *relative to the focus
+  // root*, so they mean nothing once the focus changes or goes away. They were
+  // only ever written, never cleared — so after any focus session the people it
+  // had covered kept their old rows while everyone else fell back to
+  // computeGenerationDepths, and the chart drew two incompatible numbering
+  // systems at once, with children above their own parents. Cleared here rather
+  // than at each call site because this is the one function that decides
+  // whether a lineage numbering applies at all; computeLineageSet fills it in
+  // again immediately below when it does.
+  state._lineageGen = null;
   if (!state.focusRootId || !state.individuals.has(state.focusRootId)) return null;
   // Which relatives count is the reader's choice, not the renderer's: keyed to
   // the chart setting rather than to whichever view happens to be on screen, so

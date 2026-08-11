@@ -14,6 +14,7 @@ const ORDER = [
   'import.test.js',
   'merge.test.js',
   'focus.test.js',
+  'tree-rows.test.js',
   'mobile.test.js',
   'workfile.test.js',
   'deceased.test.js',
