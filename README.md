@@ -221,8 +221,27 @@ can read the key while it is in use** — including Tesseract, which is still
 fetched from a CDN. `sessionStorage` is no harder to read than `localStorage`
 for script already on the page; the difference is only how long it survives.
 
-If that matters to you, set `window.AI_PROXY_URL` to a proxy that holds the
-key server-side, and do not paste a key into a public deployment at all.
+The one thing that removes the exposure rather than shortening it is not
+pasting a key into a public deployment at all.
+
+### `AI_PROXY_URL`
+
+Setting it changes exactly one thing: where the AI import posts. With it set
+the request goes to `<AI_PROXY_URL>/v1/messages` instead of
+`https://api.anthropic.com/v1/messages`. The method, body and headers are
+otherwise identical — **including `x-api-key`**.
+
+So a proxy does not by itself keep the key out of the browser. The page still
+sends one, and the import refuses to start while the key box is empty. For the
+proxy to actually hold the key server-side it has to **ignore the forwarded
+`x-api-key` and substitute its own**; you then type any placeholder into the
+dialog to get past the empty check.
+
+The proxy also has to accept the request the browser makes: CORS for your
+origin, `POST /v1/messages`, and the `x-api-key`, `anthropic-version`,
+`anthropic-dangerous-direct-browser-access` and `content-type` request
+headers. No proxy ships with this repo — `AI_PROXY_URL` is the hook for one
+you run yourself.
 
 `localStorage.perfLog = '1'` turns on render and rebuild timings in the console.
 
