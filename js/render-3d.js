@@ -140,6 +140,27 @@ export function resize3D() {
   state.graph3d.width(el.clientWidth).height(el.clientHeight);
 }
 
+// Where the pointer is, for placing the tooltip. The container outlives every
+// graph instance — `innerHTML = ''` clears its children, not its own listeners
+// — so registering these inside initGraph3D() stacked another pair on every
+// file load, and each one fires on every mousemove over the scene. Same shape
+// as the initSVG leak; once is enough, and the graph is read off state.
+let _3dPointerTracked = false;
+function _track3DPointer(container) {
+  if (_3dPointerTracked) return;
+  _3dPointerTracked = true;
+  container.addEventListener('mousemove', e => {
+    state._3dMousePos.x = e.clientX;
+    state._3dMousePos.y = e.clientY;
+  });
+  container.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      state._3dMousePos.x = e.touches[0].clientX;
+      state._3dMousePos.y = e.touches[0].clientY;
+    }
+  }, { passive: true });
+}
+
 export function initGraph3D() {
   const container = document.getElementById('graph-3d-container');
   container.innerHTML = '';
@@ -156,17 +177,7 @@ export function initGraph3D() {
     ltype:  l.ltype,
   }));
 
-  // Track mouse/touch for tooltip positioning
-  container.addEventListener('mousemove', e => {
-    state._3dMousePos.x = e.clientX;
-    state._3dMousePos.y = e.clientY;
-  });
-  container.addEventListener('touchstart', e => {
-    if (e.touches.length === 1) {
-      state._3dMousePos.x = e.touches[0].clientX;
-      state._3dMousePos.y = e.touches[0].clientY;
-    }
-  }, { passive: true });
+  _track3DPointer(container);
 
   state.graph3d = ForceGraph3D()(container)
     .backgroundColor(state._3dAppearance.bgColor)

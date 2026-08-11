@@ -5,8 +5,6 @@ import { _applyFamNodeSize } from './relations.js';
 import { _rerenderNodes, applyFilter, linkColor, updateLabelColors, updateLabels } from './render-2d.js';
 import { refresh3D } from './render-3d.js';
 
-export const GOLDEN_ANGLE = 137.508;
-
 export function surnameHashColor(surname) {
   // Fallback for surnames not in the pre-assigned cache
   if (!surname) return '#888888';
@@ -60,12 +58,6 @@ export function debouncedLsWrite(key, value, delay = 200) {
     localStorage.setItem(key, value);
   }, delay);
 }
-
-export const PALETTE = [
-  '#4e79a7','#e15759','#59a14f','#76b7b2','#edc948',
-  '#b07aa1','#ff9da7','#f28e2b','#9c755f','#bab0ac',
-  '#d37295','#a0cbe8','#fabfd2','#8cd17d','#b6992d'
-];
 
 // Every family name a person belongs to: the surname they carry, and the one
 // they were born with where the record keeps both. A married woman belongs to
@@ -206,11 +198,6 @@ export function indiColor(indi) {
 
 export function nodeBaseColor(n) {
   if (n.type === 'FAM') return n.data.div ? state.nodeColors.famDiv : state.nodeColors.fam;
-  return indiColor(n.data);
-}
-
-export function labelColor(n) {
-  if (n.type !== 'INDI') return '#888888';
   return indiColor(n.data);
 }
 

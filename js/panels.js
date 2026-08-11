@@ -209,11 +209,6 @@ export function toggleQuickAdd(type) {
   }
 }
 
-export function quickAddFromHover(personId, type) {
-  showIndiDetail(personId);
-  toggleQuickAdd(type);
-}
-
 export function confirmQuickAddRelative(personId, type) {
   const givn = document.getElementById(`qa-${type}-givn`)?.value.trim() || '';
   const surn = document.getElementById(`qa-${type}-surn`)?.value.trim() || '';
@@ -1459,12 +1454,6 @@ export function startEdit() {
   }
 }
 
-export function quickAddChildFromHover(famId) {
-  showFamDetail(famId);
-  startEdit();
-  _famEditToggleNewChild();
-}
-
 export function getNextIndiId() {
   let i = 1;
   while (state.individuals.has(`@I${i}@`)) i++;
@@ -1596,26 +1585,6 @@ export function _acOccupations() {
   const s = new Set();
   for (const [, i] of state.individuals) if (i.occu) s.add(i.occu);
   return [...s].sort();
-}
-
-export function _acNames() {
-  // Returns {label, value, searchText} objects; label includes maiden name for display.
-  const seen = new Map(); // name -> {count, maidenName}
-  for (const [, i] of state.individuals) {
-    if (!i.name) continue;
-    const prev = seen.get(i.name);
-    seen.set(i.name, {
-      count:      (prev?.count || 0) + 1,
-      maidenName: prev?.maidenName || i.maidenName || '',
-    });
-  }
-  return [...seen.entries()]
-    .sort((a, b) => b[1].count - a[1].count)
-    .map(([name, { maidenName }]) => ({
-      value:      name,
-      label:      maidenName ? `${name} (${t('tooltip.born', { name: maidenName })})` : name,
-      searchText: (name + ' ' + maidenName).toLowerCase(),
-    }));
 }
 
 export function _acAttach(input, getFn) {

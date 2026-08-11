@@ -77,6 +77,38 @@ const chipCount = key => Number(chipByKey(key).querySelector('b').textContent);
     Imp._renderImportReview();
   };
 
+  console.log('\nopening and closing the dialog');
+
+  // Every other test here calls the render functions directly, which is how a
+  // dangling getElementById in the reset path shipped unnoticed: the markup it
+  // reached for had been deleted, so opening the dialog threw on null.style
+  // and left it half-reset. This drives the real entry point instead.
+  test('opening the import dialog runs its whole reset without throwing', () => {
+    Imp.openImport();
+    assert.strictEqual(document.getElementById('import-modal').style.display, 'flex');
+    // The reset runs to the end, so the last thing it touches is really cleared.
+    assert.strictEqual(document.getElementById('import-ocr-status').textContent, '');
+    assert.strictEqual(state._importFilter, 'all');
+    assert.deepStrictEqual(state._importActions, []);
+  });
+
+  test('closing it puts the modal away', () => {
+    Imp.openImport();
+    Imp.closeTextImport();
+    assert.strictEqual(document.getElementById('import-modal').style.display, 'none');
+  });
+
+  test('reopening after a review resets back to the input step', () => {
+    // What parseImportText() leaves behind once a file has been reviewed.
+    document.getElementById('import-step-input').style.display = 'none';
+    document.getElementById('import-step-review').style.display = '';
+    Imp.openImport();
+    assert.strictEqual(document.getElementById('import-step-input').style.display, '',
+      'the input step comes back');
+    assert.strictEqual(document.getElementById('import-step-review').style.display, 'none',
+      'and the old review is put away');
+  });
+
   console.log('\nthe diff table');
 
   test('every suggestion gets a row', () => {

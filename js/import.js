@@ -983,8 +983,6 @@ export function openImport() {
   document.addEventListener('paste', _importPasteHandler);
 }
 
-export const openTextImport = openImport; // backwards alias
-
 export function closeTextImport() {
   document.removeEventListener('paste', _importPasteHandler);
   clearTimeout(state._importConnTimer);
@@ -1013,7 +1011,6 @@ export function _resetImportUI() {
   document.getElementById('import-drop-filename').style.display = 'none';
   document.getElementById('import-image-preview').style.display = 'none';
   document.getElementById('import-image-options').style.display = 'none';
-  document.getElementById('import-ai-key-row').style.display = 'none';
   document.getElementById('import-error-msg').style.display = 'none';
   document.getElementById('import-replace-btn').style.display = 'none';
   document.getElementById('import-ocr-status').textContent = '';
