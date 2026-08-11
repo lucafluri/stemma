@@ -32,11 +32,12 @@ function* _placeFields() {
 }
 
 /**
- * Fold a place name to the form used for comparison: case, accents, and
- * punctuation dropped, whitespace collapsed. "St. Gallen", "St Gallen" and
- * "ST.  GALLEN" all key to "st gallen".
+ * Fold text for comparison: case, accents and punctuation dropped, whitespace
+ * collapsed. "St. Gallen", "St Gallen" and "ST.  GALLEN" all fold to
+ * "st gallen". Names want the same treatment as places — nobody types the
+ * umlaut in "Müller" when they are looking something up.
  */
-export function placeKey(s) {
+export function foldText(s) {
   return String(s == null ? '' : s)
     .normalize('NFD')
     .replace(/\p{M}/gu, '')            // combining accents left by NFD
@@ -45,6 +46,9 @@ export function placeKey(s) {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
+
+/** The folded form of a place name, under the name the rest of this file uses. */
+export const placeKey = foldText;
 
 /** Every distinct place string in the tree, with how many fields use it. */
 export function collectPlaces() {

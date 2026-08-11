@@ -36,6 +36,7 @@
     <button id="tools-btn" onclick="toggleToolsMenu(event)" data-i18n-title="topbar.toolsTitle" title="Werkzeuge" aria-haspopup="true" aria-expanded="false">&#x1F527; <span data-i18n="topbar.tools">Werkzeuge</span> <span class="tools-caret">&#x25BE;</span></button>
     <div id="tools-dropdown">
       <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
+      <button onclick="closeToolsMenu();openFindTool()" data-i18n-title="find.titleLong" title="Personen suchen und filtern">&#x1F50E; <span data-i18n="find.title">Personen suchen</span></button>
       <button onclick="closeToolsMenu();openPlacesTool()" data-i18n-title="topbar.placesTitle" title="Ortsnamen vereinheitlichen">&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></button>
     </div>
   </div>
@@ -502,6 +503,94 @@
   <button id="rel-highlight" class="rel-hl-btn" type="button" onclick="relHighlightPath()" data-i18n="relationTool.highlightPath" style="display:none">Highlight path</button>
 </div>
 <div id="tooltip"></div>
+
+<!-- ── Find people ─────────────────────────────────────────────────────── -->
+<div id="find-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="find.title" aria-label="Personen suchen">
+  <div id="find-backdrop" onclick="closeFindTool()"></div>
+  <div id="find-panel">
+    <div id="places-header">
+      <h2>&#x1F50E; <span data-i18n="find.title">Personen suchen</span></h2>
+      <button id="find-close-btn" onclick="closeFindTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+
+    <!-- Every field narrows the result together with the others; an empty form
+         lists the whole tree, which is a useful thing to ask for. -->
+    <div id="find-form" oninput="runFind()" onchange="runFind()">
+      <label class="find-field find-field--wide">
+        <span data-i18n="find.name">Name</span>
+        <input type="text" id="find-name" autocomplete="off" data-i18n-placeholder="find.namePlaceholder" placeholder="Vor-, Nach- oder Ledigname">
+      </label>
+      <label class="find-field find-field--wide">
+        <span data-i18n="find.place">Ort</span>
+        <input type="text" id="find-place" autocomplete="off" data-i18n-placeholder="find.placePlaceholder" placeholder="Geburt, Tod oder Heirat">
+      </label>
+      <label class="find-field">
+        <span data-i18n="find.occupation">Beruf</span>
+        <input type="text" id="find-occupation" autocomplete="off">
+      </label>
+      <label class="find-field">
+        <span data-i18n="find.sex">Geschlecht</span>
+        <select id="find-sex" class="sidebar-select">
+          <option value="" data-i18n="find.any">egal</option>
+          <option value="M" data-i18n="stats.sexM">männlich</option>
+          <option value="F" data-i18n="stats.sexF">weiblich</option>
+          <option value="U" data-i18n="find.sexUnknown">unbekannt</option>
+        </select>
+      </label>
+      <label class="find-field">
+        <span data-i18n="find.status">Status</span>
+        <select id="find-status" class="sidebar-select">
+          <option value="" data-i18n="find.any">egal</option>
+          <option value="living" data-i18n="find.living">lebend</option>
+          <option value="deceased" data-i18n="find.deceased">verstorben</option>
+        </select>
+      </label>
+      <div class="find-field find-field--range">
+        <span data-i18n="find.born">Geboren</span>
+        <div class="find-range">
+          <input type="number" id="find-born-from" min="0" max="2200" data-i18n-placeholder="find.from" placeholder="von">
+          <input type="number" id="find-born-to"   min="0" max="2200" data-i18n-placeholder="find.to"   placeholder="bis">
+        </div>
+      </div>
+      <div class="find-field find-field--range">
+        <span data-i18n="find.died">Gestorben</span>
+        <div class="find-range">
+          <input type="number" id="find-died-from" min="0" max="2200" data-i18n-placeholder="find.from" placeholder="von">
+          <input type="number" id="find-died-to"   min="0" max="2200" data-i18n-placeholder="find.to"   placeholder="bis">
+        </div>
+      </div>
+      <div class="find-field find-field--range">
+        <span data-i18n="find.married">Geheiratet</span>
+        <div class="find-range">
+          <input type="number" id="find-married-from" min="0" max="2200" data-i18n-placeholder="find.from" placeholder="von">
+          <input type="number" id="find-married-to"   min="0" max="2200" data-i18n-placeholder="find.to"   placeholder="bis">
+        </div>
+      </div>
+      <label class="find-field find-field--wide" data-i18n-title="find.missingTitle" title="Personen finden, bei denen diese Angabe fehlt — die Arbeitsliste des Stammbaums.">
+        <span data-i18n="find.missing">Fehlende Angabe</span>
+        <select id="find-missing" class="sidebar-select">
+          <option value="" data-i18n="find.any">egal</option>
+          <option value="birth" data-i18n="find.missingBirth">kein Geburtsdatum</option>
+          <option value="death" data-i18n="find.missingDeath">verstorben, kein Sterbedatum</option>
+          <option value="place" data-i18n="find.missingPlace">kein Ort</option>
+          <option value="sex" data-i18n="find.missingSex">kein Geschlecht</option>
+          <option value="parents" data-i18n="find.missingParents">keine Eltern</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="find-count"></div>
+    <div id="find-results"></div>
+
+    <div class="import-step-footer">
+      <button class="import-action-btn import-action-btn--primary" id="find-highlight-btn" onclick="highlightFindMatches()"
+              data-i18n-title="find.highlightTitle" title="Alle Treffer im Diagramm hervorheben — „Hervorhebung aufheben“ macht es rückgängig.">&#x2728;
+        <span data-i18n="find.highlight">Treffer hervorheben</span></button>
+      <button class="import-action-btn" onclick="resetFindTool()" data-i18n="find.reset">Zurücksetzen</button>
+      <button class="import-action-btn" onclick="closeFindTool()" data-i18n="import.close">Schliessen</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Place-name cleanup ──────────────────────────────────────────────── -->
 <div id="places-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="places.title" aria-label="Ortsnamen">
