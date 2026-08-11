@@ -2033,39 +2033,6 @@ body.relation-picking * { cursor: crosshair !important; }
   color: #959595;
   font-style: italic;
 }
-#import-ai-key-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 8px;
-  background: #121212;
-  border: 1px solid #2c2c2c;
-  border-radius: 6px;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-#import-ai-key-row input[type="password"],
-#import-ai-key-row input[type="text"] {
-  flex: 1;
-  min-width: 180px;
-  background: #090909;
-  border: 1px solid #2c2c2c;
-  color: #cdcdcd;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 12px;
-}
-#import-ai-key-row select, #import-ai-key-row button {
-  background: #222222;
-  border: 1px solid #3d3d3d;
-  color: #bababa;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-}
 #import-error-msg {
   background: #1b1b1b;
   border: 1px solid #3c3c3c;

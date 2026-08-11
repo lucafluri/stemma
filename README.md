@@ -13,9 +13,9 @@ Tesseract, fetched from a CDN on demand if you use OCR import — it pulls its
 own worker and wasm files at runtime, so vendoring just the entry script would
 not have made that path work offline either.
 
-**Everything stays in your browser.** The file you open is never uploaded. The
-one exception is the optional AI import, which sends the text or image you give
-it to the Anthropic API — and only when you explicitly use that feature.
+**Everything stays in your browser.** The file you open is never uploaded, and
+nothing you import is sent anywhere. Tesseract is the only thing fetched at
+runtime, and it fetches code, not your data — the OCR itself runs locally.
 
 ---
 
@@ -74,9 +74,8 @@ spouses and children from the buttons there. Name, place and occupation fields
 suggest values already in the tree as you type.
 
 **Import.** GEDCOM, JSON and YAML load directly into an empty tree. Onto a tree
-that already has people in it — and for plain text or images of scanned charts,
-optionally read with OCR (Tesseract) or the Anthropic API — the file goes
-through a review step instead.
+that already has people in it — and for plain text, or images of scanned charts
+read with OCR (Tesseract) — the file goes through a review step instead.
 
 That step is a diff table, one row per record in the incoming file: what is new,
 what fills a gap, what disagrees, and what the tree already holds identically.
@@ -141,7 +140,7 @@ loaded as native ES modules (`js/package.json` only marks the directory as
 | `js/render-2d.js` | SVG rendering, the force simulation, zoom, image export |
 | `js/render-3d.js` | the 3D scene, camera, labels and time axis |
 | `js/panels.js` | detail panel and all the editing forms |
-| `js/import.js` | the import wizard: text parsing, OCR, AI extraction, merge review |
+| `js/import.js` | the import wizard: text parsing, OCR, merge review |
 | `js/stats.js` | the statistics panel — figures about the tree as a whole |
 | `js/relations.js` | highlighting and the "how are these two related" tool |
 | `js/colors.js` | surname palette and node/link colouring |
@@ -179,7 +178,7 @@ Sixteen suites, no framework — plain `node` scripts with `assert`:
 | `workfile.test.js` | reopening and saving back over the same file |
 | `relations.test.js` | the relation tool's path-based labels, including in-laws reached through a spouse edge |
 | `import-ui.test.js` | the review screen itself — the diff table, the filter chips and their counts |
-| `session.test.js` | what the browser keeps between visits: where the API key may live, and the unsaved-work warning |
+| `autosave.test.js` | the unsaved-work warning, and when the autosave has made it unnecessary |
 | `wiring.test.js` | that every inline `onclick` in `index.html` resolves to a real function |
 
 `test-setup.js` builds a jsdom window from `index.html` with stubs for the
@@ -194,54 +193,6 @@ rather than against coordinates, so they survive tuning.
 ---
 
 ## Configuration
-
-`config.local.js` is git-ignored and optional. It only matters for the AI import:
-
-```js
-window.ANTHROPIC_API_KEY = 'sk-ant-...';
-// window.AI_PROXY_URL = 'http://127.0.0.1:3001';   // if calling through a proxy
-```
-
-A key put here is readable by anything running on the page — fine for local use,
-but do not commit it or deploy it.
-
-The key can also be typed into the import dialog instead. Where that is kept
-depends on where the page is served from, since the risk does:
-
-- **`localhost` or `file://`** — `localStorage`, so it is still there next time.
-- **any other origin** (a GitHub Pages deployment, a LAN address) —
-  `sessionStorage`, so it goes when the tab does. A key left in `localStorage`
-  by an earlier visit is moved across and taken off disk on load, whether or
-  not you go near the AI import that session.
-
-This limits how long an exposed key lasts. It is not a fix for the exposure
-itself: the request still goes from the page to `api.anthropic.com` with
-`anthropic-dangerous-direct-browser-access`, so **anything running on the page
-can read the key while it is in use** — including Tesseract, which is still
-fetched from a CDN. `sessionStorage` is no harder to read than `localStorage`
-for script already on the page; the difference is only how long it survives.
-
-The one thing that removes the exposure rather than shortening it is not
-pasting a key into a public deployment at all.
-
-### `AI_PROXY_URL`
-
-Setting it changes exactly one thing: where the AI import posts. With it set
-the request goes to `<AI_PROXY_URL>/v1/messages` instead of
-`https://api.anthropic.com/v1/messages`. The method, body and headers are
-otherwise identical — **including `x-api-key`**.
-
-So a proxy does not by itself keep the key out of the browser. The page still
-sends one, and the import refuses to start while the key box is empty. For the
-proxy to actually hold the key server-side it has to **ignore the forwarded
-`x-api-key` and substitute its own**; you then type any placeholder into the
-dialog to get past the empty check.
-
-The proxy also has to accept the request the browser makes: CORS for your
-origin, `POST /v1/messages`, and the `x-api-key`, `anthropic-version`,
-`anthropic-dangerous-direct-browser-access` and `content-type` request
-headers. No proxy ships with this repo — `AI_PROXY_URL` is the hook for one
-you run yourself.
 
 `localStorage.perfLog = '1'` turns on render and rebuild timings in the console.
 

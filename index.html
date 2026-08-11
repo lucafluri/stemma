@@ -506,7 +506,7 @@
 
     <!-- Step 1: Input -->
     <div id="import-step-input">
-      <p class="import-hint" data-i18n-html="import.hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR (offline) gelesen; bei Bedarf steht KI als Fallback bereit.</p>
+      <p class="import-hint" data-i18n-html="import.hint">Lade <b>GEDCOM</b>, <b>JSON</b>, <b>YAML</b>, <b>Text</b> oder ein <b>Bild</b> einer Stammbaumseite. Bilder werden per OCR gelesen.</p>
 
       <div id="import-drop-zone" ondragover="_imDragOver(event)" ondragleave="_imDragLeave(event)" ondrop="_imDrop(event)" onclick="_imPickFile()">
         <div id="import-drop-label">&#x1F4C2; <span data-i18n="import.dropLabel">Datei ablegen, klicken zum Wählen, oder Strg+V zum Einfügen</span></div>
@@ -521,29 +521,13 @@
       <!-- Image-only options -->
       <div id="import-image-options" style="display:none">
         <button class="import-action-btn" onclick="runImportOcr()" id="import-ocr-btn">&#x1F50D; <span data-i18n="import.ocr">OCR (Tesseract)</span></button>
-        <button class="import-action-btn" onclick="runImportAi()" id="import-ai-btn">&#x1F916; <span data-i18n="import.ai">KI-Fallback</span></button>
       </div>
       <div id="import-ocr-status" class="import-ocr-status"></div>
-
-      <!-- AI key (only shown when AI fallback is used) -->
-      <div id="import-ai-key-row" style="display:none">
-        <label for="ai-api-key-input" data-i18n="import.apiKey">API Key</label>
-        <input type="password" id="ai-api-key-input" data-i18n-placeholder="import.apiKeyPlaceholder" placeholder="sk-ant-… (oder config.local.js)" autocomplete="off" spellcheck="false">
-        <button onclick="_aiToggleKeyVisibility()" data-i18n-title="import.show" title="Anzeigen">&#x1F441;</button>
-        <button onclick="_aiSaveKey()" data-i18n-title="import.save" title="Speichern">&#x1F4BE;</button>
-        <select id="ai-model-select">
-          <option value="claude-haiku-4-5">Haiku 4.5</option>
-          <option value="claude-sonnet-5" selected>Sonnet 5</option>
-          <option value="claude-opus-5">Opus 5</option>
-        </select>
-        <span id="ai-key-status"></span>
-      </div>
 
       <div id="import-error-msg" style="display:none"></div>
 
       <div class="import-step-footer">
         <button class="import-action-btn import-action-btn--primary" onclick="parseImportText()" id="import-parse-btn">&#x1F50D; <span data-i18n="import.analyze">Analysieren &amp; zusammenführen</span></button>
-        <button class="import-action-btn" onclick="runImportAi('text')" id="import-ai-text-btn" data-i18n-title="import.replaceTitle" title="Text per KI in strukturierte Daten umwandeln">&#x1F916; <span data-i18n="import.aiText">KI-Analyse</span></button>
         <button class="import-action-btn" onclick="importReplaceDataset()" id="import-replace-btn" style="display:none" data-i18n-title="import.replaceTitle" title="Aktuelle Daten komplett ersetzen">&#x21BB; <span data-i18n="import.replace">Ersetzen</span></button>
         <button class="import-action-btn" onclick="closeTextImport()" data-i18n="import.cancel">Abbrechen</button>
       </div>
@@ -595,10 +579,9 @@
 </div>
 
 
-<script src="config.local.js" onerror=""></script>
 <!-- Vendored rather than loaded from a CDN: the app needs to start offline,
      and a compromised CDN would otherwise run arbitrary code against your
-     genealogy data (and your API key, if AI import is in use). -->
+     genealogy data. -->
 <script src="vendor/d3.v7.min.js"></script>
 <script src="vendor/three.min.js"></script>
 <script src="vendor/OrbitControls.js"></script>

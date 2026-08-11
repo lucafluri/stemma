@@ -134,7 +134,7 @@ export const state = {
   _importExpanded: new Set(),     // action ids whose full editing card is open
   _importJsonPersons: null,  // set when a .json/.ged/.yaml file is loaded
   _importLoadedFile: null,  // raw File handle, for "replace dataset" path
-  _importImageData: null,  // { base64, mediaType } for AI fallback
+  _importImageData: null,  // { base64, mediaType } of a dropped image, for OCR
   _tesseractLoading: null,
   _currentMatchActionId: null,
   _imMatchMode: 'link',      // 'link' = same person, 'parent' = attach as their child

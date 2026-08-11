@@ -4,7 +4,7 @@
   "description": "",
   "main": "js/main.js",
   "scripts": {
-    "test": "node gedcom.test.js && node import.test.js && node merge.test.js && node focus.test.js && node mobile.test.js && node workfile.test.js && node deceased.test.js && node hover.test.js && node stats.test.js && node autocomplete.test.js && node physics.test.js && node ui.test.js && node relations.test.js && node import-ui.test.js && node session.test.js && node wiring.test.js"
+    "test": "node gedcom.test.js && node import.test.js && node merge.test.js && node focus.test.js && node mobile.test.js && node workfile.test.js && node deceased.test.js && node hover.test.js && node stats.test.js && node autocomplete.test.js && node physics.test.js && node ui.test.js && node relations.test.js && node import-ui.test.js && node autosave.test.js && node wiring.test.js"
   },
   "repository": {
     "type": "git",
