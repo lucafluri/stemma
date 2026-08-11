@@ -17,16 +17,21 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, 'js', 'import.js'), 'utf8');
+// The parsing and merge half now lives in import-parse.js, the dialog in
+// import.js. Both are read so a function moving between them does not break
+// the lift — what is under test is the function, not which file holds it.
+const src = ['import.js', 'import-parse.js']
+  .map(f => fs.readFileSync(path.join(__dirname, 'js', f), 'utf8'))
+  .join('\n');
 
 function lift(name) {
   const m = src.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
-  assert(m, `${name} not found in app.js — did it get renamed?`);
+  assert(m, `${name} not found under js/ — did it get renamed?`);
   return m[0];
 }
 function liftConst(name) {
   const m = src.match(new RegExp(`const ${name}\\s*=\\s*\\[[^\\]]*\\];`));
-  assert(m, `${name} not found in app.js`);
+  assert(m, `${name} not found under js/`);
   return m[0];
 }
 
