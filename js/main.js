@@ -1,8 +1,10 @@
+import * as ChangesMod from './changes.js';
 import * as ColorsMod from './colors.js';
 import * as GedcomIoMod from './gedcom-io.js';
 import * as GraphDataMod from './graph-data.js';
 import * as FindMod from './find.js';
 import * as ImportMod from './import.js';
+import * as MapViewMod from './map-view.js';
 import * as PanelsMod from './panels.js';
 import * as PlacesMod from './places.js';
 import * as RelationsMod from './relations.js';
@@ -413,8 +415,8 @@ function _onLanguageChanged() {
 // observe some of these namespaces mid-initialization. Queuing a microtask
 // runs this after the *whole* graph's synchronous evaluation has settled,
 // regardless of which module happened to be the entry point.
-queueMicrotask(() => Object.assign(window, ColorsMod, FindMod, GedcomIoMod, GraphDataMod, ImportMod, PanelsMod,
-  PlacesMod, RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
+queueMicrotask(() => Object.assign(window, ChangesMod, ColorsMod, FindMod, GedcomIoMod, GraphDataMod, ImportMod,
+  MapViewMod, PanelsMod, PlacesMod, RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
     state,
     toggleSidebar,
     toggleToolsMenu,

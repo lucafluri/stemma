@@ -324,16 +324,28 @@ export function renderStats() {
   ].filter(Boolean).join('');
 }
 
-// Recomputing walks the whole tree, so it is only ever done for a panel that is
-// actually open — but it must be done for *every* change to the tree, not only
-// when the panel is opened. Rendering on open alone is what let the figures sit
-// there going stale while the sidebar's family-name list, which is rebuilt on
-// every change, moved on without them: the same family then had two different
-// sizes on screen at once, a few centimetres apart.
-export function refreshStats() {
-  if (document.getElementById('stats-panel')?.open) renderStats();
+// The figures used to live in a sidebar accordion, squeezed into 220px next to
+// the family-name list. They are a report about the whole tree, not a control,
+// so they now open as their own window from the Tools menu and get the width
+// the tables actually need.
+export function openStatsTool() {
+  const modal = document.getElementById('stats-modal');
+  if (!modal) return;
+  renderStats();
+  modal.style.display = 'flex';
 }
 
-export function toggleStatsPanel() {
-  refreshStats();
+export function closeStatsTool() {
+  const modal = document.getElementById('stats-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+// Recomputing walks the whole tree, so it is only ever done for a window that is
+// actually open — but it must be done for *every* change to the tree, not only
+// when it is opened. Rendering on open alone is what let the figures sit there
+// going stale while the sidebar's family-name list, which is rebuilt on every
+// change, moved on without them: the same family then had two different sizes
+// on screen at once, a few centimetres apart.
+export function refreshStats() {
+  if (document.getElementById('stats-modal')?.style.display === 'flex') renderStats();
 }

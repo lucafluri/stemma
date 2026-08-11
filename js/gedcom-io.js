@@ -4,11 +4,18 @@ import { buildSurnameColorMap, buildSurnameList } from './colors.js';
 import { DECEASED_AGE_THRESHOLD, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
 import { applyFilter, autoSettle, buildAndRunSimulation, initSVG, renderGraph } from './render-2d.js';
+import { captureBaseline, refreshChanges } from './changes.js';
+import { refreshMap } from './map-view.js';
 import { refreshStats } from './stats.js';
 import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, initGraph3D, update3DNames, updateViewToggleUI } from './render-3d.js';
 
 export function _setDirty(v) {
   state._gedcomDirty = v;
+  // Clean means memory and disk agree, which is exactly the moment the change
+  // log has to start counting from again — on load, on save, on download, and
+  // on anything added later that goes through here.
+  if (!v) captureBaseline();
+  refreshChanges();
   // These edits are newer than whatever the last autosave captured, until the
   // debounced write below actually lands.
   if (v) state._autosaveCaptured = false;
@@ -125,7 +132,8 @@ export function _fullRebuildGraph(opts = {}) {
   if (state.currentView === '3d' && state.selectedIndiId) _setOrbitTarget3D(state.selectedIndiId);
   updateFocusUI();
   showDataUI();   // deleting the last record has to put the empty state back
-  refreshStats(); // ...and an open statistics panel must not keep the old figures
+  refreshStats(); // ...and an open statistics window must not keep the old figures
+  refreshMap();   // ...nor an open map keep an event whose place just changed
   perf.end('[rebuild] total');
 }
 

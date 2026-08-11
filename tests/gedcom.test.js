@@ -723,6 +723,115 @@ test('exporting a selection does not mutate the loaded tree', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Place coordinates (the MAP subtree under PLAC)
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\nplace coordinates');
+
+const GEO_GED = [
+  '0 HEAD',
+  '1 GEDC',
+  '2 VERS 5.5.1',
+  '0 @I1@ INDI',
+  '1 NAME Hans /Fluri/',
+  '1 BIRT',
+  '2 DATE 3 JAN 1820',
+  '2 PLAC Bern',
+  '3 MAP',
+  '4 LATI N46.947975',
+  '4 LONG E7.447447',
+  '1 DEAT',
+  '2 DATE 1890',
+  '2 PLAC Valparaíso',
+  '3 MAP',
+  '4 LATI S33.045720',
+  '4 LONG W71.619560',
+  '2 CAUS Fieber',
+  '0 @F1@ FAM',
+  '1 HUSB @I1@',
+  '1 MARR',
+  '2 DATE 1845',
+  '2 PLAC Solothurn',
+  '3 MAP',
+  '4 LATI N47.207780',
+  '4 LONG E7.537500',
+  '0 TRLR',
+].join('\n');
+
+test('coordinates are read off every kind of event', () => {
+  const { individuals, families } = parseGEDCOM(GEO_GED);
+  const i = individuals.get('@I1@');
+  deepEqual(i.birth.map, [46.947975, 7.447447], 'birth');
+  // South and west are negative, which is the whole reason the hemisphere
+  // letter cannot just be dropped.
+  deepEqual(i.death.map, [-33.04572, -71.61956], 'death');
+  deepEqual(families.get('@F1@').marriages[0].map, [47.20778, 7.5375], 'marriage');
+});
+
+test('a tag after the MAP subtree is still read as part of the event', () => {
+  // "2 CAUS Fieber" sits after "4 LONG" and belongs to DEAT, not to the map.
+  const { individuals } = parseGEDCOM(GEO_GED);
+  assert.strictEqual(individuals.get('@I1@').death.caus, 'Fieber');
+});
+
+test('coordinates survive a GEDCOM round-trip', () => {
+  const first = parseGEDCOM(GEO_GED);
+  const out = serializeGEDCOM(first.individuals, first.families);
+  assert.ok(out.includes('4 LATI N46.947975'), `MAP not written:\n${out}`);
+  assert.ok(out.includes('4 LONG W71.619560'), 'west must come back out as W');
+  const again = parseGEDCOM(out);
+  deepEqual(again.individuals.get('@I1@').birth.map, [46.947975, 7.447447]);
+  deepEqual(again.individuals.get('@I1@').death.map, [-33.04572, -71.61956]);
+  deepEqual(again.families.get('@F1@').marriages[0].map, [47.20778, 7.5375]);
+});
+
+test('a MAP belongs to its own event and does not leak into the next one', () => {
+  const { individuals } = parseGEDCOM(GEO_GED);
+  const { individuals: i2 } = parseGEDCOM([
+    '0 @I1@ INDI',
+    '1 BIRT',
+    '2 PLAC Bern',
+    '3 MAP',
+    '4 LATI N46.947975',
+    '4 LONG E7.447447',
+    '1 DEAT',
+    '2 PLAC Solothurn',
+    '0 TRLR',
+  ].join('\n'));
+  assert.ok(individuals.get('@I1@').birth.map, 'precondition');
+  assert.strictEqual(i2.get('@I1@').death.map, undefined, 'a place with no MAP has no coordinates');
+});
+
+test('a place without coordinates writes no MAP lines', () => {
+  const { individuals, families } = parseGEDCOM([
+    '0 @I1@ INDI', '1 BIRT', '2 PLAC Bern', '0 TRLR',
+  ].join('\n'));
+  const out = serializeGEDCOM(individuals, families);
+  assert.ok(!out.includes('MAP'), `an empty MAP subtree is worse than none:\n${out}`);
+});
+
+test('a half-written pair is not exported as if it were a location', () => {
+  // Files in the wild carry "4 LATI" with no "4 LONG". Half a coordinate points
+  // at the Gulf of Guinea, and writing it out would make that look deliberate.
+  const { individuals, families } = parseGEDCOM([
+    '0 @I1@ INDI', '1 BIRT', '2 PLAC Bern', '3 MAP', '4 LATI N46.9', '0 TRLR',
+  ].join('\n'));
+  const out = serializeGEDCOM(individuals, families);
+  assert.ok(!out.includes('MAP'), `incomplete coordinates must not be written:\n${out}`);
+});
+
+test('coordinates travel through JSON and YAML too', () => {
+  const first = parseGEDCOM(GEO_GED);
+  const viaJson = importJSON(exportJSON(first.individuals, first.families));
+  deepEqual(viaJson.individuals.get('@I1@').birth.map, [46.947975, 7.447447], 'JSON');
+  deepEqual(viaJson.families.get('@F1@').marriages[0].map, [47.20778, 7.5375], 'JSON marriage');
+
+  const viaYaml = importYAML(exportYAML(first.individuals, first.families));
+  deepEqual(viaYaml.individuals.get('@I1@').birth.map, [46.947975, 7.447447], 'YAML');
+  deepEqual(viaYaml.individuals.get('@I1@').death.map, [-33.04572, -71.61956], 'YAML, negative');
+  deepEqual(viaYaml.families.get('@F1@').marriages[0].map, [47.20778, 7.5375], 'YAML marriage');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);

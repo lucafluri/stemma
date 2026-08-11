@@ -283,29 +283,27 @@ const p = (id, o = {}) => Object.assign({
     assert.ok(html.includes('stat-bar'), 'the sex split bar should be drawn');
   });
 
-  await test('an open panel follows the tree instead of freezing on what it opened with', async () => {
+  await test('an open window follows the tree instead of freezing on what it opened with', async () => {
     // This is what made the statistics disagree with the sidebar's family-name
     // list: that list is rebuilt on every change, while the panel was rendered
     // only when it was opened — so after any edit the same family had two
     // different sizes on screen at once.
-    const { refreshStats } = await import(url('stats.js'));
-    const panel = global.document.getElementById('stats-panel');
+    const { refreshStats, openStatsTool, closeStatsTool } = await import(url('stats.js'));
 
     load(new Map([['a', p('a', { surn: 'Fluri' })]]));
-    panel.open = true;
-    refreshStats();
-    assert.ok(body().textContent.includes('Fluri'), 'precondition: the panel is showing');
+    openStatsTool();
+    assert.ok(body().textContent.includes('Fluri'), 'precondition: the window is showing');
 
     load(new Map([['a', p('a', { surn: 'Fluri' })], ['b', p('b', { surn: 'Meier' })]]));
     refreshStats();
     assert.ok(body().textContent.includes('Meier'), 'a person added while it is open must appear');
 
-    // ...and a closed panel still costs nothing to leave alone.
-    panel.open = false;
+    // ...and a closed window still costs nothing to leave alone.
+    closeStatsTool();
     const before = body().innerHTML;
     load(new Map([['c', p('c', { surn: 'Zwahlen' })]]));
     refreshStats();
-    assert.strictEqual(body().innerHTML, before, 'a closed panel should not be re-rendered');
+    assert.strictEqual(body().innerHTML, before, 'a closed window should not be re-rendered');
   });
 
   await test('a long name keeps its count and stays readable on hover', async () => {

@@ -9,6 +9,16 @@
  * returns people and actions, which is why it can be tested on its own.
  */
 import { state } from './state.js';
+import { rememberPlaceCoords } from './map-view.js';
+import { setPlace } from './places.js';
+
+/** "N46.9479" / "-7.44" → a number, hemisphere letter applied; else null. */
+export function _tiGeoNum(v) {
+  const m = String(v == null ? '' : v).trim().match(/^([NSEW])?\s*(-?\d+(?:\.\d+)?)$/i);
+  if (!m) return null;
+  const n = +m[2];
+  return /^[SW]$/i.test(m[1] || '') ? -Math.abs(n) : n;
+}
 
 export const _TI_MONTH_MAP = {
   jan:'JAN',feb:'FEB',mar:'MAR',apr:'APR',may:'MAY',jun:'JUN',
@@ -544,9 +554,9 @@ export function _tiApplyActions(actions) {
     // behaviour of filling anything non-empty.
     const use = f => action.fieldApply ? !!action.fieldApply[f] : !!action.fields[f];
     if (use('Birth Date'))  indi.birth.date = action.fields['Birth Date'];
-    if (use('Birth Place')) indi.birth.plac = action.fields['Birth Place'];
+    if (use('Birth Place')) setPlace(indi.birth, action.fields['Birth Place']);
     if (use('Death Date')) { indi.death.date = action.fields['Death Date']; indi.deceased = true; }
-    if (use('Death Place')) indi.death.plac = action.fields['Death Place'];
+    if (use('Death Place')) setPlace(indi.death, action.fields['Death Place']);
     if (use('Sex')) indi.sex = action.fields['Sex'];
     if (use('Notes')) {
       indi.note = indi.note ? indi.note + '; ' + action.fields['Notes'] : action.fields['Notes'];
@@ -604,7 +614,7 @@ export function _tiApplyActions(actions) {
       if (!fam.marriages.length) fam.marriages.push({ date:'', plac:'', types:[] });
       const m0 = fam.marriages[0];
       if (!m0.date && action.fields['Marriage Date'])  m0.date = action.fields['Marriage Date'];
-      if (!m0.plac && action.fields['Marriage Place']) m0.plac = action.fields['Marriage Place'];
+      if (!m0.plac && action.fields['Marriage Place']) setPlace(m0, action.fields['Marriage Place']);
       if (added) report.push({ type:'fam', msg:`${husbName} + ${wifeName} → ${fam.id} (+${added})` });
       continue;
     }
@@ -864,9 +874,21 @@ export function _tiParseGedcomForMerge(raw) {
 
   const indiMap = new Map(); // id -> {name,sex,birth,death,fams,famc,note}
   const famMap  = new Map(); // id -> {husb,wife,chil,marr}
+  // One LATI/LONG at a time; the pair is only remembered once both have arrived.
+  const _geoLine = (g, t2, v) => {
+    if (t2 === 'LATI') g.lat = _tiGeoNum(v);
+    else if (t2 === 'LONG') g.lon = _tiGeoNum(v);
+    if (Number.isFinite(g.lat) && Number.isFinite(g.lon)) rememberPlaceCoords(g.plac, [g.lat, g.lon]);
+  };
 
   const lines = raw.split(/\r?\n/);
   let cur = null, curType = null, subCtx = null;
+  // The import pipeline flattens people down to plain string fields, so an
+  // event's coordinates have nowhere to ride along. They are not thrown away
+  // either: they go into the map's coordinate cache under the place name, so
+  // after the merge the map already knows where the imported places are and can
+  // offer to write them back. See rememberPlaceCoords.
+  let placCtx = null, geo = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -874,6 +896,8 @@ export function _tiParseGedcomForMerge(raw) {
     const m = line.match(/^(\d+)\s+(\S+)\s*(.*)/);
     if (!m) continue;
     const level = +m[1], tag = m[2], val = m[3].trim();
+
+    if (level <= 1) { placCtx = null; geo = null; }
 
     if (level === 0) {
       subCtx = null;
@@ -900,11 +924,14 @@ export function _tiParseGedcomForMerge(raw) {
         else if (tag === 'FAMC' && val) cur.famc.push(val);
         else if (tag === 'NOTE') cur.note = val;
       } else if (level === 2) {
+        placCtx = null;
         if      (subCtx === 'BIRT' && tag === 'DATE') cur.birth.date = val;
-        else if (subCtx === 'BIRT' && tag === 'PLAC') cur.birth.plac = val;
+        else if (subCtx === 'BIRT' && tag === 'PLAC') { cur.birth.plac = val; placCtx = val; }
         else if (subCtx === 'DEAT' && tag === 'DATE') cur.death.date = val;
-        else if (subCtx === 'DEAT' && tag === 'PLAC') cur.death.plac = val;
+        else if (subCtx === 'DEAT' && tag === 'PLAC') { cur.death.plac = val; placCtx = val; }
         else if (tag === 'CONT') cur.note += '\n' + val;
+      } else if (level === 3 && tag === 'MAP' && placCtx) { geo = { plac: placCtx };
+      } else if (level === 4 && geo) { _geoLine(geo, tag, val);
       } else if (level === 3 && tag === 'CONT') { cur.note += '\n' + val; }
 
     } else if (curType === 'FAM') {
@@ -915,12 +942,14 @@ export function _tiParseGedcomForMerge(raw) {
         else if (tag === 'CHIL' && val) cur.chil.push(val);
         else if (tag === 'MARR') { if (!cur.marriages.length) cur.marriages.push({date:'',plac:'',types:[]}); subCtx = 'MARR'; }
       } else if (level === 2 && subCtx === 'MARR') {
+        placCtx = null;
         const m = cur.marriages[cur.marriages.length - 1];
         if (m) {
           if (tag === 'DATE') m.date = val;
-          else if (tag === 'PLAC') m.plac = val;
+          else if (tag === 'PLAC') { m.plac = val; placCtx = val; }
         }
-      }
+      } else if (level === 3 && tag === 'MAP' && placCtx) { geo = { plac: placCtx };
+      } else if (level === 4 && geo) { _geoLine(geo, tag, val); }
     }
   }
 

@@ -5,6 +5,7 @@ import { resetHighlight, updateHLButtons } from './relations.js';
 import { flashNode } from './render-2d.js';
 import { _setOrbitTarget3D } from './render-3d.js';
 import { _acAttachFields } from './autocomplete.js';
+import { setPlace } from './places.js';
 
 // Re-exported so the window bulk-assign in main.js still reaches them.
 export * from './autocomplete.js';
@@ -728,10 +729,10 @@ export function commitIndiEdit() {
 
   i.sex        = document.getElementById('ef-sex').value;
   i.birth.date = _gedcomDateValue('ef-bdate');
-  i.birth.plac = document.getElementById('ef-bplac').value.trim();
+  setPlace(i.birth, document.getElementById('ef-bplac').value);
   i.deceased   = document.getElementById('ef-dead').checked;
   i.death.date = _gedcomDateValue('ef-ddate');
-  i.death.plac = document.getElementById('ef-dplac').value.trim();
+  setPlace(i.death, document.getElementById('ef-dplac').value);
   i.death.caus = document.getElementById('ef-dcaus').value.trim();
   i.occu       = document.getElementById('ef-occu').value.trim();
   i.note       = document.getElementById('ef-note').value;
@@ -748,7 +749,7 @@ export function commitIndiEdit() {
     if (fam && mdateEl) {
       if (!fam.marriages[0]) fam.marriages[0] = { date: '', plac: '', types: [] };
       fam.marriages[0].date = _gedcomDateValue('ef-fam-' + sid + '-mdate');
-      fam.marriages[0].plac = (document.getElementById('ef-fam-' + sid + '-mplac')?.value || '').trim();
+      setPlace(fam.marriages[0], document.getElementById('ef-fam-' + sid + '-mplac')?.value || '');
       fam.div       = document.getElementById('ef-fam-' + sid + '-div')?.checked ?? fam.div;
     }
   }
@@ -1184,7 +1185,7 @@ export function _famEditRemoveMarr(idx) {
 export function _famEditSyncMarriagesFromDom() {
   state._famEditMarriages.forEach((m, i) => {
     m.date = _gedcomDateValue('ef-marr-' + i + '-date');
-    m.plac = (document.getElementById('ef-marr-' + i + '-plac')?.value || '').trim();
+    setPlace(m, document.getElementById('ef-marr-' + i + '-plac')?.value || '');
     m.types = [...document.querySelectorAll(`input[data-marr-idx="${i}"][data-marr-type]:checked`)].map(cb => cb.dataset.marrType);
   });
 }

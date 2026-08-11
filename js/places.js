@@ -21,7 +21,7 @@ import { state } from './state.js';
 // Three fields, and the tool has to agree with the exporter about which they
 // are — a place the collector misses is a place the merge silently leaves
 // behind. Both the read and the write below go through this one walk.
-function* _placeFields() {
+export function* placeFields() {
   for (const indi of state.individuals.values()) {
     if (indi.birth) yield indi.birth;
     if (indi.death) yield indi.death;
@@ -29,6 +29,26 @@ function* _placeFields() {
   for (const fam of state.families.values()) {
     for (const m of fam.marriages || []) yield m;
   }
+}
+
+/**
+ * The one way to write a place onto a record.
+ *
+ * A place field may carry `map: [lat, lon]`, looked up for the name that was
+ * there when it was looked up. Change the name and that coordinate is a claim
+ * about a different village — so every writer goes through here and the two
+ * fields cannot drift apart. Detail-panel edits, import merges and the
+ * place-name tool all used to set `.plac` directly, which is how a person moved
+ * from Bern to Basel and kept Bern's pin on the map.
+ *
+ * Returns true when the name actually changed.
+ */
+export function setPlace(field, value) {
+  const next = String(value == null ? '' : value).trim();
+  if (!field || next === field.plac) return false;
+  field.plac = next;
+  delete field.map;
+  return true;
 }
 
 /**
@@ -53,7 +73,7 @@ export const placeKey = foldText;
 /** Every distinct place string in the tree, with how many fields use it. */
 export function collectPlaces() {
   const counts = new Map();
-  for (const f of _placeFields()) {
+  for (const f of placeFields()) {
     const v = f.plac;
     if (v) counts.set(v, (counts.get(v) || 0) + 1);
   }
@@ -272,11 +292,17 @@ export function tidyPlace(s) {
  */
 export function applyPlaceRenames(renames, { tidy = false } = {}) {
   let changed = 0;
-  for (const f of _placeFields()) {
+  for (const f of placeFields()) {
     if (!f.plac) continue;
-    let next = renames.get(f.plac) ?? f.plac;
+    const before = f.plac;
+    const renamed = renames.get(before);
+    let next = renamed ?? before;
     if (tidy) next = tidyPlace(next);
-    if (next !== f.plac) { f.plac = next; changed++; }
+    if (next !== before) { f.plac = next; changed++; }
+    // Coordinates were looked up for the old name and are only trustworthy for
+    // it. Tidying spacing does not change which place is meant, so those keep
+    // theirs; an actual rename drops them and the map offers a fresh lookup.
+    if (renamed != null && renamed !== before) delete f.map;
   }
   return changed;
 }

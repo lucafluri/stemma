@@ -24,6 +24,8 @@ const ORDER = [
   'ui.test.js',
   'relations.test.js',
   'places.test.js',
+  'map.test.js',
+  'changes.test.js',
   'find.test.js',
   'import-ui.test.js',
   'autosave.test.js',

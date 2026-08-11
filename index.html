@@ -21,6 +21,8 @@
   <div id="dl-wrap" style="display:none">
     <button id="dl-btn" onclick="downloadGEDCOM()" data-i18n-title="topbar.saveTitle" title="Als GEDCOM speichern">&#x2B07; <span data-i18n="topbar.save">Speichern</span></button><button id="dl-format-btn" onclick="toggleExportMenu(event)" data-i18n-title="topbar.exportFormat" title="Exportformat wählen">&#x25BE;</button>
     <div id="export-dropdown">
+      <!-- What a save would write, above the list of ways to write it. -->
+      <button class="dd-review" onclick="closeExportMenu();openChangesTool()" data-i18n-title="changes.titleLong" title="Was sich seit dem Öffnen geändert hat">&#x1F4DD; <span data-i18n="changes.review">Änderungen ansehen</span></button>
       <button onclick="downloadGEDCOM();closeExportMenu()" data-i18n="export.gedcom">GEDCOM (.ged)</button>
       <button onclick="downloadJSON();closeExportMenu()" data-i18n="export.json">JSON (.json)</button>
       <button onclick="downloadYAML();closeExportMenu()" data-i18n="export.yaml">YAML (.yaml)</button>
@@ -38,6 +40,8 @@
       <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
       <button onclick="closeToolsMenu();openFindTool()" data-i18n-title="find.titleLong" title="Personen suchen und filtern">&#x1F50E; <span data-i18n="find.title">Personen suchen</span></button>
       <button onclick="closeToolsMenu();openPlacesTool()" data-i18n-title="topbar.placesTitle" title="Ortsnamen vereinheitlichen">&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></button>
+      <button onclick="closeToolsMenu();openMapView()" data-i18n-title="map.titleLong" title="Orte auf der Karte, über die Zeit">&#x1F5FA; <span data-i18n="map.title">Karte</span></button>
+      <button onclick="closeToolsMenu();openStatsTool()" data-i18n-title="stats.titleLong" title="Kennzahlen über den ganzen Stammbaum">&#x1F4CA; <span data-i18n="stats.title">Statistik</span></button>
     </div>
   </div>
   <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language">
@@ -169,11 +173,6 @@
       <button class="sidebar-btn" onclick="zoomToFit()" data-i18n="sidebar.fitAll">Alles anzeigen</button>
       <button class="sidebar-btn" onclick="autoSettle()">&#x21ba; <span data-i18n="sidebar.reloadGraph">Graph neu laden</span></button>
     </div>
-
-    <details id="stats-panel" ontoggle="toggleStatsPanel(event)">
-      <summary data-i18n="stats.title">Statistik</summary>
-      <div id="stats-body"></div>
-    </details>
 
     <details id="link-colors-panel">
       <summary data-i18n="linkColors.title">Verbindungsfarben</summary>
@@ -634,6 +633,80 @@
       <button class="import-action-btn import-action-btn--primary" onclick="applyPlacesTool()">&#x2713; <span data-i18n="places.apply">Änderungen anwenden</span></button>
       <button class="import-action-btn" onclick="closePlacesTool()" data-i18n="import.cancel">Abbrechen</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Map ─────────────────────────────────────────────────────────────────
+     The only two network calls in the app live here: basemap tiles, and the
+     place-name lookup behind the "Orte suchen" button. Neither runs on load. -->
+<div id="map-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="map.title" aria-label="Karte">
+  <div id="map-backdrop" onclick="closeMapView()"></div>
+  <div id="map-panel">
+    <div id="places-header">
+      <h2>&#x1F5FA; <span data-i18n="map.title">Karte</span></h2>
+      <button id="map-close-btn" class="modal-close-btn" onclick="closeMapView()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+
+    <div id="map-body">
+      <div id="map-canvas">
+        <svg id="map-svg">
+          <g id="map-tiles"></g>
+          <g id="map-points"></g>
+        </svg>
+        <div id="map-attrib">&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></div>
+      </div>
+      <div id="map-side">
+        <div id="map-summary"></div>
+        <div id="map-list"></div>
+        <div id="map-status"></div>
+        <!-- Only appears once there is something to write, and writes exactly
+             the places still ticked in the list above. -->
+        <button class="pl-bulk-btn pl-bulk-btn--primary" id="map-save-coords-btn" style="display:none" onclick="saveMapCoords()"></button>
+        <button class="pl-bulk-btn" id="map-geocode-btn" onclick="geocodeMapPlaces()" data-i18n="map.geocode">Orte suchen</button>
+        <p class="pl-hint" data-i18n="map.geocodeHint">Ortsnamen werden dafür einzeln an OpenStreetMap geschickt. Das ist die einzige Stelle, an der Daten aus der Datei das Gerät verlassen.</p>
+      </div>
+    </div>
+
+    <div id="map-controls">
+      <button id="map-play-btn" onclick="toggleMapPlay()" data-i18n-title="map.play" title="Zeitraum durchlaufen">&#x25B6;</button>
+      <div id="map-years">
+        <input type="range" id="map-year-from" oninput="onMapYearInput()" data-i18n-aria="map.yearFrom" aria-label="Von Jahr">
+        <input type="range" id="map-year-to" oninput="onMapYearInput()" data-i18n-aria="map.yearTo" aria-label="Bis Jahr">
+      </div>
+      <div id="map-year-label"></div>
+      <div id="map-types" onchange="onMapFilterChange()">
+        <label><input type="checkbox" id="map-type-birth" checked><span data-i18n="map.type.birth">Geburt</span></label>
+        <label><input type="checkbox" id="map-type-death" checked><span data-i18n="map.type.death">Tod</span></label>
+        <label><input type="checkbox" id="map-type-marriage" checked><span data-i18n="map.type.marriage">Heirat</span></label>
+        <label data-i18n-title="map.undatedTitle" title="Ereignisse ohne Jahr lassen sich nicht einordnen — sie sind entweder immer oder nie dabei."><input type="checkbox" id="map-undated"><span data-i18n="map.undated">ohne Jahr</span></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Statistics ──────────────────────────────────────────────────────── -->
+<div id="stats-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="stats.title" aria-label="Statistik">
+  <div id="stats-backdrop" onclick="closeStatsTool()"></div>
+  <div id="stats-panel">
+    <div id="places-header">
+      <h2>&#x1F4CA; <span data-i18n="stats.title">Statistik</span></h2>
+      <button id="stats-close-btn" class="modal-close-btn" onclick="closeStatsTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+    <div id="stats-body"></div>
+  </div>
+</div>
+
+<!-- ── Changes since the file was opened ───────────────────────────────── -->
+<div id="changes-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="changes.title" aria-label="Änderungen">
+  <div id="changes-backdrop" onclick="closeChangesTool()"></div>
+  <div id="changes-panel">
+    <div id="places-header">
+      <h2>&#x1F4DD; <span data-i18n="changes.title">Änderungen</span></h2>
+      <button id="changes-close-btn" class="modal-close-btn" onclick="closeChangesTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+    <p class="pl-hint" data-i18n="changes.hint">Alles, was sich seit dem Öffnen der Datei bzw. dem letzten Speichern geändert hat — genau das, was beim Speichern in die Datei geht.</p>
+    <div id="changes-summary"></div>
+    <div id="changes-body"></div>
   </div>
 </div>
 

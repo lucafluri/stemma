@@ -1594,6 +1594,9 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
 }
 #export-dropdown button:last-child, #tools-dropdown button:last-child { border-bottom: none; }
 #export-dropdown button:hover, #tools-dropdown button:hover { background: var(--c-5); color: var(--c-11); }
+/* Reviewing the changes is not a fourth export format; the heavier rule keeps
+   it from being read as one by someone aiming for GEDCOM. */
+#export-dropdown .dd-review { border-bottom: 1px solid var(--c-7); color: var(--c-11); }
 
 /* ── Tools menu ──────────────────────────────────────────────
    Look comes from the export dropdown's rules above; only the anchoring
@@ -3201,8 +3204,38 @@ body.relation-picking * { cursor: crosshair !important; }
   color: var(--c-13);
 }
 
-/* ── Statistics panel ── */
-#stats-body { padding: 2px 0 6px; }
+/* ── Statistics window ── */
+#stats-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#stats-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65); }
+#stats-panel {
+  position: relative;
+  background: var(--c-1);
+  border: 1px solid var(--c-5);
+  border-radius: var(--r-lg);
+  width: min(560px, 94vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  padding: 0 18px 16px;
+  overflow: hidden;
+  box-shadow: var(--sh-3);
+}
+/* The figures were written for a 220px sidebar; with the room a window gives,
+   two columns keep the whole report on one screen instead of one long scroll. */
+#stats-body {
+  padding: 10px 4px 6px 0;
+  overflow-y: auto;
+  columns: 240px 2;
+  column-gap: 26px;
+}
+#stats-body > * { break-inside: avoid; }
 .stat-row {
   display: flex;
   justify-content: space-between;
@@ -3305,7 +3338,7 @@ body.relation-picking * { cursor: crosshair !important; }
   flex-shrink: 0;
 }
 #places-header h2 { margin: 0; font-size: 17px; font-weight: 600; color: var(--c-12); }
-#places-close-btn {
+#places-close-btn, .modal-close-btn {
   background: none;
   border: none;
   color: var(--c-8);
@@ -3315,7 +3348,7 @@ body.relation-picking * { cursor: crosshair !important; }
   border-radius: var(--r-sm);
   line-height: 1;
 }
-#places-close-btn:hover { color: var(--c-12); background: var(--c-4); }
+#places-close-btn:hover, .modal-close-btn:hover { color: var(--c-12); background: var(--c-4); }
 
 .pl-hint { margin: 0; font-size: 12.5px; color: var(--c-8); line-height: 1.5; flex-shrink: 0; }
 #places-summary {
@@ -3615,4 +3648,348 @@ body.relation-picking * { cursor: crosshair !important; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Map ──────────────────────────────────────────────────────────────────
+   Nearly full-screen: a map that is not big enough to pan around in is a
+   picture, and the whole point of this one is that it can be explored. */
+#map-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#map-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65); }
+#map-panel {
+  position: relative;
+  background: var(--c-1);
+  border: 1px solid var(--c-5);
+  border-radius: var(--r-lg);
+  width: min(1240px, 96vw);
+  height: min(92vh, 940px);
+  display: flex;
+  flex-direction: column;
+  padding: 0 18px 14px;
+  overflow: hidden;
+  box-shadow: var(--sh-3);
+}
+#map-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+}
+#map-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--c-5);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  /* Shows through wherever tiles have not loaded — offline, or over the sea. */
+  background: var(--c-0);
+}
+#map-svg { width: 100%; height: 100%; display: block; cursor: grab; }
+#map-svg:active { cursor: grabbing; }
+/* Attribution is a condition of using the tiles, so it is not optional chrome. */
+#map-attrib {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 10px;
+  padding: 2px 6px;
+  color: var(--c-10);
+  background: rgba(7, 9, 12, 0.72);
+  border-top-left-radius: var(--r-xs);
+}
+#map-attrib a { color: var(--accent-text); }
+
+.map-dot {
+  fill: var(--accent);
+  fill-opacity: 0.45;
+  stroke: var(--c-13);
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+  cursor: pointer;
+}
+.map-dot:hover { fill-opacity: 0.75; }
+.map-dot--sel { fill: var(--warn-bright); fill-opacity: 0.85; stroke-width: 2; }
+
+#map-side {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+#map-summary {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-8);
+  line-height: 1.5;
+}
+#map-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.map-list-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-12);
+  padding: 4px 2px;
+  position: sticky;
+  top: 0;
+  background: var(--c-1);
+}
+.map-back {
+  background: none;
+  border: none;
+  color: var(--accent-text);
+  font-size: 12px;
+  text-align: left;
+  padding: 2px;
+  cursor: pointer;
+}
+.map-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--r-xs);
+  color: var(--c-11);
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.map-row:hover { background: var(--c-3); color: var(--c-13); }
+/* A place with no coordinates is still in the list — it is how you find out
+   which ones the lookup has not reached. */
+.map-row--unlocated { color: var(--c-8); font-style: italic; }
+.map-row-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-row-year { color: var(--c-8); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.map-row-type { font-size: 10px; color: var(--c-9); flex-shrink: 0; }
+.map-row-type--birth { color: #6fbf73; }
+.map-row-type--death { color: var(--c-9); }
+.map-row-type--marriage { color: #b07cd6; }
+
+#map-status { font-size: 11px; color: var(--c-9); min-height: 14px; line-height: 1.4; }
+
+#map-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--c-4);
+  padding-top: 10px;
+  flex-wrap: wrap;
+}
+#map-play-btn {
+  background: var(--c-3);
+  color: var(--c-11);
+  border: 1px solid var(--c-5);
+  border-radius: var(--r-sm);
+  width: 32px;
+  height: 30px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#map-play-btn:hover { background: var(--c-5); color: var(--c-13); }
+/* Two sliders stacked rather than side by side: they share one scale, and a
+   split scale makes "1820–1890" impossible to read off at a glance. */
+#map-years { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 2px; }
+#map-years input[type=range] { width: 100%; }
+#map-year-label {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-12);
+  min-width: 108px;
+  text-align: center;
+}
+#map-types { display: flex; gap: 12px; flex-wrap: wrap; }
+#map-types label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--c-10);
+  cursor: pointer;
+}
+
+@media (max-width: 820px) {
+  #map-body { flex-direction: column; }
+  #map-side { width: auto; max-height: 34%; }
+  #map-canvas { min-height: 240px; }
+}
+
+/* A place whose coordinates are not in the records yet: the tick is the
+   approval, so it sits outside the row button rather than inside it. */
+.map-row-wrap { display: flex; align-items: center; gap: 6px; }
+.map-row-wrap .map-row { flex: 1; min-width: 0; }
+.map-tick { flex-shrink: 0; cursor: pointer; }
+.pl-bulk-btn--primary {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid-border);
+  color: var(--c-13);
+}
+.pl-bulk-btn--primary:hover { background: var(--accent-solid-hover); color: var(--c-13); }
+
+/* Correcting one place's coordinates, inside its own event list. */
+.map-fix {
+  border: 1px solid var(--c-4);
+  border-radius: var(--r-sm);
+  padding: 8px;
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--c-2);
+}
+.map-fix-here { display: flex; align-items: baseline; gap: 8px; }
+.map-coord { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--c-11); }
+.map-coord--none { color: var(--c-8); font-style: italic; }
+.map-fix-clear {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--c-9);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.map-fix-clear:hover { color: var(--warn-bright); }
+.map-fix-row { display: flex; gap: 6px; }
+.map-fix-row .edit-input { flex: 1; min-width: 0; }
+.map-fix-hint { margin: 0; font-size: 11px; color: var(--c-8); line-height: 1.45; }
+.map-fix-note { font-size: 11.5px; color: var(--c-9); padding: 2px 0; }
+.map-fix-note--err { color: var(--warn-bright); }
+/* Candidates wrap rather than ellipsise: a Nominatim display_name is the whole
+   administrative chain, and the tail is exactly what tells two apart. */
+.map-cand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  background: var(--c-1);
+  border: 1px solid var(--c-4);
+  border-radius: var(--r-xs);
+  color: var(--c-11);
+  font-size: 11.5px;
+  line-height: 1.35;
+  padding: 5px 7px;
+  cursor: pointer;
+}
+.map-cand:hover { background: var(--c-3); border-color: var(--accent-solid-border); color: var(--c-13); }
+.map-cand-ll { color: var(--c-8); font-variant-numeric: tabular-nums; font-size: 10.5px; }
+
+/* ── Changes since the file was opened ── */
+#changes-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#changes-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65); }
+#changes-panel {
+  position: relative;
+  background: var(--c-1);
+  border: 1px solid var(--c-5);
+  border-radius: var(--r-lg);
+  width: min(680px, 94vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 16px;
+  overflow: hidden;
+  box-shadow: var(--sh-3);
+}
+#changes-summary {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-8);
+  flex-shrink: 0;
+}
+#changes-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+.ch-section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-12);
+  padding: 10px 2px 2px;
+  position: sticky;
+  top: 0;
+  background: var(--c-1);
+}
+.ch-rec {
+  border: 1px solid var(--c-4);
+  border-left: 3px solid var(--c-6);
+  border-radius: var(--r-sm);
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ch-rec--added   { border-left-color: #6fbf73; }
+.ch-rec--removed { border-left-color: #d06a6a; }
+.ch-rec--changed { border-left-color: var(--accent); }
+.ch-rec-head { display: flex; align-items: baseline; gap: 8px; }
+.ch-rec-name { font-size: 13px; color: var(--c-12); font-weight: 600; }
+.ch-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ch-badge--added   { background: #1d3a22; color: #8fd694; }
+.ch-badge--removed { background: #3a1d1d; color: #e08d8d; }
+.ch-badge--changed { background: var(--accent-soft); color: var(--accent-text); }
+/* Old and new side by side. They wrap rather than truncate: a note is often the
+   thing that changed, and an ellipsised note says nothing at all. */
+.ch-field {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) 1fr auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 1px 0;
+}
+.ch-key { color: var(--c-9); }
+.ch-val { overflow-wrap: anywhere; }
+.ch-val--before { color: var(--c-9); text-decoration: line-through; text-decoration-color: var(--c-7); }
+.ch-val--after  { color: var(--c-12); }
+.ch-val--empty  { font-style: italic; color: var(--c-7); text-decoration: none; }
+.ch-arrow { color: var(--c-7); }
+
+@media (max-width: 620px) {
+  .ch-field { grid-template-columns: 1fr; gap: 1px; }
+  .ch-arrow { display: none; }
 }

@@ -48,6 +48,43 @@
     };
   }
 
+  // ─── Place coordinates ──────────────────────────────────────────────────────
+  //
+  // A place field may carry `map: [lat, lon]` in decimal degrees, south and west
+  // negative. GEDCOM writes it as a MAP subtree under the event's PLAC:
+  //
+  //   2 PLAC Bern
+  //   3 MAP
+  //   4 LATI N46.947975
+  //   4 LONG E7.447447
+  //
+  // 5.5.1 has no place record to hang coordinates off, so they repeat per event
+  // — which is what Gramps, RootsMagic and Ancestry all write, and therefore
+  // what other software reads. JSON and YAML get the field for free, since both
+  // serialise the record objects as they are.
+
+  /** "N46.947975", "-7.44" → a number; anything unparseable → null. */
+  function _geoNum(v) {
+    const m = String(v == null ? '' : v).trim().match(/^([NSEW])?\s*(-?\d+(?:\.\d+)?)$/i);
+    if (!m) return null;
+    const n = +m[2];
+    return /^[SW]$/i.test(m[1] || '') ? -Math.abs(n) : n;
+  }
+
+  function _setGeo(field, idx, val) {
+    const n = _geoNum(val);
+    if (n == null || !field) return;
+    if (!Array.isArray(field.map)) field.map = [null, null];
+    field.map[idx] = n;
+  }
+
+  /** The MAP subtree for a place field, or nothing when it has no usable pair. */
+  function _mapLines(level, ll) {
+    if (!Array.isArray(ll) || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return [];
+    const f = (v, pos, neg) => (v < 0 ? neg : pos) + Math.abs(v).toFixed(6);
+    return [`${level} MAP`, `${level + 1} LATI ${f(ll[0], 'N', 'S')}`, `${level + 1} LONG ${f(ll[1], 'E', 'W')}`];
+  }
+
   // ─── GEDCOM parser ───────────────────────────────────────────────────────────
 
   /**
@@ -66,6 +103,11 @@
     let cur     = null;
     let curType = null;  // 'INDI' | 'FAM' | null
     let subCtx  = null;  // tag context string or null
+    // The place field whose PLAC line we are inside, and whether its MAP
+    // subtree is open — LATI/LONG are two levels below the event, so the walk
+    // has to remember which of birth/death/marriage it is descending through.
+    let placCtx = null;
+    let mapCtx  = null;
     let capturingOther = false;  // inside an unrecognized level-0 record
 
     for (const rawLine of lines) {
@@ -85,6 +127,7 @@
       // ── Level 0: new top-level record ──────────────────────────────────────
       if (level === 0) {
         subCtx = null;
+        placCtx = mapCtx = null;
         capturingOther = false;  // re-decided below for this record
 
         // Reject malformed/hostile xref ids (e.g. containing quotes) — these get
@@ -124,6 +167,7 @@
       if (curType === 'INDI') {
         if (level === 1) {
           subCtx = null;
+          placCtx = mapCtx = null;
           switch (tag) {
             case 'NAME': {
               const nr = { raw: val, givn: '', surn: '', type: '' };
@@ -148,6 +192,9 @@
         } else if (subCtx === '_UNK') {
           cur._unknown.push(rawLine);
         } else if (level === 2) {
+          // Any level-2 tag closes the previous PLAC's subtree, so a MAP under
+          // one event's place cannot leak onto the next.
+          placCtx = mapCtx = null;
           if (subCtx && subCtx.startsWith('NAME_')) {
             const nr = cur._names[parseInt(subCtx.slice(5), 10)];
             if (nr) {
@@ -162,10 +209,11 @@
               if (ym) cur.birthYear = +ym[1];
             } else if (tag === 'PLAC') {
               cur.birth.plac = val;
+              placCtx = cur.birth;
             }
           } else if (subCtx === 'DEAT') {
             if      (tag === 'DATE') cur.death.date = val;
-            else if (tag === 'PLAC') cur.death.plac = val;
+            else if (tag === 'PLAC') { cur.death.plac = val; placCtx = cur.death; }
             else if (tag === 'CAUS') cur.death.caus = val;
           } else if (subCtx === 'NOTE') {
             if      (tag === 'CONT') cur.note += '\n' + rawVal;
@@ -176,6 +224,11 @@
             else if (tag === 'CONT') cur.note += '\n' + rawVal;
             else if (tag === 'CONC') cur.note += rawVal;
           }
+        } else if (level === 3 && tag === 'MAP' && placCtx) {
+          mapCtx = placCtx;
+        } else if (level === 4 && mapCtx) {
+          if      (tag === 'LATI') _setGeo(mapCtx, 0, val);
+          else if (tag === 'LONG') _setGeo(mapCtx, 1, val);
         } else if (level === 3 && tag === 'CONT') {
           cur.note += '\n' + rawVal;
         } else if (level === 3 && tag === 'CONC') {
@@ -186,6 +239,7 @@
       } else if (curType === 'FAM') {
         if (level === 1) {
           subCtx = null;
+          placCtx = mapCtx = null;
           switch (tag) {
             case 'HUSB': cur.husb = val; break;
             case 'WIFE': cur.wife = val; break;
@@ -204,16 +258,22 @@
         } else if (subCtx === '_UNK') {
           cur._unknown.push(rawLine);
         } else if (level === 2) {
+          placCtx = mapCtx = null;
           if (subCtx === 'MARR') {
             const mm = cur.marriages[cur.marriages.length - 1];
             if (mm) {
               if      (tag === 'DATE') mm.date  = val;
-              else if (tag === 'PLAC') mm.plac  = val;
+              else if (tag === 'PLAC') { mm.plac = val; placCtx = mm; }
               else if (tag === 'TYPE') mm.types = val.split(',').map(s => s.trim()).filter(Boolean);
             }
           } else if (subCtx === 'DIV') {
             if (tag === 'DATE') cur.divDate = val;
           }
+        } else if (level === 3 && tag === 'MAP' && placCtx) {
+          mapCtx = placCtx;
+        } else if (level === 4 && mapCtx) {
+          if      (tag === 'LATI') _setGeo(mapCtx, 0, val);
+          else if (tag === 'LONG') _setGeo(mapCtx, 1, val);
         }
       }
     }
@@ -349,14 +409,14 @@
       if (i.birth.date || i.birth.plac) {
         lines.push('1 BIRT');
         if (i.birth.date) lines.push(`2 DATE ${i.birth.date}`);
-        if (i.birth.plac) lines.push(`2 PLAC ${i.birth.plac}`);
+        if (i.birth.plac) lines.push(`2 PLAC ${i.birth.plac}`, ..._mapLines(3, i.birth.map));
       }
 
       if (i.deceased || i.death.date || i.death.plac || i.death.caus) {
         if (i.death.date || i.death.plac || i.death.caus) {
           lines.push('1 DEAT');
           if (i.death.date) lines.push(`2 DATE ${i.death.date}`);
-          if (i.death.plac) lines.push(`2 PLAC ${i.death.plac}`);
+          if (i.death.plac) lines.push(`2 PLAC ${i.death.plac}`, ..._mapLines(3, i.death.map));
           if (i.death.caus) lines.push(`2 CAUS ${i.death.caus}`);
         } else {
           lines.push('1 DEAT Y');
@@ -387,7 +447,7 @@
         if (!mm.date && !mm.plac && !(mm.types && mm.types.length)) continue;
         lines.push('1 MARR');
         if (mm.date)           lines.push(`2 DATE ${mm.date}`);
-        if (mm.plac)           lines.push(`2 PLAC ${mm.plac}`);
+        if (mm.plac)           lines.push(`2 PLAC ${mm.plac}`, ..._mapLines(3, mm.map));
         if (mm.types && mm.types.length) lines.push(`2 TYPE ${mm.types.join(', ')}`);
       }
       if (f.div) {
