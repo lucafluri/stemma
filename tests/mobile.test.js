@@ -27,7 +27,7 @@ const { setupDom } = require('./test-setup.js');
 
 setupDom();
 
-const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
 const setWidth = w => { global.window.innerWidth = w; };
 
 let passed = 0, failed = 0;

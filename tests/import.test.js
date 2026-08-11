@@ -21,7 +21,7 @@ const path = require('path');
 // import.js. Both are read so a function moving between them does not break
 // the lift — what is under test is the function, not which file holds it.
 const src = ['import.js', 'import-parse.js']
-  .map(f => fs.readFileSync(path.join(__dirname, 'js', f), 'utf8'))
+  .map(f => fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'))
   .join('\n');
 
 function lift(name) {

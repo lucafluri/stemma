@@ -43,8 +43,8 @@ function seed(state) {
 }
 
 (async () => {
-  const Imp = await import('./js/import.js');
-  const { state } = await import('./js/state.js');
+  const Imp = await import('../js/import.js');
+  const { state } = await import('../js/state.js');
   await new Promise(r => setTimeout(r, 50));
 
   // jsdom has finished parsing long before the module graph loads, so the

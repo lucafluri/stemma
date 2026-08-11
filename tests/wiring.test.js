@@ -18,6 +18,7 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 const { setupDom } = require('./test-setup.js');
 
 setupDom();
@@ -48,12 +49,12 @@ function handlerNames(html) {
 (async () => {
   // js/main.js is what puts every module's exports on window, so importing it
   // is what makes the inline handlers resolvable — exactly as in the browser.
-  await import('./js/main.js');
+  await import('../js/main.js');
   await new Promise(r => setTimeout(r, 100));
   document.dispatchEvent(new window.Event('DOMContentLoaded'));
   await new Promise(r => setTimeout(r, 50));
 
-  const names = handlerNames(fs.readFileSync('index.html', 'utf8'));
+  const names = handlerNames(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8'));
 
   console.log('\ninline handlers in index.html');
 

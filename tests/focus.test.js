@@ -18,7 +18,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const JS_DIR = path.join(__dirname, 'js');
+const JS_DIR = path.join(__dirname, '..', 'js');
 const src = fs.readdirSync(JS_DIR)
   .filter(f => f.endsWith('.js'))
   .map(f => fs.readFileSync(path.join(JS_DIR, f), 'utf8'))

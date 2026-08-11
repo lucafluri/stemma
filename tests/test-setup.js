@@ -16,7 +16,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 function setupDom() {
-  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   // 'outside-only' lets us run classic <script>-style code directly against
   // the jsdom window's realm (via window.eval), matching how i18n.js expects
   // to be loaded -- it assigns `const I18N` / `function t` into script scope,
@@ -62,11 +62,11 @@ function setupDom() {
   // via module.exports -- run it in the jsdom window's own realm so its
   // top-level `const`/`function` declarations land in window/script scope,
   // exactly like a real <script src="i18n.js">.
-  window.eval(fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8'));
+  window.eval(fs.readFileSync(path.join(__dirname, '..', 'i18n.js'), 'utf8'));
   global.t = window.t;
 
   // gedcom.js is a UMD module and works fine via plain require().
-  global.GEDCOMModule = require('./gedcom.js');
+  global.GEDCOMModule = require('../gedcom.js');
 
   return dom;
 }

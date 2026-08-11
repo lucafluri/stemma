@@ -25,7 +25,7 @@ function test(name, fn) {
 }
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const { state } = await import(url('state.js'));
   const rel = await import(url('relations.js'));
 

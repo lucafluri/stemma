@@ -14,7 +14,7 @@ const {
   importJSON,
   exportYAML,
   importYAML
-} = require('./gedcom.js');
+} = require('../gedcom.js');
 
 let passed = 0;
 let failed = 0;
@@ -615,7 +615,7 @@ test('JSON round-trip preserves unknown level-1 subtree', () => {
 // plain `state` — it only ever reads state.nodes/individuals/families.
 const fs = require('fs');
 const path = require('path');
-const ioSrc = fs.readFileSync(path.join(__dirname, 'js', 'gedcom-io.js'), 'utf8');
+const ioSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'gedcom-io.js'), 'utf8');
 const subsetSrc = ioSrc.match(/export function visibleSubset\(\) \{[\s\S]*?\n\}/)[0].replace('export ', '');
 const visibleSubset = state =>
   new Function('state', `${subsetSrc}\nreturn visibleSubset();`)(state);

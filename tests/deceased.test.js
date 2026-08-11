@@ -51,7 +51,7 @@ function buildLine(depth, youngestBirthYear) {
 }
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const gd = await import(url('graph-data.js'));
   const { state } = await import(url('state.js'));
 

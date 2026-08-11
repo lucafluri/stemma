@@ -82,7 +82,7 @@ function installFakeIndexedDB() {
 }
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const io = await import(url('gedcom-io.js'));
   const { state } = await import(url('state.js'));
 

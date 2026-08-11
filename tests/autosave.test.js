@@ -23,8 +23,8 @@ async function test(name, fn) {
 }
 
 (async () => {
-  const Io = await import('./js/gedcom-io.js');
-  const { state } = await import('./js/state.js');
+  const Io = await import('../js/gedcom-io.js');
+  const { state } = await import('../js/state.js');
   await new Promise(r => setTimeout(r, 50));
   document.dispatchEvent(new window.Event('DOMContentLoaded'));
 

@@ -1,112 +1,33 @@
 # Stammbaum Visualisierung
 
-A browser-based family tree viewer and editor for GEDCOM files. Loads a `.ged`
-(or JSON/YAML) file, draws it as either a classical genealogical chart or a
-force-directed graph in 2D, and as an orbitable graph in 3D — and lets you edit
-people, families and relationships and save the result back out.
+A browser-based family tree viewer and editor for GEDCOM files.
+Load a `.ged` (or JSON/YAML) file, view it as a 2D chart or force graph, or as an orbitable 3D graph, then edit people, families and relationships and save back.
 
-No build step and nothing to install. It is a static page; the four runtime
-dependencies — d3, three.js, OrbitControls and 3d-force-graph — are vendored
-into `vendor/` and loaded as plain `<script>` tags, so the app starts offline
-and does not depend on a CDN being up or trustworthy. The one exception is
-Tesseract, fetched from a CDN on demand if you use OCR import — it pulls its
-own worker and wasm files at runtime, so vendoring just the entry script would
-not have made that path work offline either.
-
-**Everything stays in your browser.** The file you open is never uploaded, and
-nothing you import is sent anywhere. Tesseract is the only thing fetched at
-runtime, and it fetches code, not your data — the OCR itself runs locally.
-
----
+Your data stays in the browser — nothing is uploaded.
 
 ## Running it
 
 ```bash
 git clone https://github.com/lucafluri/gedcom_vis
 cd gedcom_vis
+python -m http.server 8000
 ```
 
-Then serve the folder — `js/` is loaded as native ES modules, which browsers
-refuse to fetch over `file://`, so opening `index.html` by double-clicking it
-will not work:
+Then open `http://localhost:8000`. The app is a static page; `js/` is loaded as native ES modules, so opening `index.html` directly via `file://` will not work.
 
-```bash
-python -m http.server 8000    # then visit http://localhost:8000
-```
+## Features
 
-Deployed automatically to GitHub Pages from `master`
-(`.github/workflows/static.yml` uploads the repository as-is).
+- **Two views** — press `V` to switch between 2D (classical chart or force graph) and 3D.
+- **Focus mode** — narrow the chart to one person and relatives out to a chosen distance.
+- **Auto-deceased** — people born (or estimated) more than 110 years ago are marked deceased on save.
+- **Editing** — click a person or family to edit; add parents, spouses and children.
+- **Import** — load GEDCOM/JSON/YAML into an empty tree, or review changes before merging into an existing tree. Plain text and scanned-chart images (OCR via Tesseract) are also supported.
+- **Export** — save as GEDCOM, JSON or YAML; the 2D chart also exports as PNG or SVG.
+- **Working file** — in Chromium-based browsers you can reopen the last file and save back over it.
 
----
+## Keyboard
 
-## What it does
-
-**Two views.** `V` switches between them. A fresh visit opens in 3D; from the
-second visit on, the view you last used is remembered.
-
-- **2D** — a classical family tree chart (generations on rows, marriage markers
-  between couples, sibling bars bracketing children), or a force-directed graph
-  when the tree layout is switched off.
-- **3D** — the same graph in space, stratified by birth year or by generation,
-  with an optional time axis.
-
-**Starting out.** With nothing loaded the canvas offers the two things that are
-actually possible — open a file, or create the first person — and the sidebar
-stays out of the way until there is a tree for it to act on. Controls that
-cannot do anything in the current mode (physics under the classical chart, the
-3D appearance panel in 2D, the image exports in 3D) hide rather than sit there
-inert.
-
-**Focus.** The 2D view shows the whole file by default. Focusing narrows it to one
-person and their relatives out to a chosen distance — direct line, siblings,
-and cousins to a configurable degree. The panel shows how many people are on
-screen and how many are hidden. `+N` chips mark where a branch was cut; clicking
-one opens the next generation.
-
-**Auto-deceased.** Anyone born (or, lacking a recorded date, *estimated* from
-relatives' years) more than 110 years ago is marked deceased. On the next save
-that writes `1 DEAT Y` into the file — including for people whose year was only
-a guess. When that happens, the status line after saving/exporting names who and
-their estimated year, so it is never a silent edit.
-
-**Editing.** Click a person or family to open the detail panel; add parents,
-spouses and children from the buttons there. Name, place and occupation fields
-suggest values already in the tree as you type.
-
-**Import.** GEDCOM, JSON and YAML load directly into an empty tree. Onto a tree
-that already has people in it — and for plain text, or images of scanned charts
-read with OCR (Tesseract) — the file goes through a review step instead.
-
-That step is a diff table, one row per record in the incoming file: what is new,
-what fills a gap, what disagrees, and what the tree already holds identically.
-Where the two sources disagree the row shows both answers side by side and
-clicking picks the winner; expanding a row opens the full editing card. Chips
-above filter to one kind, and bulk approve/skip acts on whatever is filtered.
-
-Children of a couple the tree already records are added to that family rather
-than to a duplicate of it. Every proposed person is checked for whether it would
-actually hang off the existing tree afterwards, and the ones that would not are
-flagged and filterable. A person nothing in the file ties to the tree is offered
-a *link* (same person) or *attach* (make them somebody's child); a person whose
-tie is merely sitting in a row that has not been approved yet says so instead,
-and the flag clears the moment that other row is approved. While **only import
-connected data** is on — it is by default — applying stops rather than parking a
-second, detached tree beside the first.
-
-**Export.** GEDCOM, JSON or YAML, either the whole tree or just the people
-currently on screen. The 2D chart also exports as PNG or SVG.
-
-### The working file
-
-In Chromium-based browsers the topbar has a file button that reopens the last
-file you had open, and a save button that writes back over it — both showing the
-filename. This uses the File System Access API, which Firefox and mobile browsers
-do not implement; there both buttons hide themselves and saving falls back to
-downloading a copy.
-
-### Keyboard
-
-| Key | |
+| Key | Action |
 |---|---|
 | `V` | switch 2D / 3D |
 | `F` | fit everything on screen |
@@ -120,90 +41,35 @@ downloading a copy.
 | `0` `+` `-` | reset zoom, zoom in, zoom out |
 | `Esc` | close the detail panel |
 
----
+## Project layout
 
-## Layout
-
-Everything at the repository root is served as-is. There is no bundler; `js/` is
-loaded as native ES modules (`js/package.json` only marks the directory as
-`"type": "module"` for the Node test runner).
-
-| | |
+| File / folder | Purpose |
 |---|---|
-| `index.html` | the whole UI — every panel and dialog, with inline handlers |
-| `styles.css` | all styling, including the ≤768px mobile rules |
-| `gedcom.js` | GEDCOM/JSON/YAML parsing and serialisation (UMD, also used by tests) |
+| `index.html` | the UI |
+| `styles.css` | all styling |
+| `gedcom.js` | GEDCOM/JSON/YAML parser and serializer |
 | `i18n.js` | German and English strings |
-| `js/state.js` | the single mutable `state` object every module shares |
-| `js/graph-data.js` | node/link building, the focus filter, generation depths, year estimates |
-| `js/tree-layout.js` | the 2D genealogical chart — rows, ordering, coordinates, connectors |
-| `js/render-2d.js` | SVG rendering, the force simulation, zoom, image export |
-| `js/render-3d.js` | the 3D scene, camera, labels and time axis |
-| `js/panels.js` | detail panel and all the editing forms |
-| `js/import.js` | the import wizard: text parsing, OCR, merge review |
-| `js/stats.js` | the statistics panel — figures about the tree as a whole |
-| `js/relations.js` | highlighting and the "how are these two related" tool |
-| `js/colors.js` | surname palette and node/link colouring |
-| `js/gedcom-io.js` | file loading, saving, autosave, the working-file handle |
-| `js/main.js` | wiring: keyboard, startup, and exposing modules on `window` |
-
-Inline `onclick=` handlers in `index.html` call module functions directly, which
-works because `js/main.js` assigns every module's exports onto `window` at
-startup. Adding a new handler means exporting the function — nothing else.
-
----
+| `js/` | app modules (state, rendering, import, etc.) |
+| `vendor/` | vendored runtime dependencies (d3, three.js, etc.) |
+| `tests/` | plain Node test suites |
 
 ## Tests
 
 ```bash
-npm install    # jsdom, the only dependency, and only for tests
+npm install   # only jsdom is needed
 npm test
 ```
 
-Sixteen suites, no framework — plain `node` scripts with `assert`:
+## Browser support
 
-| | |
-|---|---|
-| `gedcom.test.js` | parsing, serialisation, round-trips, subset export |
-| `focus.test.js` | the focus filter and the whole 2D chart layout |
-| `import.test.js` | linking imported people to existing records, the merge diff, and whether an import lands connected |
-| `merge.test.js` | the review screen: warnings that follow the approvals, and the apply guard |
-| `deceased.test.js` | auto-marking long-dead people |
-| `hover.test.js` | the text on a person's box |
-| `stats.test.js` | the statistics figures and how they are rendered |
-| `autocomplete.test.js` | name suggestions and which form fields get them |
-| `physics.test.js` | what dragging a physics slider costs |
-| `mobile.test.js` | the 3D view's behaviour on a narrow viewport |
-| `ui.test.js` | which controls are offered, and when — the empty state, and hiding controls that would act on nothing |
-| `workfile.test.js` | reopening and saving back over the same file |
-| `relations.test.js` | the relation tool's path-based labels, including in-laws reached through a spouse edge |
-| `import-ui.test.js` | the review screen itself — the diff table, the filter chips and their counts |
-| `autosave.test.js` | the unsaved-work warning, and when the autosave has made it unnecessary |
-| `wiring.test.js` | that every inline `onclick` in `index.html` resolves to a real function |
-
-`test-setup.js` builds a jsdom window from `index.html` with stubs for the
-libraries that arrive via `<script>` (d3, THREE, ForceGraph3D), which is enough
-for the real module graph to load. Suites that need the browser use it; the
-purely computational ones lift the function under test out of the source.
-
-Layout tests are written against what a reader actually notices — couples drawn
-side by side, no two boxes overlapping, no connector straying across the chart —
-rather than against coordinates, so they survive tuning.
-
----
+- **Chromium / Firefox / Safari** run the app.
+- **Working file (reopen + save in place)** requires the File System Access API — Chromium only. Elsewhere the buttons hide and saving falls back to a download.
+- **3D on mobile** reduces resolution and disables name labels by default.
 
 ## Configuration
 
-`localStorage.perfLog = '1'` turns on render and rebuild timings in the console.
+Set `localStorage.perfLog = '1'` to enable render/rebuild timings in the console.
 
----
+## Deployment
 
-## Browser support
-
-Chromium, Firefox and Safari all run the app. Two things degrade:
-
-- **Reopening and saving back over a file** needs the File System Access API —
-  Chromium only. Elsewhere the buttons are hidden and export downloads a copy.
-- **3D on mobile** caps the renderer pixel ratio, lowers sphere resolution and
-  defaults name labels off, since a hundred canvas labels on a phone screen is
-  neither readable nor affordable.
+GitHub Pages deploys the repository as-is from `master` (see `.github/workflows/static.yml`).

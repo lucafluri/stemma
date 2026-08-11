@@ -25,7 +25,7 @@ async function test(name, fn) {
 }
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const r2d = await import(url('render-2d.js'));
   const { state } = await import(url('state.js'));
 

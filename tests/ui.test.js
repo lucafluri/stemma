@@ -32,7 +32,7 @@ const shown = id => {
 };
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const { state }          = await import(url('state.js'));
   const { showDataUI }     = await import(url('gedcom-io.js'));
   const { updateViewToggleUI } = await import(url('render-3d.js'));

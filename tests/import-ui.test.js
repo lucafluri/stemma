@@ -59,8 +59,8 @@ const chipByKey = key => chips().find(c => (c.getAttribute('onclick') || '').inc
 const chipCount = key => Number(chipByKey(key).querySelector('b').textContent);
 
 (async () => {
-  const Imp = await import('./js/import.js');
-  const { state } = await import('./js/state.js');
+  const Imp = await import('../js/import.js');
+  const { state } = await import('../js/state.js');
   await new Promise(r => setTimeout(r, 50));
 
   // jsdom finished parsing long before the module graph loaded, so the

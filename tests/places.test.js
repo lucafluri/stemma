@@ -31,7 +31,7 @@ const p = (id, bplac, dplac) => ({
 });
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const places = await import(url('places.js'));
   const { state } = await import(url('state.js'));
 

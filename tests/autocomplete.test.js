@@ -30,7 +30,7 @@ const p = (id, o = {}) => Object.assign({
 }, o);
 
 (async () => {
-  const url = f => pathToFileURL(path.join(__dirname, 'js', f)).href;
+  const url = f => pathToFileURL(path.join(__dirname, '..', 'js', f)).href;
   const panels = await import(url('panels.js'));
   const { state } = await import(url('state.js'));
 
