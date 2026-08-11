@@ -9,14 +9,22 @@ import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, initGr
 
 export function _setDirty(v) {
   state._gedcomDirty = v;
+  // These edits are newer than whatever the last autosave captured, until the
+  // debounced write below actually lands.
+  if (v) state._autosaveCaptured = false;
   for (const id of ['dl-btn', 'save-file-btn']) {
     document.getElementById(id)?.classList.toggle('has-unsaved', v);
   }
-  if (v) _autosave(); else localStorage.removeItem('gedcomAutosave');
+  if (v) _autosave(); else { localStorage.removeItem('gedcomAutosave'); state._autosaveCaptured = false; }
 }
 
+// Leaving with edits that exist nowhere but this tab is worth interrupting for.
+// Once the autosave has written *these* edits, it is not: the restore bar
+// offers them back on the next load, so the prompt would be asking about work
+// that is already safe. A failed autosave (quota) never sets the flag, so the
+// warning stands exactly when the data really is only here.
 window.addEventListener('beforeunload', e => {
-  if (state._gedcomDirty) { e.preventDefault(); e.returnValue = ''; }
+  if (state._gedcomDirty && !state._autosaveCaptured) { e.preventDefault(); e.returnValue = ''; }
 });
 
 export function _autosave() {
@@ -28,6 +36,7 @@ export function _autosave() {
         ts: Date.now(),
         ged: serializeGEDCOM()
       }));
+      state._autosaveCaptured = true;
     } catch (e) { /* quota exceeded — silently skip autosave */ }
   }, 2000);
 }

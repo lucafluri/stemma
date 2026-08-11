@@ -1254,7 +1254,7 @@ export async function runImportAi(mode) {
   if (!keyInput.value) {
     if (window.ANTHROPIC_API_KEY) keyInput.value = window.ANTHROPIC_API_KEY;
     else {
-      const saved = localStorage.getItem('ai_api_key');
+      const saved = _aiKeyStore().getItem('ai_api_key');
       if (saved) keyInput.value = saved;
     }
   }
@@ -2635,18 +2635,48 @@ export function _imRemoveChild(actionId, idx) {
   _imRepaintAction(actionId);
 }
 
+// Whether this page is being served from somewhere only you can reach. A key
+// in localStorage outlives the tab and is readable by anything running on the
+// page — an acceptable trade on your own machine, but on a public deployment
+// (GitHub Pages) one paste would sit in that browser indefinitely, on an
+// origin anybody can serve script from.
+export function _aiKeyIsLocalOrigin() {
+  const h = window.location?.hostname ?? '';
+  // file:// has no hostname at all, and is as local as it gets.
+  return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+}
+
+// Off localhost the key is held for the session only, so closing the tab
+// takes it with you. A key persisted by an earlier visit is carried over once
+// and then cleared — otherwise turning this on would stop new exposure while
+// leaving the existing one sitting there, which is the half of the problem
+// that actually matters.
+export function _aiKeyStore() {
+  if (_aiKeyIsLocalOrigin()) return localStorage;
+  const stale = localStorage.getItem('ai_api_key');
+  if (stale) {
+    if (!sessionStorage.getItem('ai_api_key')) sessionStorage.setItem('ai_api_key', stale);
+    localStorage.removeItem('ai_api_key');
+  }
+  return sessionStorage;
+}
+
 export function _aiGetKey() {
   const el = document.getElementById('ai-api-key-input');
   const inp = el ? (el.value || '').trim() : '';
-  return inp || window.ANTHROPIC_API_KEY || localStorage.getItem('ai_api_key') || '';
+  return inp || window.ANTHROPIC_API_KEY || _aiKeyStore().getItem('ai_api_key') || '';
 }
 
 export function _aiSaveKey() {
   const k = _aiGetKey();
   if (!k) return;
-  localStorage.setItem('ai_api_key', k);
+  const sessionOnly = !_aiKeyIsLocalOrigin();
+  _aiKeyStore().setItem('ai_api_key', k);
   const s = document.getElementById('ai-key-status');
-  if (s) { s.textContent = t('import.saved'); setTimeout(() => s.textContent = '', 1500); }
+  if (s) {
+    s.textContent = t(sessionOnly ? 'import.savedSession' : 'import.saved');
+    setTimeout(() => s.textContent = '', sessionOnly ? 4000 : 1500);
+  }
 }
 
 export function _aiToggleKeyVisibility() {

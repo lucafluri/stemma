@@ -36,6 +36,7 @@ const shown = id => {
   const { state }          = await import(url('state.js'));
   const { showDataUI }     = await import(url('gedcom-io.js'));
   const { updateViewToggleUI } = await import(url('render-3d.js'));
+  const R2D                = await import(url('render-2d.js'));
 
   const person = id => [id, {
     id, name: 'A B', givn: 'A', surn: 'B', displayName: 'A B', sex: 'M',
@@ -147,6 +148,36 @@ const shown = id => {
     // `parseInt(...) || 1` used to make a fresh install start at 1 — a marker a
     // pixel across — and made 0, the slider's own minimum, unselectable.
     assert.strictEqual(state.famNodeSize, 7);
+  });
+
+  console.log('\ncontrols that follow the language');
+
+  await test('the built-in physics presets are shown translated, not as their keys', async () => {
+    // The preset keys are German identifiers ('Baum'), which is what
+    // applyPreset and the saved user presets are keyed by. The list used to
+    // print the key itself, so the English UI offered "Baum" and "Kompakt".
+    window.setLanguage('en');
+    R2D.renderPresetList();
+    const labels = [...document.querySelectorAll('#preset-list .preset-row.builtin .preset-name')]
+      .map(el => el.textContent.trim());
+    assert.ok(labels.includes('Tree'), `expected the English label, got ${JSON.stringify(labels)}`);
+    assert.ok(!labels.includes('Baum'), 'the raw key must not reach the reader');
+
+    window.setLanguage('de');
+    R2D.renderPresetList();
+    const de = [...document.querySelectorAll('#preset-list .preset-row.builtin .preset-name')]
+      .map(el => el.textContent.trim());
+    assert.ok(de.includes('Baum'), 'and German gets the German one back');
+  });
+
+  await test('applying a preset still goes by its key, whatever it is labelled', async () => {
+    window.setLanguage('en');
+    R2D.renderPresetList();
+    const row = [...document.querySelectorAll('#preset-list .preset-row.builtin .preset-name')]
+      .find(el => el.textContent.trim() === 'Tree');
+    assert.ok(row, 'the Tree row should exist');
+    assert.ok((row.getAttribute('onclick') || '').includes("'Baum'"),
+      'the click has to carry the key, or the preset cannot be looked up');
   });
 
   console.log('\n' + '─'.repeat(50));

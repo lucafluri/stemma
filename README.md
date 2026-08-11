@@ -161,7 +161,7 @@ npm install    # jsdom, the only dependency, and only for tests
 npm test
 ```
 
-Thirteen suites, no framework — plain `node` scripts with `assert`:
+Fifteen suites, no framework — plain `node` scripts with `assert`:
 
 | | |
 |---|---|
@@ -178,6 +178,8 @@ Thirteen suites, no framework — plain `node` scripts with `assert`:
 | `ui.test.js` | which controls are offered, and when — the empty state, and hiding controls that would act on nothing |
 | `workfile.test.js` | reopening and saving back over the same file |
 | `relations.test.js` | the relation tool's path-based labels, including in-laws reached through a spouse edge |
+| `import-ui.test.js` | the review screen itself — the diff table, the filter chips and their counts |
+| `session.test.js` | what the browser keeps between visits: where the API key may live, and the unsaved-work warning |
 
 `test-setup.js` builds a jsdom window from `index.html` with stubs for the
 libraries that arrive via `<script>` (d3, THREE, ForceGraph3D), which is enough
@@ -200,8 +202,21 @@ window.ANTHROPIC_API_KEY = 'sk-ant-...';
 ```
 
 A key put here is readable by anything running on the page — fine for local use,
-but do not commit it or deploy it. The key can also be typed into the import
-dialog instead, which keeps it in `localStorage`.
+but do not commit it or deploy it.
+
+The key can also be typed into the import dialog instead. Where that is kept
+depends on where the page is served from, since the risk does:
+
+- **`localhost` or `file://`** — `localStorage`, so it is still there next time.
+- **any other origin** (a GitHub Pages deployment, a LAN address) —
+  `sessionStorage`, so it goes when the tab does. A key left in `localStorage`
+  by an earlier visit is moved across and cleared on first load.
+
+This is a limit on how long an exposed key lasts, not a fix for the exposure:
+the request still goes from the page to `api.anthropic.com` with
+`anthropic-dangerous-direct-browser-access`, so anything running on the page
+can read the key while it is in use. Set `window.AI_PROXY_URL` to route
+through a proxy that holds the key server-side if that matters to you.
 
 `localStorage.perfLog = '1'` turns on render and rebuild timings in the console.
 

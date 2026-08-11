@@ -48,11 +48,29 @@ const collateralSrc = lift('_collateralMaxDepth');
 // real js/state.js `state` -- computeFocusSet/computeLineageSet only ever
 // read/write it as `state.<name>`, never reassign the binding itself, so a
 // fresh object per call is enough to isolate one test from the next.
-function focusSet(individuals, families, focusRootId, focusLimit, tree = false) {
+function focusSet(individuals, families, focusRootId, focusLimit, tree = false, spouseFamily = false) {
   return new Function(
     'state', 'useTreeLayout',
     `${collateralSrc}\n${lineageSrc}\n${ballSrc}\nreturn computeFocusSet();`
-  )({ individuals, families, focusRootId, focusLimit, treeLayout: tree, _revealed: new Set(), cousinDegree: COUSIN_DEGREE }, () => tree);
+  )({ individuals, families, focusRootId, focusLimit, treeLayout: tree, _revealed: new Set(),
+      cousinDegree: COUSIN_DEGREE, includeSpouseFamily: spouseFamily }, () => tree);
+}
+
+// isFamVisible reaches isIndiVisible → hasEnabledFamilyName (the surname
+// filter) and inGenRange → generationNumbers (the layering cache). Both are
+// supplied here so a fixture can exercise the generation band on its own:
+// every surname counts as enabled, and each person's generation is stated
+// outright rather than derived.
+const genRangeSrc = lift('inGenRange');
+const indiVisSrc  = lift('isIndiVisible');
+const famVisSrc   = lift('isFamVisible');
+
+function famVisible(individuals, families, gens, genRange, famId) {
+  return new Function(
+    'state', 'hasEnabledFamilyName', 'generationNumbers',
+    `${genRangeSrc}\n${indiVisSrc}\n${famVisSrc}\nreturn isFamVisible(famId);`
+      .replace('isFamVisible(famId)', `isFamVisible(${JSON.stringify(famId)})`)
+  )({ individuals, families, genRange }, () => true, () => gens);
 }
 
 // ── Fixture: a 4-generation line plus a wide sibling ring ──
@@ -180,6 +198,98 @@ test('keeps the spouse of every blood relative, one hop only', () => {
   assert.ok(kept.has('I13'), 'the subject\'s own spouse gets a box next to them');
   // ...and the parents of someone on the chart are both kept, spouses or not.
   assert.ok(kept.has('I1') && kept.has('I2'), 'ancestor couples stay whole');
+});
+
+// ── The in-laws switch ──
+// I3 (focus) married I13, whose own parents and sister are on file. Off, they
+// are not walked; on, exactly that one hop is.
+function buildSpouseFamilyFixture() {
+  const { individuals, families } = buildTree();
+  const person = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+
+  person('SpDad', [], ['FSP']);
+  person('SpMum', [], ['FSP']);
+  person('SpSis', ['FSP'], ['FSIS']);
+  person('SpSisHusb', [], ['FSIS']);        // one hop further out again
+  person('SpSisKid', ['FSIS'], []);
+  individuals.get('I13').famc = ['FSP'];    // the spouse now has parents on file
+  families.set('FSP',  { husb: 'SpDad', wife: 'SpMum', chil: ['I13', 'SpSis'] });
+  families.set('FSIS', { husb: 'SpSisHusb', wife: 'SpSis', chil: ['SpSisKid'] });
+  return { individuals, families };
+}
+
+// The in-laws are deliberately not named I*, so these read the returned set
+// directly rather than through people(), which keeps only the I* fixture ids.
+test("off, a spouse's own family is not walked", () => {
+  const { individuals, families } = buildSpouseFamilyFixture();
+  const kept = new Set(focusSet(individuals, families, 'I3', 100, true, false));
+  assert.ok(kept.has('I13'), 'the spouse is still there');
+  for (const id of ['SpDad', 'SpMum', 'SpSis']) {
+    assert.ok(!kept.has(id), `${id} is the spouse's blood, not the subject's — should stay off`);
+  }
+});
+
+test('on, it reaches the spouse\'s parents and siblings', () => {
+  const { individuals, families } = buildSpouseFamilyFixture();
+  const kept = new Set(focusSet(individuals, families, 'I3', 100, true, true));
+  for (const id of ['SpDad', 'SpMum', 'SpSis']) {
+    assert.ok(kept.has(id), `${id} is the spouse's immediate family and was asked for`);
+  }
+});
+
+test('on, it stops there — not the whole second tree', () => {
+  const { individuals, families } = buildSpouseFamilyFixture();
+  const kept = new Set(focusSet(individuals, families, 'I3', 100, true, true));
+  // One hop means the sister, not the sister's husband or her children.
+  assert.ok(!kept.has('SpSisKid'), 'the in-law walk must not carry on downwards');
+  assert.ok(!kept.has('SpSisHusb'), 'nor sideways into her own marriage');
+});
+
+test('the in-laws are placed level with the spouse, not floating', () => {
+  const { individuals, families } = buildSpouseFamilyFixture();
+  const state = { individuals, families, focusRootId: 'I3', focusLimit: 100, treeLayout: true,
+                  _revealed: new Set(), cousinDegree: COUSIN_DEGREE, includeSpouseFamily: true };
+  new Function('state', `${collateralSrc}\n${lineageSrc}\nreturn computeLineageSet();`)(state);
+  const gen = state._lineageGen;
+  assert.strictEqual(gen.get('SpSis'), gen.get('I13'), 'a sister sits on her sibling\'s row');
+  assert.strictEqual(gen.get('SpDad'), gen.get('I13') - 1, 'a parent sits one row above');
+});
+
+// ── The generation band and the family diamonds ──
+console.log('\nisFamVisible under a generation band');
+
+// Dad+Mum -> Kid. Generation 0 is the youngest, so Kid is 0 and the parents 1.
+const bandFixture = () => ({
+  individuals: new Map([['Dad', {}], ['Mum', {}], ['Kid', {}]]),
+  families: new Map([['F', { husb: 'Dad', wife: 'Mum', chil: ['Kid'] }]]),
+  gens: new Map([['Dad', 1], ['Mum', 1], ['Kid', 0]]),
+});
+
+test('a family with nobody filtered out is shown', () => {
+  const { individuals, families, gens } = bandFixture();
+  assert.strictEqual(famVisible(individuals, families, gens, null, 'F'), true);
+});
+
+test('a family cut down to one survivor is not', () => {
+  const { individuals, families, gens } = bandFixture();
+  // Only the child's generation is asked for: the diamond would hang off him
+  // joined to nobody, which is what it used to do.
+  assert.strictEqual(famVisible(individuals, families, gens, { min: 0, max: 0 }, 'F'), false);
+});
+
+test('a family keeping two of its three is still joining them', () => {
+  const { individuals, families, gens } = bandFixture();
+  assert.strictEqual(famVisible(individuals, families, gens, { min: 1, max: 1 }, 'F'), true);
+});
+
+test('a family that only ever had one member is judged on that one', () => {
+  const individuals = new Map([['Solo', {}]]);
+  const families = new Map([['F', { husb: 'Solo', wife: null, chil: [] }]]);
+  const gens = new Map([['Solo', 0]]);
+  assert.strictEqual(famVisible(individuals, families, gens, { min: 0, max: 0 }, 'F'), true,
+    'one member in range is all such a family has');
+  assert.strictEqual(famVisible(individuals, families, gens, { min: 1, max: 1 }, 'F'), false,
+    'and out of range it goes with them');
 });
 
 // ── Fixture: three generations of ancestors, one collateral branch at each ──

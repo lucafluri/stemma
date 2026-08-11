@@ -365,6 +365,7 @@ function _onLanguageChanged() {
   updateFocusUI();
   updateHLButtons();
   syncNodeDragBtn();
+  renderPresetList();   // built-in preset names are translated, so they restale
   // The axis labels are drawn into textures, not DOM, so applyTranslations
   // cannot reach them -- "Gen 1" would stay in the old language until something
   // else happened to rebuild the axis.

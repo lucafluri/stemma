@@ -863,6 +863,24 @@ export const BUILTIN_PRESETS = {
   'Spiral':    { spouseDist:60,  parentDist:70,  spouseStrength:0.35, parentStrength:0.55, chargeIndi:220, chargeFam:30, chargeDistMax:500, collideRadius:20, yStrength:0.20, centerStrength:0.08, velocityDecay:0.38, alphaDecay:0.020 },
 };
 
+// The keys above are identifiers, not labels — they are what applyPreset() and
+// the stored user presets are keyed by, so they stay German whatever the UI
+// language is. This is only what the reader sees. The translations already
+// existed; the list simply printed the raw key instead of asking for them.
+const BUILTIN_PRESET_LABELS = {
+  'Standard': 'presets.standard',
+  'Baum':      'presets.tree',
+  'Kompakt':   'presets.compact',
+  'Locker':    'presets.loose',
+  'Zeitlinie': 'presets.timeline',
+  'Spiral':    'presets.spiral',
+};
+
+export function presetLabel(name) {
+  const key = BUILTIN_PRESET_LABELS[name];
+  return key ? t(key) : name;   // user presets are named by the user; leave them
+}
+
 export function getUserPresets() {
   try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); }
   catch { return {}; }
@@ -901,7 +919,8 @@ export function renderPresetList() {
   for (const name of Object.keys(BUILTIN_PRESETS)) {
     const row = document.createElement('div');
     row.className = 'preset-row builtin';
-    row.innerHTML = `<span class="preset-name" title="${escAttr(name)}" onclick="applyPreset('${escJs(name)}',true)">${escHtml(name)}</span>`;
+    const label = presetLabel(name);
+    row.innerHTML = `<span class="preset-name" title="${escAttr(label)}" onclick="applyPreset('${escJs(name)}',true)">${escHtml(label)}</span>`;
     container.appendChild(row);
   }
 

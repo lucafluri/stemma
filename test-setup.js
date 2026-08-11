@@ -27,6 +27,7 @@ function setupDom() {
   global.window = window;
   global.document = window.document;
   global.localStorage = window.localStorage;
+  global.sessionStorage = window.sessionStorage;
   global.CanvasRenderingContext2D = window.CanvasRenderingContext2D || class {};
   global.HTMLCanvasElement = window.HTMLCanvasElement;
   global.FileReader = window.FileReader;

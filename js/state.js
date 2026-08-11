@@ -50,6 +50,7 @@ export const state = {
   _lsWriteTimeouts: {},
   _gedcomDirty: false,
   _autosaveTimer: null,
+  _autosaveCaptured: false,   // the current edits have been written to the autosave slot
   physicsParams: { ...PHYSICS_DEFAULTS },
   graph3d: null,
   currentView: localStorage.getItem('viewMode') === '2d' ? '2d' : '3d',   // '2d' | '3d'
