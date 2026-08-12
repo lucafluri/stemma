@@ -750,6 +750,17 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
   user-select: none;
   -webkit-user-select: none;
 }
+/* The overview layer sits under the SVG and never takes a pointer event: the
+   zoom/pan behaviour is bound to the SVG above it, and both are painted from
+   the same transform, so they stay registered without the canvas taking part. */
+#graph-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
 #graph-svg .main-g {
   will-change: transform;
 }
@@ -1063,6 +1074,15 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* What the scene budgets above are actually doing right now — a line of plain
+   figures under the sliders, so the numbers are not set blind. */
+.phys-hint {
+  font-size: 10px;
+  color: var(--c-8);
+  line-height: 1.45;
+  margin: 2px 0 4px;
+  font-variant-numeric: tabular-nums;
 }
 .phys-row-head {
   display: flex;

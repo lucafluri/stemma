@@ -30,6 +30,7 @@ const ORDER = [
   'find.test.js',
   'import-ui.test.js',
   'autosave.test.js',
+  'scale.test.js',
   'wiring.test.js'
 ];
 

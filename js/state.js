@@ -2,7 +2,7 @@
 // Everything here used to be a top-level `let` in the original monolithic
 // app.js; call sites elsewhere now read/write it as `state.<name>` instead of
 // a bare identifier.
-import { LINK_COLOR_DEFAULTS, MAP_DOT_COLOR_DEFAULT, NODE_COLOR_DEFAULTS, PHYSICS_DEFAULTS, TREE_SPACING_DEFAULTS } from './constants.js';
+import { LINK_COLOR_DEFAULTS, MAP_DOT_COLOR_DEFAULT, NODE_COLOR_DEFAULTS, PHYSICS_DEFAULTS, SCENE_DEFAULTS, TREE_SPACING_DEFAULTS } from './constants.js';
 
 export const state = {
   individuals: new Map(),   // id -> indi object
@@ -20,6 +20,9 @@ export const state = {
   svgSel: null,   // d3 selection of <svg>
   gMain: null,   // d3 selection of main <g>
   zoomBehavior: null,  // d3.zoom() instance
+  linkG: null,   // the <g> the link paths are joined into
+  nodeG: null,   // ...and the one the node groups go in
+  _cullSig: null,  // what renderViewport() last drew, so a pan that changes nothing costs nothing
   linkSel: null,
   nodeSel: null,
   labelSel: null,
@@ -53,6 +56,21 @@ export const state = {
   _autosaveCaptured: false,   // the current edits have been written to the autosave slot
   physicsParams: { ...PHYSICS_DEFAULTS },
   graph3d: null,
+  _g3dById: null,     // Map<id, node> over what the 3D scene actually holds
+  _3dOmitted: 0,      // people the scene budget left out, reported in the focus panel
+  scene3d: { ...SCENE_DEFAULTS },   // the budgets above, as the reader has set them
+  // Draw the 3D scene as three instanced layers instead of one Three.js object
+  // per node and per link. Strictly faster, but it replaces the library's own
+  // rendering and picking, so the switch stays reachable — off falls back to
+  // the per-object path, which is still there and still works.
+  instanced3d: localStorage.getItem('instanced3d') !== '0',
+  // Draw only the nearest `scene3d.drawMax` nodes and hide the rest. This
+  // existed because every node was its own draw call and a few thousand of them
+  // was all a frame could carry. With the instanced renderer the whole scene is
+  // three draw calls whatever its size, so the reason is gone and the default is
+  // off — everything in the scene is drawn. The switch stays for the case the
+  // budget still helps: a weak GPU, or a scene pushed far past what fits.
+  cull3d: localStorage.getItem('cull3d') === '1',
   currentView: localStorage.getItem('viewMode') === '2d' ? '2d' : '3d',   // '2d' | '3d'
   focusRootId: null,
   focusLimit: parseInt(localStorage.getItem('focusLimit')) || 120,
@@ -116,6 +134,7 @@ export const state = {
   _touchDragged: false,
   _touchStartPos: null,
   _estimatedYears: null,  // Map<id, number>
+  _spouseIds: null,   // Map<id, id[]> — see spouseIndex() in graph-data.js
   _genDepthsCache: null,   // Map<id, number> — cleared by _fullRebuildGraph
   _genNumbers: null,   // Map<id, number> — the same thing counted the other way
   _autoSettleTimer: null,
@@ -174,4 +193,15 @@ try {
 try {
   const saved = JSON.parse(localStorage.getItem('treeSpacing') || '{}');
   Object.assign(state.treeSpacing, saved);
+} catch (e) { /* ignore */ }
+
+try {
+  const saved = JSON.parse(localStorage.getItem('scene3d') || '{}');
+  // Only finite positive numbers: a corrupted or hand-edited entry that put a
+  // zero or a string in here would empty the 3D scene with no way back short of
+  // clearing site data.
+  for (const k of Object.keys(SCENE_DEFAULTS)) {
+    const v = Number(saved[k]);
+    if (Number.isFinite(v) && v >= 0) state.scene3d[k] = v;
+  }
 } catch (e) { /* ignore */ }

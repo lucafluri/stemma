@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { contrastTextColor, nodeBaseColor, refreshNodeColors } from './colors.js';
-import { PHYSICS_DEFAULTS, perf } from './constants.js';
+import { PHYSICS_DEFAULTS, perf, physicsScale } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
@@ -19,6 +19,321 @@ export const NODE_BOX_RX = 5;
 export const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, not the screen
 
 export const NODE_YEAR_FONT = 8;
+
+// ── Viewport culling and zoom level-of-detail ───────────────────────────────
+//
+// A chart of any size is only ever drawn twice over: as boxes you can read, or
+// as a shape you can navigate. Below LOD_ZOOM a box is a few pixels across and
+// its name is already hidden, so what is on screen is the shape — and a shape
+// does not need a quarter of a million SVG elements to say what it is. It is
+// painted onto a canvas in one pass instead. Above LOD_ZOOM the boxes are real
+// SVG again, but only the ones inside the window: at any legible zoom that is a
+// few hundred of them however large the file is.
+//
+// None of this touches a chart under CULL_MIN_NODES, which is every ordinary
+// one — there the whole thing goes into the DOM at once exactly as before, and
+// re-deciding that on every pan would cost more than it saved.
+export const CULL_MIN_NODES = 2000;
+
+// The zoom at which names stop being legible; updateLabels() hides them at the
+// same point, which is what makes this the honest place to change technique.
+export const LOD_ZOOM = 0.28;
+
+// Drawn a little beyond the window so a box entering from the edge is already
+// there, and a short pan needs no re-join at all. Half a screen either way.
+export const CULL_SLACK_PX = 400;
+
+export function _cullActive() {
+  return state.nodes.length >= CULL_MIN_NODES;
+}
+
+/**
+ * The window in graph coordinates, grown by the slack above — the inverse of
+ * the zoom transform applied to the two screen corners. Kept as plain arithmetic
+ * over {k, x, y} rather than reaching for the DOM itself so the direction of
+ * that inversion can actually be tested; getting it backwards puts the window
+ * on the wrong side of the origin and culls everything.
+ */
+export function _cullRect(W, H, t) {
+  // A node is placed by its centre, so half a box either way is what stops one
+  // straddling the edge from popping in and out; the slack is on top of that.
+  // The slack is a screen distance, so it shrinks in graph units as you zoom in.
+  const m = NODE_BOX_W / 2 + CULL_SLACK_PX / t.k;
+  return {
+    x0: (0 - t.x) / t.k - m, x1: (W - t.x) / t.k + m,
+    y0: (0 - t.y) / t.k - m, y1: (H - t.y) / t.k + m,
+  };
+}
+
+function _visibleRect() {
+  const svgEl = document.getElementById('graph-svg');
+  return _cullRect(
+    svgEl?.clientWidth  || 1100,
+    svgEl?.clientHeight || 700,
+    d3.zoomTransform(state.svgSel.node()),
+  );
+}
+
+const _lid = v => (typeof v === 'object' && v ? v.id : v);
+
+// Links carry no id of their own and computeActiveData() builds fresh objects
+// each time, so the join is keyed on what the link *is* — otherwise every pan
+// would rebind by index and rewrite every path it kept.
+const _linkKey = l => `${_lid(l.source)}|${_lid(l.target)}|${l.ltype}`;
+
+function _joinLinks(links) {
+  const sel = state.linkG.selectAll('path').data(links, _linkKey);
+  sel.exit().remove();
+  const entered = sel.enter().append('path')
+    .attr('fill', 'none')
+    .attr('stroke', d => linkColor(d))
+    .attr('stroke-dasharray', d => linkDash(d))
+    .attr('stroke-width', d => linkWidth(d))
+    .attr('opacity', d => linkBaseOpacity(d));
+  state.linkSel = entered.merge(sel);
+}
+
+function _joinNodes(nodes) {
+  const sel = state.nodeG.selectAll('g.ng').data(nodes, d => d.id);
+  sel.exit().remove();
+
+  const entered = sel.enter().append('g')
+    .attr('class', 'ng')
+    .attr('data-nid', d => d.id)
+    .on('click', (evt, d) => {
+      evt.stopPropagation();
+      if (wasTouchDrag()) return;
+      if (d.type === 'INDI' && _tryPickRelationPerson(d.id)) return;
+      if (d.type === 'INDI') showIndiDetail(d.id);
+      else showFamDetail(d.id);
+    })
+    .on('mouseover', onHover)
+    .on('mouseout', onOut)
+    .on('contextmenu', (evt, d) => openNodeContextMenu(evt, d.id, d.type))
+    .on('dblclick', (evt, d) => {
+      evt.stopPropagation();
+      delete d.fx; delete d.fy;
+      state.simulation.alpha(0.15).restart();
+    })
+    .call(d3.drag()
+      .on('start', (evt, d) => {
+        if (!state._nodeDragEnabled) return;
+        if (!evt.active) state.simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (evt, d) => { if (state._nodeDragEnabled) { d.fx = evt.x; d.fy = evt.y; } })
+      .on('end', (evt) => { if (state._nodeDragEnabled && !evt.active) state.simulation.alphaTarget(0); })
+    );
+
+  // Shapes are appended to the nodes that just arrived, never to the ones
+  // already on screen — those already have theirs.
+  const indiE = entered.filter(d => d.type === 'INDI');
+  const famE  = entered.filter(d => d.type === 'FAM');
+
+  indiE.append('rect')
+    .attr('class', 'indi-box')
+    .attr('x', -NODE_BOX_W / 2)
+    .attr('y', -NODE_BOX_H / 2)
+    .attr('width', NODE_BOX_W)
+    .attr('height', NODE_BOX_H)
+    .attr('rx', NODE_BOX_RX)
+    .attr('fill', d => nodeBaseColor(d))
+    .attr('stroke', d => _lineageStroke(d))
+    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8)
+    .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
+    .attr('opacity', d => d.data.deceased ? 0.55 : 1);
+
+  // Ring the focus person — otherwise they're just another box in the middle
+  // of the tree that was built around them.
+  indiE.filter(d => d.id === state.focusRootId)
+    .append('rect')
+    .attr('class', 'focus-ring')
+    .attr('x', -NODE_BOX_W / 2 - 4)
+    .attr('y', -NODE_BOX_H / 2 - 4)
+    .attr('width', NODE_BOX_W + 8)
+    .attr('height', NODE_BOX_H + 8)
+    .attr('rx', NODE_BOX_RX + 3)
+    .attr('fill', 'none')
+    // Colour lives in styles.css (.focus-ring) so it follows --accent.
+    .attr('stroke-width', 1.5)
+    .attr('pointer-events', 'none');
+
+  famE.append('polygon')
+    .attr('class', 'fam-polygon')
+    .attr('points', () => { const s = famMarkerSize(); return `0,${-s} ${s},0 0,${s} ${-s},0`; })
+    .attr('fill',   d => d.data.div ? state.nodeColors.famDiv : state.nodeColors.fam)
+    .attr('stroke', d => d.data.div ? state.nodeColors.famDiv : state.nodeColors.fam)
+    .attr('stroke-width',     d => d.data.div ? 1.5 : 1)
+    .attr('stroke-dasharray', d => d.data.div ? '3 2' : null)
+    .attr('opacity', 0.88);
+
+  // Name label — lives inside the box (not a separate layer floating above
+  // it), so it moves, scales and z-orders with the node for free.
+  indiE.append('text')
+    .attr('class', 'node-label')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('dy', '-4px')
+    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
+    .attr('fill-opacity', state.labelStyle.textOpacity)
+    .attr('font-size', NODE_BOX_FONT + 'px')
+    .attr('font-weight', state.labelStyle.fontWeight || 'normal')
+    .attr('pointer-events', 'none')
+    .text(d => nodeLabelText(d.data));
+
+  // Years on a second line under the name. Only for people who have one —
+  // an empty element still costs a DOM node per person, and on a big chart
+  // that is the difference between a snappy repaint and a stuttering one.
+  indiE.filter(d => nodeYears(d.data))
+    .append('text')
+    .attr('class', 'node-years')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('dy', '7px')
+    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
+    .attr('fill-opacity', state.labelStyle.textOpacity * 0.75)
+    .attr('font-size', NODE_YEAR_FONT + 'px')
+    .attr('pointer-events', 'none')
+    .text(d => nodeYears(d.data));
+
+  state.nodeSel  = entered.merge(sel);
+  // Read back off the layer rather than kept from the append above: after an
+  // incremental join the labels on screen are the ones that survived plus the
+  // ones that just arrived, and only the DOM knows which those are.
+  state.labelSel = state.nodeG.selectAll('text.node-label');
+  state.yearSel  = state.nodeG.selectAll('text.node-years');
+}
+
+/** Clears the overview canvas and hands the chart back to the SVG. */
+function _clearOverview() {
+  const c = document.getElementById('graph-canvas');
+  const ctx = c?.getContext?.('2d');
+  if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+}
+
+// The whole chart as filled rectangles and straight lines, in screen space.
+// Everything that makes a box readable — text, rounded corners, elbowed
+// connectors, per-node event handlers — is what costs, and none of it survives
+// being drawn three pixels wide, so none of it is drawn.
+function _paintOverview() {
+  const c = document.getElementById('graph-canvas');
+  if (!c || !state.svgSel) return;
+  const W = c.clientWidth || 1100, H = c.clientHeight || 700;
+  // Cap the backing store at 2× — past that this is redrawing four times the
+  // pixels to describe a chart nobody is reading the detail of.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const pw = Math.round(W * dpr), ph = Math.round(H * dpr);
+  if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+  const ctx = c.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const t = d3.zoomTransform(state.svgSel.node());
+  const px = n => t.x + n.x * t.k, py = n => t.y + n.y * t.k;
+
+  // Two passes over the links rather than one path per link: there are only
+  // ever the two kinds, so this is two canvas paths for the whole chart.
+  ctx.lineWidth = 1;
+  for (const ltype of ['parent', 'spouse']) {
+    ctx.strokeStyle = state.linkColors[ltype] ?? state.linkColors.parent;
+    ctx.globalAlpha = ltype === 'spouse' ? 0.5 : 0.35;
+    ctx.beginPath();
+    let any = false;
+    for (const l of state.links) {
+      if (l.ltype !== ltype) continue;
+      const s = l.source, g = l.target;
+      // Endpoints are still id strings until a layout resolves them.
+      if (typeof s !== 'object' || typeof g !== 'object' || s?.x == null || g?.x == null) continue;
+      ctx.moveTo(px(s), py(s));
+      ctx.lineTo(px(g), py(g));
+      any = true;
+    }
+    if (any) ctx.stroke();
+  }
+
+  const hasHL = state.hlSet.size > 0;
+  const bw = Math.max(1, NODE_BOX_W * t.k), bh = Math.max(1, NODE_BOX_H * t.k);
+  const fs = Math.max(1, famMarkerSize() * 2 * t.k);
+  for (const n of state.nodes) {
+    if (n.x == null || n.y == null) continue;
+    const x = px(n), y = py(n);
+    const w = n.type === 'INDI' ? bw : fs;
+    const h = n.type === 'INDI' ? bh : fs;
+    if (x < -w || y < -h || x > W + w || y > H + h) continue;
+    ctx.globalAlpha = hasHL && !state.hlSet.has(n.id) ? 0.07
+                    : (n.type === 'INDI' && n.data.deceased) ? 0.55 : 1;
+    ctx.fillStyle = nodeBaseColor(n);
+    ctx.fillRect(x - w / 2, y - h / 2, w, h);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * Draws whatever the current view calls for: everything, the window's worth, or
+ * the canvas overview. Cheap to call — it works out what it would draw, and
+ * returns without touching the DOM when that is what is already on screen,
+ * which is the common case while panning.
+ */
+export function renderViewport(force = false) {
+  if (!state.gMain || !state.nodeG || !state.svgSel) return;
+
+  // Small chart: the whole thing, once, and never reconsidered.
+  if (!_cullActive()) {
+    if (!force && state._cullSig === 'all') return;
+    _clearOverview();
+    _joinLinks(state.links);
+    _joinNodes(state.nodes);
+    state._cullSig = 'all';
+    tick();
+    updateLabels(true);
+    _reapplyHighlight();
+    return;
+  }
+
+  if (state.currentZoom < LOD_ZOOM) {
+    // Nothing legible at this zoom, so nothing goes in the DOM. Emptying the
+    // SVG layers is what actually buys the frame rate back.
+    if (state._cullSig !== 'overview') {
+      _joinLinks([]);
+      _joinNodes([]);
+      state._cullSig = 'overview';
+    }
+    _paintOverview();   // repainted every frame — it is drawn in screen space
+    return;
+  }
+
+  const r = _visibleRect();
+  const inRect = n => n.x != null && n.y != null &&
+                      n.x >= r.x0 && n.x <= r.x1 && n.y >= r.y0 && n.y <= r.y1;
+  const nodes = state.nodes.filter(inRect);
+  const shown = new Set(nodes.map(n => n.id));
+  // A link is drawn when either end is on screen, so a connector running in
+  // from a box just outside the window is not cut off at the edge.
+  const links = state.links.filter(l => shown.has(_lid(l.source)) || shown.has(_lid(l.target)));
+
+  // No cheaper check stands in for the join here. A signature over the set was
+  // the obvious one and is a trap: two different windows can hold the same
+  // number of people, and the frame that follows then keeps the boxes from the
+  // last one. The keyed joins below already do exactly this comparison and are
+  // no-ops when the set has not moved — everything past this point is bounded
+  // by what is on screen, not by the size of the file.
+  if (state._cullSig !== 'svg') { _clearOverview(); state._cullSig = 'svg'; }
+  _joinLinks(links);
+  _joinNodes(nodes);
+  tick();
+  // Forced: the labels that just entered have never been measured, and
+  // updateLabels' own band check would skip the pass that measures them.
+  updateLabels(true);
+  _reapplyHighlight();
+}
+
+// Nodes that just entered are drawn at full strength. That is right when there
+// is nothing highlighted, and wrong the moment there is — so the highlight is
+// re-applied only when there is one to apply, rather than on every pan.
+function _reapplyHighlight() {
+  if (state.hlSet.size || state.selectedIndiId) applyHighlight();
+}
 
 // Optional 2D-tree display setting: outline each ancestor in the colour their
 // own line already uses for parent→child links (state.linkColors.father/
@@ -106,6 +421,25 @@ export function applyFilter() {
   updateFocusUI();
 }
 
+// Every frame of a pan or zoom fires the handler below, so the work it triggers
+// is coalesced to one pass per frame. A pan on a small chart still costs
+// nothing: the whole chart is already in the DOM and moves with one transform,
+// and updateLabels() returns immediately unless the legibility band changed.
+let _viewFrame = 0, _viewPrevZoom = null;
+function scheduleViewportRender(prevZoom) {
+  if (_viewPrevZoom === null) _viewPrevZoom = prevZoom;
+  if (_viewFrame) return;
+  _viewFrame = requestAnimationFrame(() => {
+    _viewFrame = 0;
+    const prev = _viewPrevZoom;
+    _viewPrevZoom = null;
+    if (_cullActive()) renderViewport();
+    // Nothing about a label depends on where the layer is, only on how big it
+    // is drawn — so a pure pan never has to walk them.
+    if (prev !== state.currentZoom) updateLabels();
+  });
+}
+
 export function initSVG() {
   state.svgSel = d3.select('#graph-svg');
   state.svgSel.selectAll('*').remove();
@@ -121,7 +455,6 @@ export function initSVG() {
 
   state.gMain = state.svgSel.append('g').attr('class', 'main-g');
 
-  let _labelRafPending = false;
   let _lastTransform = d3.zoomIdentity;
 
   state.zoomBehavior = d3.zoom()
@@ -155,20 +488,7 @@ export function initSVG() {
       state.gMain.attr('transform', evt.transform);
       const prev = state.currentZoom;
       state.currentZoom = evt.transform.k;
-      // A pan moves the whole layer with that one attribute; nothing about the
-      // labels depends on where the layer is. This event fires for panning as
-      // well as zooming, and without this line every animation frame of a drag
-      // walked every label on the chart.
-      if (prev === state.currentZoom) return;
-      // Full label update only when crossing visibility thresholds; otherwise RAF-throttled
-      const crossedThreshold = (prev < 0.35) !== (state.currentZoom < 0.35) ||
-                               (prev < 1.1)  !== (state.currentZoom < 1.1);
-      if (crossedThreshold) {
-        updateLabels();
-      } else if (!_labelRafPending) {
-        _labelRafPending = true;
-        requestAnimationFrame(() => { _labelRafPending = false; updateLabels(); });
-      }
+      scheduleViewportRender(prev);
     });
 
   state.svgSel.call(state.zoomBehavior);
@@ -243,134 +563,22 @@ document.addEventListener('keydown', e => {
 });
 
 export function renderGraph() {
-  perf.start('[rg] clear');       state.gMain.selectAll('*').remove();                    perf.end('[rg] clear');
+  perf.start('[rg] clear');
+  state.gMain.selectAll('*').remove();
+  // Links first so they sit under the boxes. <path> rather than <line> so the
+  // tree layout can draw square elbows; the force layout just emits a straight
+  // two-point path through the same element.
+  state.linkG = state.gMain.append('g').attr('class', 'links-g');
+  state.nodeG = state.gMain.append('g').attr('class', 'nodes-g');
+  state._cullSig = null;   // the layers are empty, whatever was drawn is gone
+  perf.end('[rg] clear');
 
-  // Links layer — <path> so the tree layout can draw square elbows; the force
-  // layout just emits a straight two-point path through the same element.
-  perf.start('[rg] links');
-  state.linkSel = state.gMain.append('g').attr('class', 'links-g')
-    .selectAll('path')
-    .data(state.links)
-    .join('path')
-    .attr('fill', 'none')
-    .attr('stroke', d => linkColor(d))
-    .attr('stroke-dasharray', d => linkDash(d))
-    .attr('stroke-width', d => linkWidth(d))
-    .attr('opacity', d => linkBaseOpacity(d));
-  perf.end('[rg] links');
-
-  // Nodes layer
-  perf.start('[rg] node join');
-  const nodeG = state.gMain.append('g').attr('class', 'nodes-g');
-
-  state.nodeSel = nodeG.selectAll('g.ng')
-    .data(state.nodes, d => d.id)
-    .join('g')
-    .attr('class', 'ng')
-    .attr('data-nid', d => d.id)
-    .on('click', (evt, d) => {
-      evt.stopPropagation();
-      if (wasTouchDrag()) return;
-      if (d.type === 'INDI' && _tryPickRelationPerson(d.id)) return;
-      if (d.type === 'INDI') showIndiDetail(d.id);
-      else showFamDetail(d.id);
-    })
-    .on('mouseover', onHover)
-    .on('mouseout', onOut)
-    .on('contextmenu', (evt, d) => openNodeContextMenu(evt, d.id, d.type))
-    .on('dblclick', (evt, d) => {
-      evt.stopPropagation();
-      delete d.fx; delete d.fy;
-      state.simulation.alpha(0.15).restart();
-    })
-    .call(d3.drag()
-      .on('start', (evt, d) => {
-        if (!state._nodeDragEnabled) return;
-        if (!evt.active) state.simulation.alphaTarget(0.3).restart();
-        d.fx = d.x; d.fy = d.y;
-      })
-      .on('drag', (evt, d) => { if (state._nodeDragEnabled) { d.fx = evt.x; d.fy = evt.y; } })
-      .on('end', (evt) => { if (state._nodeDragEnabled && !evt.active) state.simulation.alphaTarget(0); })
-    );
-  perf.end('[rg] node join');
-
-  // Draw shapes per node — batched selections instead of per-node .each()
-  perf.start('[rg] shapes');
-  const indiSel = state.nodeSel.filter(d => d.type === 'INDI');
-  const famSel  = state.nodeSel.filter(d => d.type === 'FAM');
-
-  indiSel.append('rect')
-    .attr('class', 'indi-box')
-    .attr('x', -NODE_BOX_W / 2)
-    .attr('y', -NODE_BOX_H / 2)
-    .attr('width', NODE_BOX_W)
-    .attr('height', NODE_BOX_H)
-    .attr('rx', NODE_BOX_RX)
-    .attr('fill', d => nodeBaseColor(d))
-    .attr('stroke', d => _lineageStroke(d))
-    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8)
-    .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
-    .attr('opacity', d => d.data.deceased ? 0.55 : 1);
-
-  // Ring the focus person — otherwise they're just another box in the middle
-  // of the tree that was built around them.
-  indiSel.filter(d => d.id === state.focusRootId)
-    .append('rect')
-    .attr('class', 'focus-ring')
-    .attr('x', -NODE_BOX_W / 2 - 4)
-    .attr('y', -NODE_BOX_H / 2 - 4)
-    .attr('width', NODE_BOX_W + 8)
-    .attr('height', NODE_BOX_H + 8)
-    .attr('rx', NODE_BOX_RX + 3)
-    .attr('fill', 'none')
-    // Colour lives in styles.css (.focus-ring) so it follows --accent.
-    .attr('stroke-width', 1.5)
-    .attr('pointer-events', 'none');
-
-  famSel.append('polygon')
-    .attr('class', 'fam-polygon')
-    .attr('points', () => { const s = famMarkerSize(); return `0,${-s} ${s},0 0,${s} ${-s},0`; })
-    .attr('fill',   d => d.data.div ? state.nodeColors.famDiv : state.nodeColors.fam)
-    .attr('stroke', d => d.data.div ? state.nodeColors.famDiv : state.nodeColors.fam)
-    .attr('stroke-width',     d => d.data.div ? 1.5 : 1)
-    .attr('stroke-dasharray', d => d.data.div ? '3 2' : null)
-    .attr('opacity', 0.88);
-  perf.end('[rg] shapes');
-
-  // Name label — lives inside the box (not a separate layer floating above
-  // it), so it moves, scales and z-orders with the node for free.
-  perf.start('[rg] labels');
-  state.labelSel = indiSel.append('text')
-    .attr('class', 'node-label')
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('dy', '-4px')
-    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
-    .attr('fill-opacity', state.labelStyle.textOpacity)
-    .attr('font-size', NODE_BOX_FONT + 'px')
-    .attr('font-weight', state.labelStyle.fontWeight || 'normal')
-    .attr('pointer-events', 'none')
-    .text(d => nodeLabelText(d.data));
-
-  // Years on a second line under the name. Only for people who have one —
-  // an empty element still costs a DOM node per person, and on a big chart
-  // that is the difference between a snappy repaint and a stuttering one.
-  state.yearSel = indiSel.filter(d => nodeYears(d.data))
-    .append('text')
-    .attr('class', 'node-years')
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('dy', '7px')
-    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
-    .attr('fill-opacity', state.labelStyle.textOpacity * 0.75)
-    .attr('font-size', NODE_YEAR_FONT + 'px')
-    .attr('pointer-events', 'none')
-    .text(d => nodeYears(d.data));
-
-  perf.end('[rg] labels');
-  // These elements are brand new and have never been fitted, so this pass must
-  // run whatever band the zoom happens to already be in.
-  updateLabels(true);
+  // What actually goes into those layers is renderViewport's decision — on a
+  // large chart that is a window's worth or the canvas overview, and only on a
+  // small one the whole set. Called again from onSimEnd() once the positions
+  // are final: this first pass runs before any layout has placed anybody, so on
+  // a fresh file there is deliberately nothing yet to put on screen.
+  perf.start('[rg] viewport'); renderViewport(true); perf.end('[rg] viewport');
 }
 
 export const LABEL_MIN_FONT = 7;
@@ -414,8 +622,9 @@ export function updateLabels(force = false) {
   if (!state.labelSel || state.labelSel.empty()) return;
   const zoom = state.currentZoom;
   // Below this the box itself is a few screen px wide — the name would just
-  // be noise, so drop it rather than render illegible text.
-  const hidden = zoom < 0.28;
+  // be noise, so drop it rather than render illegible text. Past the same point
+  // a large chart stops being SVG at all; see LOD_ZOOM.
+  const hidden = zoom < LOD_ZOOM;
   // The years are set smaller than the name and go to mush one step earlier.
   const yearsHidden = zoom < 0.4;
   const weight = state.labelStyle.fontWeight || 'normal';
@@ -474,11 +683,26 @@ export function buildAndRunSimulation(opts = {}) {
   // slider by hand, at which point their choice wins from then on.
   if (state._3dYHalfSpanAuto && state._genRange3D) {
     const genSpan = Math.max(1, state._genRange3D.max - state._genRange3D.min);
-    state._3dYHalfSpan = Math.round(Math.max(200, Math.min(2400, genSpan * 110)));
+    // Two different things set the size of this axis, and it needs both.
+    //
+    // How many generations there are decides how many layers have to fit —
+    // that part was already here. How many *people* there are decides how far
+    // apart everything else sits, and that part was missing: the horizontal
+    // spread scales with the tree (see physicsScale) while this stayed put, so
+    // a large file came out as a pancake — measured at 16,700 wide and 1,980
+    // tall. Scaling the axis by the same factor keeps the gap between two
+    // generations in proportion to the gap between two siblings, which is what
+    // actually makes a big tree look like a big version of a small one rather
+    // than a squashed one.
+    const S = physicsScale(state.nodes.length);
+    const span = Math.round(Math.max(200 * S, Math.min(2400 * S, genSpan * 110 * S)));
+    state._3dYHalfSpan = span;
     const spreadSlider = document.getElementById('time-spread-slider');
     const spreadNum    = document.getElementById('time-spread-num');
-    if (spreadSlider) spreadSlider.value = state._3dYHalfSpan;
-    if (spreadNum)    spreadNum.value    = state._3dYHalfSpan;
+    // The slider only covers the hand-tuned range; let it sit at its own
+    // maximum rather than silently reporting a smaller number than is in use.
+    if (spreadSlider) spreadSlider.value = Math.min(span, +spreadSlider.max || span);
+    if (spreadNum)    spreadNum.value    = span;
   }
 
   // Compute estimated birth years for persons without one (uses generation & relation info)
@@ -508,6 +732,15 @@ export function buildAndRunSimulation(opts = {}) {
       max: Math.max(state._birthYearRange.max, ...famYears),
     };
   }
+
+  // Everything above is shared: the year and generation ranges the 3D timeline
+  // stratifies against, and the estimated years both views label with. The 2D
+  // force layout below is not — and useTreeLayout() is false in the 3D view, so
+  // every filter change made while looking at the 3D scene was building and
+  // headlessly ticking a 2D simulation nobody could see. On a 50,000-person file
+  // that was eighty-odd seconds of frozen tab per change, for a layout thrown
+  // away unlooked-at. Arriving in 2D builds it: setView('2d') calls this again.
+  if (state.currentView === '3d') return;
 
   // Classical chart: positions are computed outright, so there is nothing to
   // simulate. Everything below (forces, warm reheat, headless ticking) is the
@@ -575,18 +808,19 @@ export function buildAndRunSimulation(opts = {}) {
     state.simulation.alpha(Math.max(state.simulation.alpha(), 0.3));
   } else {
     if (state.simulation) state.simulation.stop();
+    const S = physicsScale(state.nodes.length);
     state.simulation = d3.forceSimulation(state.nodes)
       .force('link', d3.forceLink(state.links)
         .id(d => d.id)
-        .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+        .distance(d => (d.ltype === 'spouse' ? p.spouseDist : p.parentDist) * S)
         .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength)
       )
       .force('charge', d3.forceManyBody()
-        .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
-        .distanceMax(p.chargeDistMax)
+        .strength(d => (d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi) * S)
+        .distanceMax(p.chargeDistMax * S)
       )
       .force('center', d3.forceCenter(W / 2, H / 2).strength(p.centerStrength))
-      .force('collide', d3.forceCollide(d => d.type === 'FAM' ? 9 : p.collideRadius).strength(0.7))
+      .force('collide', d3.forceCollide(d => (d.type === 'FAM' ? 9 : p.collideRadius) * S).strength(0.7))
       .force('fy', d3.forceY(d => nodeTargetY(d)).strength(p.yStrength))
       .alpha(1)
       .alphaDecay(p.alphaDecay)
@@ -639,16 +873,21 @@ export function applyPhysicsParams(opts = {}) {
   // built. Neither one existing is a reason to skip the other: a slider
   // change must reach whichever simulation(s) are actually live.
   if (state.simulation) {
+    // Same scaling the simulation was built with — see physicsScale(). Left out
+    // here, dragging any slider would quietly drop a large layout back to
+    // unscaled forces and collapse it.
+    const S = physicsScale(state.nodes.length);
+
     state.simulation.force('link')
-      .distance(d => d.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+      .distance(d => (d.ltype === 'spouse' ? p.spouseDist : p.parentDist) * S)
       .strength(d => d.ltype === 'spouse' ? p.spouseStrength : p.parentStrength);
 
     state.simulation.force('charge')
-      .strength(d => d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
-      .distanceMax(p.chargeDistMax);
+      .strength(d => (d.type === 'FAM' ? -p.chargeFam : -p.chargeIndi) * S)
+      .distanceMax(p.chargeDistMax * S);
 
     state.simulation.force('collide')
-      .radius(d => d.type === 'FAM' ? 9 : p.collideRadius);
+      .radius(d => (d.type === 'FAM' ? 9 : p.collideRadius) * S);
 
     state.simulation.force('fy')
       .strength(p.yStrength);
@@ -755,6 +994,12 @@ export function onSimEnd() {
       useTreeLayout() ? frameTreeChart() : zoomToFit();
     }
   }
+  // The one point every layout — classical, headless force, live force — passes
+  // through once the positions are final. renderGraph() ran before any of them
+  // and so had nothing placed to cull against; this is the pass that actually
+  // puts the chart on screen. The framing above is a transition, and each of
+  // its frames re-fires the zoom handler, so the window follows it in.
+  if (_cullActive()) renderViewport(true);
 }
 
 export function zoomToFit() {

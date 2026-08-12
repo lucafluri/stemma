@@ -19,6 +19,7 @@ export function buildGraphData() {
   state._genDepthsCache = null;
   state._genNumbers     = null;
   state._estimatedYears = null;
+  state._spouseIds      = null;
   _autoMarkDeceasedByAge();
   state.allNodes = [];
   state.allLinks = [];
@@ -70,13 +71,34 @@ export function inGenRange(id) {
   return g === undefined || (g >= state.genRange.min && g <= state.genRange.max);
 }
 
+// Who is married to whom. Only isIndiVisible() below needs it, and only for the
+// people the surname filter has switched off — but it used to answer that by
+// scanning every family in the file, per person, on every repaint. On a
+// 50,000-person file with half the surnames unticked that is 5.7×10⁸ comparisons
+// and a fifteen-second freeze on one checkbox; built once it is a few
+// milliseconds. Invalidated in buildGraphData(), where the rest of the
+// tree-shaped caches are cleared, because that is the one function every path
+// that changes the data goes through — including the file loader, which does
+// not call _fullRebuildGraph().
+export function spouseIndex() {
+  if (state._spouseIds) return state._spouseIds;
+  const idx = new Map();
+  const pair = (a, b) => { idx.has(a) ? idx.get(a).push(b) : idx.set(a, [b]); };
+  for (const [, fam] of state.families) {
+    if (fam.husb && fam.wife) { pair(fam.husb, fam.wife); pair(fam.wife, fam.husb); }
+  }
+  state._spouseIds = idx;
+  return idx;
+}
+
 export function isIndiVisible(id) {
   const indi = state.individuals.get(id);
   if (!inGenRange(id)) return false;
   if (!indi || hasEnabledFamilyName(indi)) return true;
-  for (const [, fam] of state.families) {
-    const spouseId = fam.husb === id ? fam.wife : fam.wife === id ? fam.husb : null;
-    if (spouseId && hasEnabledFamilyName(state.individuals.get(spouseId) || {})) return true;
+  // Married to someone whose family name is still shown: they stay, so a couple
+  // is never split down the middle by the surname filter.
+  for (const spouseId of spouseIndex().get(id) || []) {
+    if (hasEnabledFamilyName(state.individuals.get(spouseId) || {})) return true;
   }
   return false;
 }
@@ -912,6 +934,20 @@ export function updateFocusUI() {
     nameEl.textContent = t('focus.none');
     nameEl.classList.add('focus-none');
     if (clearBtn) clearBtn.style.display = 'none';
-    if (hiddenEl) { hiddenEl.textContent = ''; hiddenEl.style.display = 'none'; }
+    // With no focus the 2D chart really is showing everyone, so there is nothing
+    // to report — but the 3D scene has a budget of its own and may be holding
+    // far fewer. A scene quietly missing half the file, with the panel saying
+    // nothing, is the one thing a filter must never do.
+    if (hiddenEl) {
+      const omitted = state.currentView === '3d' ? (state._3dOmitted || 0) : 0;
+      if (omitted > 0) {
+        const shown = Math.max(0, state.individuals.size - omitted);
+        hiddenEl.textContent = t('focus.hidden', { shown, n: omitted });
+        hiddenEl.style.display = '';
+      } else {
+        hiddenEl.textContent = '';
+        hiddenEl.style.display = 'none';
+      }
+    }
   }
 }

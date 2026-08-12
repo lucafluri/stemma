@@ -1,4 +1,7 @@
 import { state } from './state.js';
+import { physicsScale } from './constants.js';
+import { buildInstanced3D, instancedActive, pickInstanced3D, teardownInstanced3D, updateInstanced3D } from './render-3d-instanced.js';
+
 import { _compute3DLinkColor, _nameTextColor, compute3DNodeColor } from './colors.js';
 import { openNodeContextMenu } from './context-menu.js';
 import { computeActiveData, updateFocusUI } from './graph-data.js';
@@ -61,16 +64,193 @@ export function setView(view) {
   updateHLButtons();
 }
 
+const _id3 = v => (typeof v === 'object' && v ? v.id : v);
+
+/**
+ * The slice of the active set the scene can actually carry — see
+ * state.scene3d.maxNodes. Taken as a connected ball grown outward from the
+ * best-connected person on screen rather than as the first N of the array: an
+ * arbitrary slice of a large file is mostly people with no relative in it, and
+ * a scene of unconnected dots says less than a smaller scene that holds
+ * together.
+ */
+function _sceneBall(budget) {
+  const adj = new Map();
+  const link = (a, b) => {
+    const at = adj.get(a);
+    if (at) at.push(b); else adj.set(a, [b]);
+  };
+  for (const l of state.links) {
+    const s = _id3(l.source), t = _id3(l.target);
+    link(s, t); link(t, s);
+  }
+
+  // Best-connected first, so the scene fills with the parts of the file that
+  // have the most to show. A GEDCOM is very often several unrelated trees, and
+  // one ball then runs out of people long before it runs out of budget — the
+  // first version of this filled 141 of a 4,000 slot scene for exactly that
+  // reason. So seeds are taken in turn until the budget is met, which fills it
+  // with whole families rather than a fragment of one.
+  const order = state.nodes.map(n => n.id)
+    .sort((a, b) => (adj.get(b)?.length ?? 0) - (adj.get(a)?.length ?? 0));
+  // A focus person is the reader's own answer to "who is this scene about", and
+  // outranks the merely well-connected one.
+  if (state.focusRootId && state.individuals.has(state.focusRootId)) {
+    order.unshift(state.focusRootId);
+  }
+
+  const keep = new Set();
+  for (const seed of order) {
+    if (keep.size >= budget) break;
+    if (keep.has(seed)) continue;
+    keep.add(seed);
+    let frontier = [seed];
+    while (frontier.length && keep.size < budget) {
+      const next = [];
+      for (const id of frontier) {
+        for (const nb of adj.get(id) || []) {
+          if (keep.size >= budget) break;
+          if (keep.has(nb)) continue;
+          keep.add(nb);
+          next.push(nb);
+        }
+        if (keep.size >= budget) break;
+      }
+      frontier = next;
+    }
+  }
+  return keep;
+}
+
+/** What to hand ForceGraph3D: the whole active set, or a budgeted ball of it. */
+export function scene3DData() {
+  let nodes = state.nodes, links = state.links;
+  if (nodes.length > state.scene3d.maxNodes) {
+    const keep = _sceneBall(state.scene3d.maxNodes);
+    nodes = nodes.filter(n => keep.has(n.id));
+    links = links.filter(l => keep.has(_id3(l.source)) && keep.has(_id3(l.target)));
+  }
+  state._3dOmitted = state.nodes.filter(n => n.type === 'INDI').length
+                   - nodes.filter(n => n.type === 'INDI').length;
+  return {
+    nodes: nodes.map(n => ({ id: n.id, type: n.type, data: n.data })),
+    links: links.map(l => ({ source: _id3(l.source), target: _id3(l.target), ltype: l.ltype })),
+  };
+}
+
+/**
+ * Level of detail, chosen from how much is in the scene rather than from the
+ * camera: the objects are built once at push time and kept, so this is the only
+ * moment the choice can be made. Link cylinders become plain line segments —
+ * one mesh per link is what puts tens of thousands of draw calls in a frame —
+ * and the spheres lose facets nobody can resolve at that density anyway.
+ */
+function _apply3DDetail(g, nodeCount) {
+  // Instanced: the library draws nothing at all. An empty Object3D per node is
+  // still created — that is how it tracks positions — but it has no geometry and
+  // so costs no draw call, and the links are switched off outright. Everything
+  // visible comes from render-3d-instanced.js instead.
+  if (state.instanced3d) {
+    g.nodeThreeObject(() => new THREE.Object3D())
+     .nodeThreeObjectExtend(false)
+     .linkVisibility(false);
+    return true;
+  }
+  g.linkVisibility(true);
+  const dense = nodeCount > state.scene3d.detailMax;
+  g.linkWidth(dense ? 0 : state._3dAppearance.linkWidth)
+   .nodeResolution(dense ? 6 : (_isMobile() ? 8 : 12));
+  return dense;
+}
+
 export function _push3DData() {
   if (!state.graph3d) return;
-  state.graph3d.graphData({
-    nodes: state.nodes.map(n => ({ id: n.id, type: n.type, data: n.data })),
-    links: state.links.map(l => ({
-      source: typeof l.source === 'object' ? l.source.id : l.source,
-      target: typeof l.target === 'object' ? l.target.id : l.target,
-      ltype:  l.ltype,
-    })),
-  });
+  const data = scene3DData();
+
+  _apply3DDetail(state.graph3d, data.nodes.length);
+  state.graph3d.graphData(data);
+  // Built from what was just pushed rather than read back out of the library:
+  // these are the very objects it keeps and writes x/y/z onto, so the map holds
+  // live positions, and the scene's size stays a number this file owns.
+  //
+  // Both the orbit target and the pivot snap used to look a node up with a
+  // linear .find() over the whole scene — the tracking one on every rendered
+  // frame.
+  state._g3dById = new Map(data.nodes.map(n => [n.id, n]));
+
+  // ForceGraph3D leaves its layout engine stopped when new data arrives through
+  // graphData(): the people change but no force ever acts on them, so a focus
+  // change or a cleared focus left whatever positions happened to be there
+  // frozen on screen. Measured directly — scattering every node to a mean radius
+  // of 1,578 and calling graphData() alone left it at 1,578; refresh() alone
+  // left it at 1,553; refresh() *and* a reheat pulled it back to 893 and kept
+  // going. Neither resumeAnimation nor cooldownTime/cooldownTicks nor
+  // numDimensions revived it. This is not new — the unmodified app behaves the
+  // same way — and rebuilding the whole instance also works but throws the
+  // canvas and the camera away with it.
+  state.graph3d.refresh();
+  state.graph3d.d3ReheatSimulation();
+
+  // The scene it was culled against no longer exists.
+  _lastCullPos.x = _lastCullPos.y = _lastCullPos.z = NaN;
+  if (state.instanced3d) buildInstanced3D();
+  update3DSceneInfo();
+}
+
+/**
+ * The line of plain figures under the scene sliders: what the scene is holding
+ * right now, so the budgets are not set blind. Lives here rather than with the
+ * rest of the sidebar wiring because every one of these numbers is a property of
+ * the scene, and this is the file that changes them — put in the panel, it went
+ * stale on every push that did not happen to come from a slider.
+ */
+/**
+ * Switch between the instanced layers and the library's own per-object
+ * rendering. Both paths build their objects at push time, so this re-pushes
+ * rather than trying to convert one into the other in place.
+ */
+export function setInstanced3D(on) {
+  state.instanced3d = !!on;
+  localStorage.setItem('instanced3d', state.instanced3d ? '1' : '0');
+  const cb = document.getElementById('instanced-3d-toggle');
+  if (cb) cb.checked = state.instanced3d;
+  if (!state.graph3d) return;
+  teardownInstanced3D();
+  _push3DData();          // rebuilds whichever set of objects now applies
+  apply3DPhysics({ reheat: false });
+  update3DNames();
+  refresh3D();
+}
+
+/**
+ * Turn distance culling on or off. Off is the default now that the whole scene
+ * costs three draw calls; on reinstates the nearest-N budget for a machine that
+ * still wants it.
+ */
+export function setCull3D(on) {
+  state.cull3d = !!on;
+  localStorage.setItem('cull3d', state.cull3d ? '1' : '0');
+  const cb = document.getElementById('cull-3d-toggle');
+  if (cb) cb.checked = state.cull3d;
+  // The "drawn at once" budget only means something while culling is on.
+  const row = document.getElementById('sc-draw-max-row');
+  if (row) row.style.display = state.cull3d ? '' : 'none';
+  cull3D(true);              // forced: this is what puts everything back on
+  update3DSceneInfo();
+}
+
+export function update3DSceneInfo() {
+  const el = document.getElementById('sc-scene-info');
+  if (!el) return;
+  const built = state._g3dById?.size ?? 0;
+  el.textContent = built
+    ? t('appearance.sceneInfo', {
+        built,
+        drawn: state.cull3d ? Math.min(built, state.scene3d.drawMax) : built,
+        omitted: state._3dOmitted || 0,
+        scale: physicsScale(built).toFixed(1),
+      })
+    : '';
 }
 
 export function updateViewToggleUI() {
@@ -170,17 +350,11 @@ export function initGraph3D() {
   const container = document.getElementById('graph-3d-container');
   container.innerHTML = '';
 
-  // Build 3D node and link arrays (keep data references intact)
-  const gNodes = state.nodes.map(n => ({
-    id:   n.id,
-    type: n.type,
-    data: n.data,
-  }));
-  const gLinks = state.links.map(l => ({
-    source: typeof l.source === 'object' ? l.source.id : l.source,
-    target: typeof l.target === 'object' ? l.target.id : l.target,
-    ltype:  l.ltype,
-  }));
+  // Budgeted, exactly as a later _push3DData() would be — this is the path a
+  // freshly loaded file takes, and pushing the whole set here was what froze
+  // the tab for two minutes before the first frame.
+  const data = scene3DData();
+  const dense = data.nodes.length > state.scene3d.detailMax;
 
   _track3DPointer(container);
 
@@ -188,22 +362,24 @@ export function initGraph3D() {
     .backgroundColor(state._3dAppearance.bgColor)
     .width(container.clientWidth)
     .height(container.clientHeight)
-    .graphData({ nodes: gNodes, links: gLinks })
+    .graphData(data)
     // ── Nodes ──
     .nodeColor(n => compute3DNodeColor(n))
     .nodeVal(n => _famNodeVal(n))
     .nodeRelSize(state._3dAppearance.nodeRelSize)
     .nodeOpacity(state._3dAppearance.nodeOpacity)
     // Spheres are small on a phone screen; the facets do not show, the triangles
-    // still cost.
-    .nodeResolution(_isMobile() ? 8 : 12)
+    // still cost. A crowded scene is the same argument at any screen size.
+    .nodeResolution(dense ? 6 : (_isMobile() ? 8 : 12))
     // No .nodeLabel() here: the library's own hover tooltip would show
     // alongside the custom #tooltip div that onNodeHover()/onHover() already
     // drive (shared with the 2D view) — showing both at once is the "two
     // tooltips" bug. That one is the richer, kept one.
     // ── Links ──
     .linkColor(l => linkColor(l))
-    .linkWidth(state._3dAppearance.linkWidth)
+    // A width above zero makes ForceGraph3D build a cylinder mesh per link; at
+    // zero it draws the lot as line segments instead.
+    .linkWidth(dense ? 0 : state._3dAppearance.linkWidth)
     .linkOpacity(state._3dAppearance.linkOpacity)
     // ── Events ──
     .onNodeClick((n, evt) => {
@@ -228,6 +404,15 @@ export function initGraph3D() {
       _isMobile() ? minimizeDetailPanel() : closeDetailPanel();
     })
     .enableNodeDrag(false);   // broken in 3D — orbit controls fight the drag handler
+
+  // The same call _push3DData() makes, so both routes into a scene agree about
+  // what it draws. Spelling the flags out again here instead is how this path
+  // ended up building 11,948 link objects behind the instanced layer: the
+  // per-node meshes were suppressed (update3DNames does that) and the links
+  // were not, so only one half of the switch had been made.
+  _apply3DDetail(state.graph3d, data.nodes.length);
+
+  state._g3dById = new Map(data.nodes.map(n => [n.id, n]));
 
   // Delay setup so the library's internal controls finish initialising first
   setTimeout(() => {
@@ -312,7 +497,7 @@ export function initGraph3D() {
     }
 
     // Redirect the render-loop's update() call to our OrbitControls + orbit target tracking
-    old.update = () => { _tickOrbitTarget(); state._orbitControls3d.update(); };
+    old.update = () => { _tickOrbitTarget(); state._orbitControls3d.update(); _scheduleCull3D(); };
 
     // ── Lighting setup — replace ForceGraph3D defaults ──
     const scene = state.graph3d.scene();
@@ -329,6 +514,11 @@ export function initGraph3D() {
     state._3dPointLight = new THREE.PointLight(0xffffff, state._3dAppearance.pointLight, 0);
     cam.add(state._3dPointLight);
     scene.add(cam); // ensure camera is part of scene graph so its children render
+
+    _bindInstancedPicking(domEl);
+    // The scene only exists once the library has built it, which is why the
+    // instanced layers are added here rather than alongside the graphData call.
+    if (state.instanced3d) buildInstanced3D();
 
     apply3DPhysics();
     build3DTimeline();
@@ -348,19 +538,56 @@ export function apply3DPhysics({ repin = true, reheat = true } = {}) {
   if (!state.graph3d) return;
   const p = state.physicsParams;
 
+  // The sliders describe the *shape* of the layout at a chart's worth of people;
+  // this is what turns that into the absolute numbers a scene of this size
+  // needs. Without it a large tree bundles into a ball — see physicsScale().
+  const S = physicsScale(state._g3dById?.size ?? state.nodes.length);
+
   // Only modify forces the library already created — don't inject foreign d3-force objects
   const lf = state.graph3d.d3Force('link');
   if (lf) lf
-    .distance(l => l.ltype === 'spouse' ? p.spouseDist    : p.parentDist)
+    .distance(l => (l.ltype === 'spouse' ? p.spouseDist : p.parentDist) * S)
     .strength(l => l.ltype === 'spouse' ? p.spouseStrength : p.parentStrength);
 
   const cf = state.graph3d.d3Force('charge');
-  if (cf) cf
-    .strength(n => n.type === 'FAM' ? -p.chargeFam : -p.chargeIndi)
-    .distanceMax(p.chargeDistMax);
+  if (cf) {
+    cf.strength(n => (n.type === 'FAM' ? -p.chargeFam : -p.chargeIndi) * S)
+      // Scaling this is the whole fix: left at its slider value the repulsion
+      // simply stops existing past a fixed radius, and a graph wider than that
+      // radius has nothing holding it open.
+      .distanceMax(p.chargeDistMax * S);
+    // Barnes-Hut accuracy. theta is how large a distant cluster may look before
+    // the octree stops descending into it and treats it as one mass — so it
+    // trades exactness of the repulsion for the cost of computing it, and it is
+    // by far the largest lever on that cost. Measured on a 12,000-node scene:
+    // 173 ms per tick at d3's default 0.9, 92 ms at 1.5, 49 ms at 2.5.
+    //
+    // What the looser value buys is invisible at that size: the error is in
+    // where individual people sit within a cluster of thousands, which nobody is
+    // reading. A small tree is another matter — there every position is looked
+    // at, so it keeps the accurate default.
+    if (cf.theta) {
+      const n = state._g3dById?.size ?? state.nodes.length;
+      cf.theta(n > 8000 ? 2.5 : n > 3000 ? 1.5 : 0.9);
+    }
+  }
 
-  state.graph3d.d3AlphaDecay(0.028);
+  // The cooling slider is the reader's, and 3D used to ignore it and hard-code
+  // its own number — so the one control that says how long the layout keeps
+  // moving did nothing in the view where settling actually takes a while.
+  //
+  // A bigger graph needs more ticks to reach the same quality: alpha has to
+  // carry information across a longer graph. Slowing the decay in proportion to
+  // the scale gives it those ticks, and the settle time below bounds the wall
+  // clock so a huge scene still stops rather than grinding indefinitely.
+  state.graph3d.d3AlphaDecay(Math.max(0.002, p.alphaDecay / S));
   state.graph3d.d3VelocityDecay(p.velocityDecay);
+  // Ticks are far more expensive on a large scene (measured: 45 ms each at
+  // 12,000 nodes against well under 1 ms at a few hundred), so a fixed fifteen
+  // seconds buys a settled layout at chart size and barely a start at file size.
+  if (state.graph3d.cooldownTime) {
+    state.graph3d.cooldownTime(Math.round(Math.min(60000, 8000 * S)));
+  }
 
   // Pin nodes to exact Y positions based on (estimated) birth year.
   // Using node.fy is exact — unlike forceY which fights link/charge forces.
@@ -373,8 +600,135 @@ export function apply3DPhysics({ repin = true, reheat = true } = {}) {
   if (reheat) state.graph3d.d3ReheatSimulation();
 }
 
+// ── Distance culling ────────────────────────────────────────────────────────
+//
+// The 2D view culls to a rectangle because that is what a window is. Here the
+// camera sits inside the scene, so the equivalent question is "how far away",
+// and the answer is applied by switching objects off rather than by removing
+// them: the objects are expensive to build and cheap to hide, and hiding one
+// takes its draw call out of the frame just the same.
+//
+// A link is drawn only when both of its ends are, which needs no second sort
+// and is also the right answer visually — a connector to somewhere off in the
+// dark says nothing.
+let _cullPending = false;
+// The simulation keeps moving nodes while the camera sits still, so a still
+// camera is not on its own a reason to keep last frame's answer. This counts
+// frames since the last pass and forces one about twice a second regardless.
+let _cullIdle = 0;
+const _lastCullPos = { x: NaN, y: NaN, z: NaN };
+
+export function cull3D(force = false) {
+  if (!state.graph3d || !state._g3dById) return;
+  // Instanced: there are no per-node objects to switch on and off. Culling is
+  // the same decision, applied one step earlier — which nodes get written into
+  // the instance buffers at all. This also has to run every frame regardless of
+  // whether the camera moved, because it is what carries the simulation's new
+  // positions into the buffers.
+  if (instancedActive()) { updateInstanced3D(force); return; }
+
+  const nodes = [...state._g3dById.values()];
+  const gd = state.graph3d.graphData();
+
+  // Switched off, or a scene small enough not to need it: everything on, and
+  // nothing to recompute until that changes.
+  if (!state.cull3d || nodes.length <= state.scene3d.drawMax) {
+    if (force) {
+      for (const n of nodes) if (n.__threeObj) n.__threeObj.visible = true;
+      for (const l of gd.links || []) if (l.__lineObj) l.__lineObj.visible = true;
+    }
+    return;
+  }
+
+  const cam = state.graph3d.camera();
+  const p = cam.position;
+  // The simulation keeps moving nodes, so this cannot be skipped purely on a
+  // still camera — but it can be skipped while neither has moved much.
+  // NaN on the first pass after a push, and NaN <= 2 is false — so a freshly
+  // built scene culls immediately rather than drawing everything until the
+  // reader happens to orbit. Written this way round deliberately: the negated
+  // form skips on NaN and leaves the scene uncut for good.
+  const moved = Math.abs(p.x - _lastCullPos.x) + Math.abs(p.y - _lastCullPos.y) + Math.abs(p.z - _lastCullPos.z);
+  if (!force && moved <= 2 && ++_cullIdle < 30) return;
+  _cullIdle = 0;
+  _lastCullPos.x = p.x; _lastCullPos.y = p.y; _lastCullPos.z = p.z;
+
+  // Squared distance — the ordering is the same and there is no square root.
+  const d2 = new Map();
+  for (const n of nodes) {
+    const dx = (n.x || 0) - p.x, dy = (n.y || 0) - p.y, dz = (n.z || 0) - p.z;
+    d2.set(n.id, dx * dx + dy * dy + dz * dz);
+  }
+  const near = [...d2.entries()].sort((a, b) => a[1] - b[1]).slice(0, state.scene3d.drawMax);
+  const shown = new Set(near.map(e => e[0]));
+
+  for (const n of nodes) {
+    if (n.__threeObj) n.__threeObj.visible = shown.has(n.id);
+  }
+  for (const l of gd.links || []) {
+    if (!l.__lineObj) continue;
+    l.__lineObj.visible = shown.has(_id3(l.source)) && shown.has(_id3(l.target));
+  }
+}
+
+/** Coalesced to one pass per frame — the render loop calls this every frame. */
+function _scheduleCull3D() {
+  // Instanced buffers hold the positions themselves, so they have to be
+  // rewritten before the frame that uses them, not a frame later — deferring
+  // this one to a rAF draws the scene one step behind the simulation, which
+  // reads as everything lagging the layout while it settles.
+  if (instancedActive()) { updateInstanced3D(); return; }
+  if (_cullPending) return;
+  _cullPending = true;
+  requestAnimationFrame(() => { _cullPending = false; cull3D(); });
+}
+
+/**
+ * Pointer handling for the instanced renderer. ForceGraph3D finds the node
+ * under the cursor by raycasting the objects it built per node; those are empty
+ * now, so its onNodeClick/onNodeHover never fire and this stands in for them,
+ * raycasting the InstancedMesh instead. Registered once, on the container, for
+ * the same reason the pointer tracker above is.
+ */
+let _instancedPickBound = false;
+function _bindInstancedPicking(domEl) {
+  if (_instancedPickBound) return;
+  _instancedPickBound = true;
+  let hovered = null;
+
+  domEl.addEventListener('mousemove', evt => {
+    if (!instancedActive()) return;
+    const n = pickInstanced3D(evt.clientX, evt.clientY);
+    if (n === hovered) { if (n) onHover(evt, n); return; }
+    hovered = n;
+    n ? onHover(evt, n) : onOut();
+    domEl.style.cursor = n ? 'pointer' : '';
+  });
+
+  domEl.addEventListener('click', evt => {
+    if (!instancedActive() || state._3dGestureDragged) return;
+    const n = pickInstanced3D(evt.clientX, evt.clientY);
+    if (!n) { _isMobile() ? minimizeDetailPanel() : closeDetailPanel(); return; }
+    if (n.type === 'INDI' && _tryPickRelationPerson(n.id)) return;
+    if (n.type === 'INDI') showIndiDetail(n.id); else showFamDetail(n.id);
+    _setOrbitTarget3D(n.type === 'INDI' ? n.id : null);
+  });
+
+  domEl.addEventListener('contextmenu', evt => {
+    if (!instancedActive()) return;
+    const n = pickInstanced3D(evt.clientX, evt.clientY);
+    if (n) { evt.preventDefault(); openNodeContextMenu(evt, n.id, n.type); }
+  });
+}
+
 export function refresh3D() {
   if (!state.graph3d) return;
+  // Instanced: colour and highlight are per-instance values in a buffer, not
+  // per-object materials, so rewriting the buffers is the whole job. None of the
+  // material walking below has anything to walk — the objects it looks for were
+  // never built.
+  if (instancedActive()) { updateInstanced3D(true); return; }
+
   const hasHL = state.hlSet.size > 0;
   const gd = state.graph3d.graphData();
 
@@ -662,7 +1016,25 @@ export function makeNameSprite3D(n) {
 
 export function update3DNames() {
   if (!state.graph3d) return;
-  if (state.show3DNames) {
+  // With the instanced renderer every name lives in one texture atlas and is
+  // drawn by one instanced quad layer, so there is no per-label cost to ration
+  // and no threshold to apply — rebuilding the layers repacks the atlas.
+  if (state.instanced3d) {
+    // Must stay the empty object, not null: null puts the library's *default*
+    // sphere back, which is exactly the per-node mesh this renderer exists to
+    // avoid — 12,000 of them reappeared behind the instanced layer, invisible
+    // in the picture and fully paid for in the frame.
+    state.graph3d.nodeThreeObject(() => new THREE.Object3D()).nodeThreeObjectExtend(false);
+    buildInstanced3D();
+    return;
+  }
+  // Sprite path: each label is its own canvas and its own GPU texture. A few
+  // hundred is a readable scene; a few thousand is texture memory the scene does
+  // not get back, and at that density they overlap into an unreadable mat
+  // anyway. The toggle still decides whether labels are wanted at all — this
+  // only decides whether the scene can afford them.
+  const affordable = (state._g3dById?.size ?? 0) <= state.scene3d.detailMax;
+  if (state.show3DNames && affordable) {
     state.graph3d
       .nodeThreeObject(n => makeNameSprite3D(n) || undefined)
       .nodeThreeObjectExtend(true);   // label sits on top of the sphere
@@ -864,8 +1236,8 @@ export function _setOrbitTarget3D(nodeId) {
   const from = ctrl.target.clone();
   let to;
   if (nodeId && state.graph3d) {
-    const gd = state.graph3d.graphData();
-    const n = gd.nodes.find(nd => nd.id === nodeId);
+    // Not necessarily in the scene: the budget may have left this person out.
+    const n = state._g3dById?.get(nodeId);
     if (n) to = new THREE.Vector3(n.x || 0, n.y || 0, n.z || 0);
   }
   if (!to) to = _graphCentroid3D();
@@ -885,10 +1257,11 @@ export function _tickOrbitTarget() {
     if (t >= 1) state._orbitTargetAnim = null;
     return;
   }
-  // Continuous tracking: follow the tracked node as it moves in the simulation
+  // Continuous tracking: follow the tracked node as it moves in the simulation.
+  // This runs on every rendered frame, so the lookup has to be a lookup — a
+  // linear scan here was the camera walking the whole scene sixty times a second.
   if (state._orbitTrackNodeId) {
-    const gd = state.graph3d.graphData();
-    const n = gd.nodes.find(nd => nd.id === state._orbitTrackNodeId);
+    const n = state._g3dById?.get(state._orbitTrackNodeId);
     if (n) {
       const pos = new THREE.Vector3(n.x || 0, n.y || 0, n.z || 0);
       state._orbitControls3d.target.lerp(pos, 0.08);

@@ -19,7 +19,7 @@ import { openNodeContextMenu } from './context-menu.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
 import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, refreshTreeLineageColoring, renderPresetList, resetView, schedulePhysicsParams, syncNodeDragBtn, toggleNodeDrag, zoomToFit } from './render-2d.js';
-import { build3DTimeline, toggleView, updateViewToggleUI } from './render-3d.js';
+import { _push3DData, apply3DPhysics, build3DTimeline, cull3D, setCull3D, toggleView, update3DNames, update3DSceneInfo, updateViewToggleUI } from './render-3d.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
 
@@ -336,6 +336,16 @@ document.addEventListener('DOMContentLoaded', () => {
     update3DNames();
   });
 
+  // The instanced-rendering switch is persisted, so the box has to be set from
+  // the setting rather than from whatever the markup happens to say.
+  const instCb = document.getElementById('instanced-3d-toggle');
+  if (instCb) instCb.checked = state.instanced3d;
+  const cullCb = document.getElementById('cull-3d-toggle');
+  if (cullCb) cullCb.checked = state.cull3d;
+  // ...and the budget slider only shows while the budget applies.
+  const cullRow = document.getElementById('sc-draw-max-row');
+  if (cullRow) cullRow.style.display = state.cull3d ? '' : 'none';
+
   // Link color pickers
   for (const key of ['spouse', 'father', 'mother', 'parent']) {
     const el = document.getElementById('lc-' + key);
@@ -393,24 +403,48 @@ document.addEventListener('DOMContentLoaded', () => {
   // of numbers than the ones actually being rendered, so the panel lied until
   // you touched a slider — and then the first touch jumped the scene.
   for (const c of AP_CONTROLS) {
-    const el = document.getElementById(c.id);
+    const el  = document.getElementById(c.id);
     if (!el) continue;
-    el.value = apValue(c);
-    if (c.dp != null) _apShowValue(c, apValue(c));
+    // The typed box, where there is one. It deliberately accepts a wider range
+    // than its slider — same bargain the physics panel already makes: the slider
+    // covers the useful span, the box lets you go past it when you mean to.
+    const num = c.dp == null ? null : document.getElementById(c.id + '-num');
+
+    const show = v => {
+      el.value = v;                                    // the slider clamps itself
+      if (num && document.activeElement !== num) num.value = Number(v).toFixed(c.dp);
+    };
+    show(apValue(c));
+
+    const commit = v => {
+      if (c.dp == null) { apSet(c, v); c.apply(v); apPersist(c); return; }
+      if (!Number.isFinite(v)) return;                 // half-typed "-" or ""
+      apSet(c, v);
+      c.apply(v);
+      apPersist(c);
+    };
+
     el.addEventListener('input', function () {
       const v = c.dp == null ? this.value : parseFloat(this.value);
-      if (c.dp != null && !Number.isFinite(v)) return;
-      if (c.top) state[c.key] = v; else state._3dAppearance[c.key] = v;
-      _apShowValue(c, v);
-      c.apply(v);
-      localStorage.setItem('appearance3d', JSON.stringify(state._3dAppearance));
+      commit(v);
+      if (c.dp != null && num) num.value = Number(v).toFixed(c.dp);
     });
+    num?.addEventListener('input', function () {
+      const v = parseFloat(this.value);
+      commit(v);
+      if (Number.isFinite(v)) el.value = v;
+    });
+    // Typing is allowed to leave the box mid-edit ("0.", "" while retyping);
+    // leaving it is where the value gets tidied back to what actually took.
+    num?.addEventListener('blur', () => show(apValue(c)));
   }
+  update3DSceneInfo();
 });
 
-// `top` marks the one value that lives on state directly rather than inside
-// state._3dAppearance; `dp` is the decimal places of the little number beside
-// the slider (absent = it is a colour input with no readout).
+// `store` says where the value lives: the 3D appearance bag by default, `top`
+// for the one that sits on state directly, `scene` for the scene budgets.
+// `dp` is the decimal places shown in the box beside the slider (absent = it is
+// a colour input with no readout).
 const AP_CONTROLS = [
   { id: 'ap-bg-color',     key: 'bgColor',                apply: v => state.graph3d?.backgroundColor(v) },
   { id: 'ap-node-opacity', key: 'nodeOpacity',  dp: 2,    apply: v => state.graph3d?.nodeOpacity(v) },
@@ -419,15 +453,40 @@ const AP_CONTROLS = [
   { id: 'ap-point',        key: 'pointLight',   dp: 1,    apply: v => { if (state._3dPointLight)   state._3dPointLight.intensity   = v; } },
   { id: 'ap-link-width',   key: 'linkWidth',    dp: 1,    apply: v => state.graph3d?.linkWidth(v) },
   { id: 'ap-node-size',    key: 'nodeRelSize',  dp: 1,    apply: v => state.graph3d?.nodeRelSize(v) },
-  { id: 'ap-font-size',    key: '_3dFontSize',  dp: 0, top: true, apply: () => update3DNames() },
+  { id: 'ap-font-size',    key: '_3dFontSize',  dp: 0, store: 'top', apply: () => update3DNames() },
+
+  // ── Scene budgets ──
+  // How many people the scene builds and how many it draws. Changing what is
+  // *built* means handing the library a different set, which is a rebuild;
+  // changing what is *drawn* is only a different answer from the cull, so it
+  // takes effect on the next frame with nothing rebuilt.
+  { id: 'sc-max-nodes',   key: 'maxNodes',  dp: 0, store: 'scene', apply: _apRebuildScene },
+  { id: 'sc-draw-max',    key: 'drawMax',   dp: 0, store: 'scene', apply: () => { cull3D(true); update3DSceneInfo(); } },
+  { id: 'sc-detail-max',  key: 'detailMax', dp: 0, store: 'scene', apply: _apRebuildScene },
 ];
 
-function apValue(c) { return c.top ? state[c.key] : state._3dAppearance[c.key]; }
+const apBag = c => c.store === 'top' ? state : c.store === 'scene' ? state.scene3d : state._3dAppearance;
+function apValue(c) { return apBag(c)[c.key]; }
+function apSet(c, v) { apBag(c)[c.key] = v; }
+function apPersist(c) {
+  if (c.store === 'scene') localStorage.setItem('scene3d', JSON.stringify(state.scene3d));
+  else localStorage.setItem('appearance3d', JSON.stringify(state._3dAppearance));
+}
 
-function _apShowValue(c, v) {
-  if (c.dp == null) return;
-  const out = document.getElementById(c.id + '-val');
-  if (out) out.textContent = Number(v).toFixed(c.dp);
+// Rebuilding the scene is a visible pause on a large file, and these arrive one
+// input event per pixel of slider travel. Coalesce to one rebuild once the
+// dragging stops.
+let _apSceneTimer = null;
+function _apRebuildScene() {
+  clearTimeout(_apSceneTimer);
+  _apSceneTimer = setTimeout(() => {
+    _apSceneTimer = null;
+    if (!state.graph3d || state.currentView !== '3d') return;
+    _push3DData();
+    apply3DPhysics();
+    update3DNames();
+    updateFocusUI();          // the omitted-people count just changed
+  }, 350);
 }
 
 // These labels are built in JS, so data-i18n can't retranslate them.

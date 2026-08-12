@@ -1,7 +1,7 @@
 import { state } from './state.js';
-import { perf } from './constants.js';
+import { AUTO_FOCUS_THRESHOLD, perf } from './constants.js';
 import { buildSurnameColorMap, buildSurnameList } from './colors.js';
-import { DECEASED_AGE_THRESHOLD, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
+import { DECEASED_AGE_THRESHOLD, _defaultFocusRoot, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
 import { applyFilter, autoSettle, buildAndRunSimulation, initSVG, renderGraph } from './render-2d.js';
 import { captureBaseline, refreshChanges } from './changes.js';
@@ -231,6 +231,12 @@ export function _loadDatasetFile(file, handle = null) {
       const fCount = state.families.size;
       document.getElementById('status').textContent =
         t('topbar.statusLoaded', { persons: iCount, families: fCount });
+
+      // Too big to draw whole — see AUTO_FOCUS_THRESHOLD. Set before the rebuild
+      // below, because buildGraphData() runs the focus walk as part of deciding
+      // what is active: choosing afterwards would mean laying the whole file out
+      // once and throwing it away, which is the cost this is here to avoid.
+      if (iCount > AUTO_FOCUS_THRESHOLD) state.focusRootId = _defaultFocusRoot();
 
       const sorted = buildSurnameColorMap();
       buildSurnameList(sorted);
