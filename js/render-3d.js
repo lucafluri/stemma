@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { physicsScale } from './constants.js';
+import { seedScene3D } from './seed-3d.js';
 import { buildInstanced3D, instancedActive, pickInstanced3D, teardownInstanced3D, updateInstanced3D } from './render-3d-instanced.js';
 
 import { _compute3DLinkColor, _nameTextColor, compute3DNodeColor } from './colors.js';
@@ -166,6 +167,14 @@ function _apply3DDetail(g, nodeCount) {
 export function _push3DData() {
   if (!state.graph3d) return;
   const data = scene3DData();
+
+  // A changed set is a new layout: give it the computed starting shape rather
+  // than making the simulation discover one. An unchanged set is a repaint —
+  // re-seeding there would throw away a settled layout to no purpose.
+  const sameSet = state._g3dById
+    && state._g3dById.size === data.nodes.length
+    && data.nodes.every(n => state._g3dById.has(n.id));
+  if (!sameSet) seedScene3D(data);
 
   _apply3DDetail(state.graph3d, data.nodes.length);
   state.graph3d.graphData(data);
@@ -354,6 +363,7 @@ export function initGraph3D() {
   // freshly loaded file takes, and pushing the whole set here was what froze
   // the tab for two minutes before the first frame.
   const data = scene3DData();
+  seedScene3D(data);                 // as _push3DData does — never start tangled
   const dense = data.nodes.length > state.scene3d.detailMax;
 
   _track3DPointer(container);

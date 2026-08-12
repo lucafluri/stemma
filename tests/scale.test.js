@@ -272,6 +272,106 @@ function bigGedcom(n) {
     state.focusRootId = null;
   });
 
+  console.log('\nthe computed 3D starting layout');
+
+  const { seedScene3D } = await import(url('seed-3d.js'));
+
+  // A branching pedigree: every couple has three children, one of whom marries
+  // and has three of their own. Wide enough that an unstructured seed would
+  // interleave the branches.
+  function buildPedigree(gens) {
+    const individuals = new Map(), families = new Map();
+    let pid = 0, fid = 0;
+    const person = () => { const id = 'P' + (++pid); individuals.set(id, p(id, 'S')); return id; };
+    let layer = [[person(), person()], [person(), person()]];
+    for (let g = 0; g < gens; g++) {
+      const next = [];
+      for (const [h, w] of layer) {
+        const f = 'F' + (++fid);
+        const ch = [person(), person(), person()];
+        families.set(f, { id: f, husb: h, wife: w, chil: ch, marriages: [] });
+        individuals.get(h).fams.push(f); individuals.get(w).fams.push(f);
+        for (const c of ch) individuals.get(c).famc.push(f);
+        next.push([ch[0], person()]);
+      }
+      layer = next;
+    }
+    return { individuals, families };
+  }
+
+  const seedOf = fixture => {
+    load(fixture);
+    const data = { nodes: state.nodes.map(n => ({ id: n.id, type: n.type, data: n.data })), links: [] };
+    seedScene3D(data);
+    return new Map(data.nodes.map(n => [n.id, n]));
+  };
+
+  await test('everybody gets a finite position', async () => {
+    const pos = seedOf(buildPedigree(4));
+    for (const [id, n] of pos) {
+      assert.ok(Number.isFinite(n.x) && Number.isFinite(n.z), `${id} was left unplaced`);
+    }
+  });
+
+  await test('relatives land near each other, strangers do not', async () => {
+    // The whole point of inheriting an angular wedge. Compare the distance from
+    // a parent to their own child against the distance to a random other person:
+    // if the seed carries no structure the two are the same.
+    const fx = buildPedigree(4);
+    const pos = seedOf(fx);
+    const d = (a, b) => Math.hypot(pos.get(a).x - pos.get(b).x, pos.get(a).z - pos.get(b).z);
+    let kin = 0, kinN = 0;
+    for (const [, fam] of fx.families) {
+      for (const c of fam.chil) {
+        if (!pos.has(fam.husb) || !pos.has(c)) continue;
+        kin += d(fam.husb, c); kinN++;
+      }
+    }
+    const ids = [...pos.keys()].filter(id => pos.get(id).type === 'INDI');
+    let far = 0, farN = 0;
+    for (let i = 0; i < ids.length; i += 7) {
+      for (let j = 3; j < ids.length; j += 11) {
+        if (i === j) continue;
+        far += d(ids[i], ids[j]); farN++;
+      }
+    }
+    const meanKin = kin / kinN, meanAny = far / farN;
+    assert.ok(meanKin < meanAny * 0.6,
+      `parent→child ${meanKin.toFixed(0)} should be well under the ${meanAny.toFixed(0)} of any two people`);
+  });
+
+  await test('a deep line does not overflow the stack', async () => {
+    // The walk is iterative for this reason: a long pedigree recursed would
+    // throw, and a GEDCOM with thousands of generations of descent is a real
+    // (if malformed) file.
+    const individuals = new Map(), families = new Map();
+    const ids = Array.from({ length: 6000 }, (_, i) => 'D' + i);
+    for (const id of ids) individuals.set(id, p(id, 'S'));
+    for (let i = 0; i + 1 < ids.length; i++) {
+      const f = 'FD' + i;
+      families.set(f, { id: f, husb: ids[i], wife: null, chil: [ids[i + 1]], marriages: [] });
+      individuals.get(ids[i]).fams.push(f);
+      individuals.get(ids[i + 1]).famc.push(f);
+    }
+    const pos = seedOf({ individuals, families });
+    assert.ok(Number.isFinite(pos.get('D5999').x), 'the far end of the line should still be placed');
+  });
+
+  await test('a person who married in sits beside their partner', async () => {
+    const fx = buildPedigree(3);
+    const pos = seedOf(fx);
+    // Spouses of the branch heads have no descent of their own to inherit from.
+    let checked = 0;
+    for (const [, fam] of fx.families) {
+      if (!fam.husb || !fam.wife || !pos.has(fam.husb) || !pos.has(fam.wife)) continue;
+      const d = Math.hypot(pos.get(fam.husb).x - pos.get(fam.wife).x,
+                           pos.get(fam.husb).z - pos.get(fam.wife).z);
+      assert.ok(Number.isFinite(d), 'both partners should be placed');
+      checked++;
+    }
+    assert.ok(checked > 0, 'the fixture should contain couples');
+  });
+
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
