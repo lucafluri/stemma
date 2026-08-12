@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { LINK_COLOR_DEFAULTS, NODE_COLOR_DEFAULTS } from './constants.js';
 import { escAttr, escHtml } from './gedcom-io.js';
 import { _applyFamNodeSize } from './relations.js';
-import { _rerenderNodes, applyFilter, linkColor, updateLabelColors, updateLabels } from './render-2d.js';
+import { _rerenderNodes, applyFilter, linkColor, refreshTreeLineageColoring, updateLabelColors, updateLabels } from './render-2d.js';
 import { refresh3D } from './render-3d.js';
 
 export function surnameHashColor(surname) {
@@ -326,6 +326,7 @@ export function updateLinkColors() {
   if (state.linkSel) {
     state.linkSel.attr('stroke', d => linkColor(d));
   }
+  refreshTreeLineageColoring();   // father/mother are also the side-colouring source
   // Update 3D links
   refresh3D();
 }

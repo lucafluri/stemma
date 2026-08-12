@@ -13,10 +13,10 @@
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" data-i18n-label="topbar.menu" aria-label="Menü öffnen">&#9776;</button>
   <h1>&#127795; <span data-i18n="app.name">Stammbaum</span></h1>
-  <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren"><span data-i18n="topbar.import">&#x1F4E5; Import</span></button>
+  <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; <span data-i18n="topbar.import">Import</span></button>
   <button id="open-recent-btn" onclick="openRecentFile()" style="display:none" data-i18n-title="topbar.openFileTitle" title="Datei öffnen">&#x1F4C1; <span data-i18n="topbar.openFile">Datei öffnen</span></button>
   <button id="save-file-btn" onclick="saveToFile()" style="display:none" data-i18n-title="topbar.saveToTitle" title="In dieselbe Datei speichern">&#x1F4BE;</button>
-  <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen"><span data-i18n="topbar.newPerson">&#xff0b; Neue Person</span></button>
+  <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen">&#xff0b; <span data-i18n="topbar.newPerson">Neue Person</span></button>
   <button id="view-toggle-btn" onclick="toggleView()" data-i18n-title="topbar.viewTitle" title="Zwischen 2D und 3D wechseln (V)" disabled>&#x25E7; <span data-i18n="topbar.view2d">2D</span></button>
   <div id="dl-wrap" style="display:none">
     <button id="dl-btn" onclick="downloadGEDCOM()" data-i18n-title="topbar.saveTitle" title="Als GEDCOM speichern">&#x2B07; <span data-i18n="topbar.save">Speichern</span></button><button id="dl-format-btn" onclick="toggleExportMenu(event)" data-i18n-title="topbar.exportFormat" title="Exportformat wählen">&#x25BE;</button>
@@ -225,6 +225,54 @@
       <button id="node-colors-reset" onclick="resetNodeColors()" data-i18n="nodeColors.reset">Zurücksetzen</button>
     </details>
 
+
+    <details id="tree-spacing-panel">
+      <summary data-i18n="treeSpacing.title">Baumabstände</summary>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="treeSpacing.row">Generationsabstand</span>
+          <input type="number" class="phys-num" id="tree-spacing-row-num" min="0.5" max="10" step="0.05" value="1"
+                 oninput="setTreeSpacing('row', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="tree-spacing-row" min="0.5" max="2.5" step="0.05" value="1"
+               oninput="setTreeSpacing('row', this.value)">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="treeSpacing.col">Personenabstand</span>
+          <input type="number" class="phys-num" id="tree-spacing-col-num" min="0.5" max="10" step="0.05" value="1"
+                 oninput="setTreeSpacing('col', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="tree-spacing-col" min="0.5" max="2.5" step="0.05" value="1"
+               oninput="setTreeSpacing('col', this.value)">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="treeSpacing.group">Abstand zwischen Familien</span>
+          <input type="number" class="phys-num" id="tree-spacing-group-num" min="0.5" max="10" step="0.05" value="1"
+                 oninput="setTreeSpacing('group', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="tree-spacing-group" min="0.5" max="2.5" step="0.05" value="1"
+               oninput="setTreeSpacing('group', this.value)">
+      </div>
+      <div class="phys-row" style="padding:4px 0" data-i18n-title="treeSpacing.sideTitle"
+           title="Zusätzlicher Abstand genau dort, wo Vater- und Mutterlinie aufeinandertreffen — zusätzlich zum allgemeinen Familienabstand oben.">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="treeSpacing.side">Abstand Vater-/Mutterseite</span>
+          <input type="number" class="phys-num" id="tree-spacing-side-num" min="0" max="10" step="0.1" value="1"
+                 oninput="setTreeSpacing('side', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="tree-spacing-side" min="0" max="3" step="0.1" value="1"
+               oninput="setTreeSpacing('side', this.value)">
+      </div>
+      <label class="sidebar-toggle" id="tree-lineage-color-row" style="border-top:none;padding-top:2px"
+             data-i18n-title="treeSpacing.lineageColorTitle"
+             title="Umriss der Vorfahren einfärben — Vaterlinie in der Vater-Verbindungsfarbe, Mutterlinie in der Mutter-Verbindungsfarbe.">
+        <input type="checkbox" id="tree-lineage-color-toggle">
+        <span data-i18n="treeSpacing.lineageColor">Vater-/Mutterlinie einfärben</span>
+      </label>
+      <button class="sidebar-btn" onclick="resetTreeSpacing()" data-i18n="treeSpacing.reset">Zurücksetzen</button>
+    </details>
 
     <details id="appearance-panel">
       <summary data-i18n="appearance.title">3D Darstellung</summary>
@@ -464,7 +512,7 @@
       <button class="highlight-btn" id="btn-ancestors" onclick="highlightMode('ancestors')" disabled>&#x2191; <span data-i18n="detail.ancestors">Vorfahren</span></button>
       <button class="highlight-btn" id="btn-descendants" onclick="highlightMode('descendants')" disabled>&#x2193; <span data-i18n="detail.descendants">Nachfahren</span></button>
       <button class="highlight-btn" id="btn-both" onclick="highlightMode('both')" disabled>&#x2195; <span data-i18n="detail.both">Beide</span></button>
-      <button class="highlight-btn" id="btn-focus-2d" onclick="focusOnPerson(state.selectedIndiId)" data-i18n-title="focus.btnTitle" title="2D-Ansicht um diese Person herum aufbauen" disabled>&#x25CE; <span data-i18n="focus.btn">Fokus 2D</span></button>
+      <button class="highlight-btn" id="btn-focus-2d" onclick="toggleFocusOnPerson(state.selectedIndiId)" data-i18n-title="focus.btnTitle" title="2D-Ansicht um diese Person herum aufbauen — nochmal klicken hebt den Fokus auf" disabled>&#x25CE; <span data-i18n="focus.btn">Fokus 2D</span></button>
       <button class="highlight-btn" id="btn-clear-hl" onclick="resetHighlight()">&#x2715; <span data-i18n="detail.clearSelection">Auswahl löschen</span></button>
       <div id="hl-count-info" style="display:none"></div>
     </div>
@@ -502,6 +550,7 @@
   <button id="rel-highlight" class="rel-hl-btn" type="button" onclick="relHighlightPath()" data-i18n="relationTool.highlightPath" style="display:none">Highlight path</button>
 </div>
 <div id="tooltip"></div>
+<div id="node-context-menu" style="display:none" role="menu"></div>
 
 <!-- ── Find people ─────────────────────────────────────────────────────── -->
 <div id="find-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="find.title" aria-label="Personen suchen">
@@ -679,6 +728,10 @@
         <label><input type="checkbox" id="map-type-death" checked><span data-i18n="map.type.death">Tod</span></label>
         <label><input type="checkbox" id="map-type-marriage" checked><span data-i18n="map.type.marriage">Heirat</span></label>
         <label data-i18n-title="map.undatedTitle" title="Ereignisse ohne Jahr lassen sich nicht einordnen — sie sind entweder immer oder nie dabei."><input type="checkbox" id="map-undated"><span data-i18n="map.undated">ohne Jahr</span></label>
+      </div>
+      <div id="map-dot-color-row">
+        <input type="color" id="map-dot-color" value="#ff7a1a" oninput="setMapDotColor(this.value)" data-i18n-title="map.dotColor" title="Punktfarbe">
+        <button id="map-dot-color-reset" onclick="resetMapDotColor()" data-i18n-title="map.dotColorReset" title="Zurücksetzen">&#x21ba;</button>
       </div>
     </div>
   </div>

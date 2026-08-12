@@ -717,6 +717,14 @@ export function focusOnPerson(id) {
   _refocus();
 }
 
+/** The "Fokus 2D" button: focus this person, or — pressed again on whoever is
+ * already the focus — drop the focus, since "click the active one off" is the
+ * expected way to undo it without hunting for the separate clear button. */
+export function toggleFocusOnPerson(id) {
+  if (id && id === state.focusRootId) clearFocus();
+  else focusOnPerson(id);
+}
+
 export function clearFocus() {
   if (!state.focusRootId) return;
   state.focusRootId = null;

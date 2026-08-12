@@ -4,6 +4,7 @@ import { PHYSICS_DEFAULTS, perf } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
+import { openNodeContextMenu } from './context-menu.js';
 import { closeDetailPanel, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _tryPickRelationPerson, applyHighlight } from './relations.js';
 import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, fit3D, setView, update3DNames } from './render-3d.js';
@@ -18,6 +19,33 @@ export const NODE_BOX_RX = 5;
 export const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, not the screen
 
 export const NODE_YEAR_FONT = 8;
+
+// Optional 2D-tree display setting: outline each ancestor in the colour their
+// own line already uses for parent→child links (state.linkColors.father/
+// mother), so the two halves of the chart read apart from the subject without
+// having to trace connectors. Only means something with a subject and the
+// classical layout — computeTreeLayout() is what actually fills _treeLineageSide.
+function _lineageSideOf(d) {
+  if (!state.treeLineageColoring || !useTreeLayout() || d.type !== 'INDI') return null;
+  return state._treeLineageSide?.get(d.id) || null;
+}
+
+function _lineageStroke(d) {
+  const side = _lineageSideOf(d);
+  if (side === 'father') return state.linkColors.father;
+  if (side === 'mother') return state.linkColors.mother;
+  return '#00000033';
+}
+
+/** Re-applies the outline above to nodes already on screen — the side map
+ * itself only changes when the layout runs, so toggling the setting or
+ * recolouring the father/mother link colours just needs to repaint it. */
+export function refreshTreeLineageColoring() {
+  if (!state.nodeSel) return;
+  state.nodeSel.select('rect.indi-box')
+    .attr('stroke', d => _lineageStroke(d))
+    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8);
+}
 
 // What goes on the name line of a person's box: the married name with the
 // maiden surname after it in brackets, the compact form a printed chart uses.
@@ -249,6 +277,7 @@ export function renderGraph() {
     })
     .on('mouseover', onHover)
     .on('mouseout', onOut)
+    .on('contextmenu', (evt, d) => openNodeContextMenu(evt, d.id, d.type))
     .on('dblclick', (evt, d) => {
       evt.stopPropagation();
       delete d.fx; delete d.fy;
@@ -278,8 +307,8 @@ export function renderGraph() {
     .attr('height', NODE_BOX_H)
     .attr('rx', NODE_BOX_RX)
     .attr('fill', d => nodeBaseColor(d))
-    .attr('stroke', '#00000033')
-    .attr('stroke-width', 0.8)
+    .attr('stroke', d => _lineageStroke(d))
+    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8)
     .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
     .attr('opacity', d => d.data.deceased ? 0.55 : 1);
 
@@ -437,6 +466,20 @@ export function buildAndRunSimulation(opts = {}) {
   const gd = computeGenerationDepths();
   const gs = state.nodes.filter(n => n.type === 'INDI' && gd.has(n.id)).map(n => gd.get(n.id));
   state._genRange3D = gs.length ? { min: Math.min(...gs), max: Math.max(...gs) } : null;
+
+  // The 3D axis-spread default used to be one fixed number regardless of how
+  // many generations were actually on screen — cramped for a 12-generation
+  // file, needlessly stretched for a 3-generation one. Scale it to the tree
+  // instead, and keep doing so on every rebuild until the reader drags the
+  // slider by hand, at which point their choice wins from then on.
+  if (state._3dYHalfSpanAuto && state._genRange3D) {
+    const genSpan = Math.max(1, state._genRange3D.max - state._genRange3D.min);
+    state._3dYHalfSpan = Math.round(Math.max(200, Math.min(2400, genSpan * 110)));
+    const spreadSlider = document.getElementById('time-spread-slider');
+    const spreadNum    = document.getElementById('time-spread-num');
+    if (spreadSlider) spreadSlider.value = state._3dYHalfSpan;
+    if (spreadNum)    spreadNum.value    = state._3dYHalfSpan;
+  }
 
   // Compute estimated birth years for persons without one (uses generation & relation info)
   perf.start('[sim] computeEstimatedYears'); computeEstimatedYears(); perf.end('[sim] computeEstimatedYears');

@@ -15,9 +15,10 @@ import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
 import { _fullRebuildGraph, _tryRestoreAutosave, showDataUI, updateFileButtons } from './gedcom-io.js';
 import { focusOnPerson, updateFocusUI } from './graph-data.js';
+import { openNodeContextMenu } from './context-menu.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
-import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, renderPresetList, resetView, schedulePhysicsParams, syncNodeDragBtn, toggleNodeDrag, zoomToFit } from './render-2d.js';
+import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, refreshTreeLineageColoring, renderPresetList, resetView, schedulePhysicsParams, syncNodeDragBtn, toggleNodeDrag, zoomToFit } from './render-2d.js';
 import { build3DTimeline, toggleView, updateViewToggleUI } from './render-3d.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
@@ -82,6 +83,27 @@ export function _initPanelSwipe() {
   }, { passive: true });
 }
 
+// Long-press timing for the node context menu on touch — no right mouse
+// button to reach it with there, so a hold takes its place.
+const LONG_PRESS_MS = 550;
+let _longPressTimer = null;
+
+function _cancelLongPress() {
+  if (_longPressTimer) clearTimeout(_longPressTimer);
+  _longPressTimer = null;
+}
+
+/** The node under a touch point, read off the DOM rather than threaded through
+ * from the event target's d3 datum, so both the SVG (2D) and the 3D canvas
+ * (whose hit-testing already happens in render-3d.js) can share this for the
+ * SVG side without an extra prop being carried around. */
+function _svgNodeAt(target) {
+  const g = target?.closest?.('.ng');
+  if (!g) return null;
+  const id = g.dataset.nid;
+  return state.nodes.find(n => n.id === id) || null;
+}
+
 export function _initTouchDragGuard() {
   const svg = document.getElementById('graph-svg');
   if (!svg) return;
@@ -89,17 +111,28 @@ export function _initTouchDragGuard() {
     if (evt.touches.length === 1) {
       state._touchDragged = false;
       state._touchStartPos = { x: evt.touches[0].clientX, y: evt.touches[0].clientY };
+      const touch = evt.touches[0];
+      const node = _svgNodeAt(evt.target);
+      _cancelLongPress();
+      if (node) {
+        _longPressTimer = setTimeout(() => {
+          _longPressTimer = null;
+          state._touchDragged = true;   // suppress the tap-to-select that follows
+          openNodeContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, node.id, node.type);
+        }, LONG_PRESS_MS);
+      }
     }
   }, { passive: true });
   svg.addEventListener('touchmove', evt => {
     if (state._touchStartPos && evt.touches.length === 1) {
       const dx = evt.touches[0].clientX - state._touchStartPos.x;
       const dy = evt.touches[0].clientY - state._touchStartPos.y;
-      if (Math.hypot(dx, dy) > 8) state._touchDragged = true;
+      if (Math.hypot(dx, dy) > 8) { state._touchDragged = true; _cancelLongPress(); }
     }
   }, { passive: true });
   svg.addEventListener('touchend', () => {
     state._touchStartPos = null;
+    _cancelLongPress();
   }, { passive: true });
 }
 
@@ -267,6 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const spreadNum    = document.getElementById('time-spread-num');
 
   function updateSpread(v) {
+    state._3dYHalfSpanAuto = false;   // the reader has an opinion now — stop overriding it on rebuild
     state._3dYHalfSpan = v;
     if (spreadSlider) spreadSlider.value = v;
     if (spreadNum) spreadNum.value = v;
@@ -332,6 +366,23 @@ document.addEventListener('DOMContentLoaded', () => {
       if (famSizeVal) famSizeVal.textContent = state.famNodeSize;
       localStorage.setItem('famNodeSize', state.famNodeSize);
       _applyFamNodeSize();
+    });
+  }
+
+  // Tree-spacing sliders (classical 2D chart only)
+  for (const key of ['row', 'col', 'group', 'side']) {
+    const slider = document.getElementById('tree-spacing-' + key);
+    const num    = document.getElementById('tree-spacing-' + key + '-num');
+    if (slider) slider.value = state.treeSpacing[key];
+    if (num)    num.value = state.treeSpacing[key];
+  }
+  const lineageColorToggle = document.getElementById('tree-lineage-color-toggle');
+  if (lineageColorToggle) {
+    lineageColorToggle.checked = state.treeLineageColoring;
+    lineageColorToggle.addEventListener('change', function () {
+      state.treeLineageColoring = this.checked;
+      localStorage.setItem('treeLineageColoring', state.treeLineageColoring ? '1' : '0');
+      refreshTreeLineageColoring();
     });
   }
 

@@ -43,3 +43,15 @@ export const NODE_COLOR_DEFAULTS = {
   fam:     '#2ecc71',
   famDiv:  '#e74c3c',
 };
+
+// A saturated orange reads against both the pale-grey OSM basemap and its blue
+// water — the previous default (a soft blue at 45% opacity) all but vanished
+// over water and over the tile grid's own blue road shields.
+export const MAP_DOT_COLOR_DEFAULT = '#ff7a1a';
+
+export const TREE_SPACING_DEFAULTS = {
+  row:   1,   // vertical distance between generations
+  col:   1,   // horizontal distance between people in a row
+  group: 1,   // extra clearance between one family's children and the next's
+  side:  1,   // extra clearance where the father's and mother's ancestry meet
+};

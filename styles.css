@@ -1594,6 +1594,33 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
 }
 #export-dropdown button:last-child, #tools-dropdown button:last-child { border-bottom: none; }
 #export-dropdown button:hover, #tools-dropdown button:hover { background: var(--c-5); color: var(--c-11); }
+
+/* ── Node context menu (right-click on a graph node) ── */
+#node-context-menu {
+  position: fixed;
+  z-index: 1300;
+  background: var(--c-3);
+  border: 1px solid var(--c-6);
+  border-radius: var(--r-sm);
+  min-width: 180px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+#node-context-menu button {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--c-5);
+  color: var(--c-10);
+  padding: 9px 14px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#node-context-menu button:last-child { border-bottom: none; }
+#node-context-menu button:hover { background: var(--c-5); color: var(--c-12); }
 /* Reviewing the changes is not a fourth export format; the heavier rule keeps
    it from being read as one by someone aiming for GEDCOM. */
 #export-dropdown .dd-review { border-bottom: 1px solid var(--c-7); color: var(--c-11); }
@@ -1817,6 +1844,17 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
   @media (hover: none) {
     #tooltip { display: none !important; }
   }
+
+  /* Bigger touch targets: the map's colour picker/reset pair, and the
+     right-click/long-press context menu rows. */
+  #map-dot-color-row input[type=color], #map-dot-color-reset {
+    width: 38px;
+    height: 38px;
+  }
+  #node-context-menu button {
+    padding: 12px 14px;
+    font-size: 14px;
+  }
 }
 
 /* Reopen pill — floating at bottom when panel is minimized */
@@ -1851,6 +1889,23 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
 
 @media (max-width: 400px) {
   #topbar h1 { display: none; }
+}
+
+/* Icon-only top bar on a phone: the label text is what pushed half these
+   buttons onto a second (sometimes third) row, eating vertical space the 3D
+   scene and the map could otherwise use. The icon plus the existing title=""
+   tooltip is still enough to identify each button. */
+@media (max-width: 480px) {
+  #import-btn span[data-i18n], #open-recent-btn span[data-i18n],
+  #new-person-btn span[data-i18n], #view-toggle-btn span[data-i18n],
+  #dl-btn span[data-i18n], #center-view-btn span[data-i18n],
+  #center-person-btn span[data-i18n], #tools-btn span[data-i18n] {
+    display: none;
+  }
+  #import-btn, #open-recent-btn, #new-person-btn, #view-toggle-btn, #dl-btn, #dl-format-btn,
+  #center-view-btn, #center-person-btn, #tools-btn {
+    padding: 6px 9px;
+  }
 }
 
 /* ── Relation tool panel ── */
@@ -3708,15 +3763,15 @@ body.relation-picking * { cursor: crosshair !important; }
 #map-attrib a { color: var(--accent-text); }
 
 .map-dot {
-  fill: var(--accent);
-  fill-opacity: 0.45;
-  stroke: var(--c-13);
-  stroke-width: 1;
-  stroke-opacity: 0.7;
+  fill: var(--accent);   /* fallback only — renderMap() sets the real fill inline from state.mapDotColor */
+  fill-opacity: 0.8;
+  stroke: #0a0a0a;
+  stroke-width: 1.5;
+  stroke-opacity: 0.85;
   cursor: pointer;
 }
-.map-dot:hover { fill-opacity: 0.75; }
-.map-dot--sel { fill: var(--warn-bright); fill-opacity: 0.85; stroke-width: 2; }
+.map-dot:hover { fill-opacity: 1; stroke: #fff; }
+.map-dot--sel { fill: var(--warn-bright); fill-opacity: 0.95; stroke: #0a0a0a; stroke-width: 2; }
 
 #map-side {
   width: 260px;
@@ -3818,6 +3873,19 @@ body.relation-picking * { cursor: crosshair !important; }
   min-width: 108px;
   text-align: center;
 }
+#map-dot-color-row { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+#map-dot-color-row input[type=color] { width: 28px; height: 28px; padding: 0; border: 1px solid var(--c-5); border-radius: var(--r-xs); cursor: pointer; background: none; }
+#map-dot-color-reset {
+  background: var(--c-3);
+  border: 1px solid var(--c-5);
+  color: var(--c-9);
+  border-radius: var(--r-xs);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#map-dot-color-reset:hover { background: var(--c-5); color: var(--c-11); }
 #map-types { display: flex; gap: 12px; flex-wrap: wrap; }
 #map-types label {
   display: flex;

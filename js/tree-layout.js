@@ -1,7 +1,8 @@
 import { state } from './state.js';
+import { TREE_SPACING_DEFAULTS } from './constants.js';
 import { _defaultFocusRoot, _refocus, computeActiveData, computeGenerationDepths, estimateBirthYear } from './graph-data.js';
 import { row } from './panels.js';
-import { NODE_BOX_H, NODE_BOX_RX, NODE_BOX_W, onSimEnd, tick } from './render-2d.js';
+import { NODE_BOX_H, NODE_BOX_RX, NODE_BOX_W, onSimEnd, refreshTreeLineageColoring, tick } from './render-2d.js';
 import { updateViewToggleUI } from './render-3d.js';
 
 export const FAM_MARKER_MIN = 4;
@@ -10,9 +11,16 @@ export function famMarkerSize() {
   return useTreeLayout() ? Math.max(FAM_MARKER_MIN, state.famNodeSize) : state.famNodeSize;
 }
 
-export const TREE_ROW_H     = 160;  // vertical distance between generations
+// Base values a display setting scales by (see applyTreeSpacing / setTreeSpacing
+// below) — everything else in this file reads the scaled `let`s, never these.
+const BASE_TREE_ROW_H     = 160;  // vertical distance between generations
+const BASE_TREE_COL_W     = 104;  // minimum distance between two people in a row (NODE_BOX_W + 12)
+const BASE_TREE_GROUP_GAP = 40;   // extra clearance between one family's children and the next's
+const BASE_TREE_SIDE_GAP  = 60;   // extra clearance where the father's and mother's ancestry meet
 
-export const TREE_COL_W     = 104;  // minimum distance between two people in a row (NODE_BOX_W + 12)
+export let TREE_ROW_H     = BASE_TREE_ROW_H;
+
+export let TREE_COL_W     = BASE_TREE_COL_W;
 
 export const TREE_SPOUSE_DX = 100;  // nominal width of a couple, used for connector routing
 
@@ -20,7 +28,58 @@ export const TREE_FAM_DY    = 0.24; // marriage row sits this fraction of a row 
 
 export const TREE_MARK_GAP  = 26;   // minimum distance between two marriage markers in a row
 
-export const TREE_GROUP_GAP = 40;   // extra clearance between one family's children and the next's
+export let TREE_GROUP_GAP = BASE_TREE_GROUP_GAP;
+
+export let TREE_SIDE_GAP  = BASE_TREE_SIDE_GAP;
+
+/** Recompute the scaled spacing constants from state.treeSpacing. Called once
+ * at load (to pick up whatever localStorage restored) and again whenever the
+ * display setting changes. */
+export function applyTreeSpacing() {
+  TREE_ROW_H     = Math.round(BASE_TREE_ROW_H     * state.treeSpacing.row);
+  TREE_COL_W     = Math.round(BASE_TREE_COL_W     * state.treeSpacing.col);
+  TREE_GROUP_GAP = Math.round(BASE_TREE_GROUP_GAP * state.treeSpacing.group);
+  TREE_SIDE_GAP  = Math.round(BASE_TREE_SIDE_GAP  * state.treeSpacing.side);
+}
+applyTreeSpacing();
+
+/** Sidebar sliders for the classical chart's spacing — how far generations sit
+ * apart, how close two people in a row may come, how much extra clearance
+ * separates one family's children from the next's, and how far the father's
+ * and mother's ancestry are pushed apart specifically (on top of the family
+ * gap above, since that one gap applies to every family boundary, not just
+ * the one either side of the focus person). 0 on the side gap turns that
+ * extra push off; the others stop at 0.5 because a chart cannot usefully
+ * compress people or generations past half size. The slider's own max tops
+ * out well below that ceiling for a comfortable drag range — the number box
+ * beside it is where a larger value actually gets typed in. */
+export function setTreeSpacing(key, v) {
+  const lo = key === 'side' ? 0 : 0.5;
+  const val = Math.max(lo, Math.min(10, parseFloat(v)));
+  if (!Number.isFinite(val) || !(key in state.treeSpacing)) return;
+  state.treeSpacing[key] = val;
+  localStorage.setItem('treeSpacing', JSON.stringify(state.treeSpacing));
+  applyTreeSpacing();
+  _syncTreeSpacingInput(key, val);
+  if (useTreeLayout()) applyTreeLayout();
+}
+
+function _syncTreeSpacingInput(key, val) {
+  const slider = document.getElementById('tree-spacing-' + key);
+  const num    = document.getElementById('tree-spacing-' + key + '-num');
+  // The slider clamps itself to its own (smaller) max when the number box
+  // holds a bigger value — expected, matching the physics panel's sliders.
+  if (slider) slider.value = val;
+  if (num)    num.value = Math.round(val * 100) / 100;
+}
+
+export function resetTreeSpacing() {
+  Object.assign(state.treeSpacing, TREE_SPACING_DEFAULTS);
+  localStorage.setItem('treeSpacing', JSON.stringify(state.treeSpacing));
+  applyTreeSpacing();
+  for (const key of Object.keys(TREE_SPACING_DEFAULTS)) _syncTreeSpacingInput(key, state.treeSpacing[key]);
+  if (useTreeLayout()) applyTreeLayout();
+}
 
 export const TREE_BUS_UP    = 48;   // sibling bar sits this far above the children's row
 
@@ -50,6 +109,101 @@ export function _assignBusLanes(items) {
     it.lane = lane;
   }
   return laneEnd.length;
+}
+
+/** Which of `subject`'s two ancestral sides each visible person's own line
+ * runs through — 'father', 'mother', or untagged (the subject, their own full
+ * siblings, descendants, in-laws, and anyone the walk never reaches). Deals
+ * only in `state.individuals` / `state.families` and `visible`, so it does
+ * not depend on computeTreeLayout's own visFam (a stricter "at least two
+ * visible members" test built for deciding whether a marriage marker earns a
+ * connector, not for this). Exported standalone so it can be tested and
+ * reasoned about apart from the layout algorithm.
+ */
+export function computeLineageSides(visible, subject) {
+  const sideOf = new Map();
+  if (!subject) return sideOf;
+
+  const famcRec = id => {
+    for (const fid of (state.individuals.get(id)?.famc || [])) {
+      const f = state.families.get(fid);
+      if (f) return f;
+    }
+    return null;
+  };
+  const famsRecs = id => (state.individuals.get(id)?.fams || [])
+    .map(fid => state.families.get(fid)).filter(Boolean);
+  const tag = (id, side) => { if (side && visible.has(id) && !sideOf.has(id)) sideOf.set(id, side); };
+
+  // Two separate seen-sets on purpose: "have we walked up through this
+  // person's ancestry" and "have we swept this person's own marriages and
+  // descendants" are different questions. A single shared set was the actual
+  // bug here — walkUp marked an ancestor seen the moment it started on their
+  // *parents*, which then made the marriage-sweep below silently skip that
+  // very ancestor's own remarriage, the one case the whole rewrite was for.
+  const seenUp = new Set();
+  const seenDown = new Set();
+
+  // A person, everyone they ever married — every marriage, not just the one
+  // that matters at whichever level called this — and everyone descending
+  // from any of those marriages. An aunt/uncle's whole line, or a remarried
+  // ancestor's second family.
+  const walkDown = (id, side) => {
+    if (seenDown.has(id)) return;
+    seenDown.add(id);
+    tag(id, side);
+    for (const fam of famsRecs(id)) {
+      const spouse = fam.husb === id ? fam.wife : fam.husb;
+      if (spouse) tag(spouse, side);
+      for (const c of fam.chil || []) walkDown(c, side);
+    }
+  };
+  // `id`'s own parents, their whole ancestry the same way, and every one of
+  // `id`'s siblings — full or half, from any marriage either parent had —
+  // with everything descending from them. Deliberately not a plain
+  // walkDown(parent, side): that would also re-descend into `id`'s own
+  // marriage, which is exactly the boundary this walk must not cross — `id`
+  // reached that marriage from one side, and whoever they married is not
+  // necessarily on it (at the very top, that other spouse is the subject's
+  // *other* parent, on the *other* side entirely).
+  const walkUp = (id, side) => {
+    if (seenUp.has(id)) return;
+    seenUp.add(id);
+    const fam = famcRec(id);
+    if (!fam) return;
+    for (const par of [fam.husb, fam.wife]) {
+      if (!par) continue;
+      tag(par, side);
+      walkUp(par, side);
+      for (const fam2 of famsRecs(par)) {
+        const otherSpouse = fam2.husb === par ? fam2.wife : fam2.husb;
+        if (otherSpouse) tag(otherSpouse, side);
+        for (const c of fam2.chil || []) if (c !== id) walkDown(c, side);
+      }
+    }
+  };
+
+  const subjFam = famcRec(subject);
+  if (!subjFam) return sideOf;
+  const { husb: fa, wife: mo } = subjFam;
+  if (fa) { tag(fa, 'father'); walkUp(fa, 'father'); }
+  if (mo) { tag(mo, 'mother'); walkUp(mo, 'mother'); }
+  // The one thing walkUp deliberately does not do for the subject's own
+  // parents: sweep *their* marriages wholesale would pull subjFam in too and
+  // tag the subject's full siblings, who are meant to stay neutral. So this
+  // is done by hand here, one marriage at a time, skipping subjFam — fa's/
+  // mo's own remarriage partner is tagged too, and every half-sibling reads
+  // as the shared parent's side rather than neutral like a full sibling.
+  for (const [p, side] of [[fa, 'father'], [mo, 'mother']]) {
+    if (!p) continue;
+    for (const fam2 of famsRecs(p)) {
+      if (fam2 === subjFam) continue;
+      const otherSpouse = fam2.husb === p ? fam2.wife : fam2.husb;
+      if (otherSpouse) tag(otherSpouse, side);
+      for (const c of fam2.chil || []) walkDown(c, side);
+    }
+  }
+  return sideOf;
 }
 
 export function computeTreeLayout() {
@@ -293,6 +447,19 @@ export function computeTreeLayout() {
   people.forEach(emitDesc);
   for (const [fid] of visFam) push(fid);
 
+  // Which of the subject's two ancestral sides each visible person's own line
+  // runs through, for the optional father-/mother-side colouring — computed
+  // independently of the ordering walk just above rather than piggybacked on
+  // it. That walk (and visFam, which it and the ordering below both lean on)
+  // only admits a family once it joins at least two *visible* members, a rule
+  // that exists to decide whether a marriage marker is worth drawing and has
+  // nothing to do with whether someone still counts as a paternal or maternal
+  // relative. Tagging alongside it left an ancestor untagged the moment their
+  // own parents' record had only one visible spouse, or children who did not
+  // happen to be on screen — which read as the colouring randomly giving out
+  // partway up a branch instead of running the whole way.
+  const sideOf = computeLineageSides(visible, subject);
+
   const layers = new Map();
   for (const [id, L] of layerOf) {
     if (!layers.has(L)) layers.set(L, []);
@@ -442,8 +609,15 @@ export function computeTreeLayout() {
       if (!i || L % 2 !== 0) return base;
       const prev = runs[i - 1].ids[runs[i - 1].ids.length - 1];
       const here = r.ids[0];
+      let gap = base;
       const a = famcKey(prev), b = famcKey(here);
-      return (a && b && a !== b) ? base + TREE_GROUP_GAP : base;
+      if (a && b && a !== b) gap += TREE_GROUP_GAP;
+      // The one boundary that is specifically the father/mother split, not
+      // just any two families landing next to each other — pushed apart
+      // further still, independent of the general family gap above.
+      const sa = sideOf.get(prev), sb = sideOf.get(here);
+      if (sa && sb && sa !== sb) gap += TREE_SIDE_GAP;
+      return gap;
     });
   };
 
@@ -736,6 +910,7 @@ export function computeTreeLayout() {
   }
 
   state._treeOmitted = omitted;
+  state._treeLineageSide = sideOf;
   return pos;
 }
 
@@ -781,6 +956,11 @@ export function applyTreeLayout() {
 
   tick();
   renderOmittedMarkers();
+  // The boxes were drawn by the renderGraph() call that always precedes this
+  // one, using whatever _treeLineageSide held from the *previous* layout —
+  // stale for a chart that just got a new subject, or empty on the very first
+  // paint. Repaint now that computeTreeLayout() above has just refreshed it.
+  refreshTreeLineageColoring();
   onSimEnd();
   return true;
 }
@@ -790,6 +970,7 @@ export function releaseTreePins() {
     if (n._treePinned) { delete n.fx; delete n.fy; delete n._treePinned; }
   }
   state._treeOmitted = null;
+  state._treeLineageSide = null;
   state.gMain?.select('g.omitted-g').selectAll('*').remove();
 }
 

@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { _compute3DLinkColor, _nameTextColor, compute3DNodeColor } from './colors.js';
+import { openNodeContextMenu } from './context-menu.js';
 import { computeActiveData, updateFocusUI } from './graph-data.js';
 import { _isMobile, closeDetailPanel, minimizeDetailPanel, row, showFamDetail, showIndiDetail } from './panels.js';
 import { _famNodeVal, _tryPickRelationPerson, applyHighlight, updateHLButtons } from './relations.js';
@@ -103,6 +104,10 @@ export function updateViewToggleUI() {
   const simLive = in3d || !state.treeLayout;
   const physicsPanel = document.getElementById('physics-panel');
   if (physicsPanel) physicsPanel.style.display = simLive ? 'block' : 'none';
+
+  // The mirror image: spacing only means something for the classical chart.
+  const spacingPanel = document.getElementById('tree-spacing-panel');
+  if (spacingPanel) spacingPanel.style.display = (!in3d && state.treeLayout) ? 'block' : 'none';
 
   // Node dragging is 2D-force-only — the 3D drag handler does not work.
   const dragBtn = document.getElementById('node-drag-btn');
@@ -209,6 +214,7 @@ export function initGraph3D() {
       else showFamDetail(n.id);
       _setOrbitTarget3D(n.type === 'INDI' ? n.id : null);
     })
+    .onNodeRightClick((n, evt) => openNodeContextMenu(evt, n.id, n.type))
     .onNodeHover(n => {
       if (n) {
         const fakeEvt = { clientX: state._3dMousePos.x, clientY: state._3dMousePos.y };

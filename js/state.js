@@ -2,7 +2,7 @@
 // Everything here used to be a top-level `let` in the original monolithic
 // app.js; call sites elsewhere now read/write it as `state.<name>` instead of
 // a bare identifier.
-import { LINK_COLOR_DEFAULTS, NODE_COLOR_DEFAULTS, PHYSICS_DEFAULTS } from './constants.js';
+import { LINK_COLOR_DEFAULTS, MAP_DOT_COLOR_DEFAULT, NODE_COLOR_DEFAULTS, PHYSICS_DEFAULTS, TREE_SPACING_DEFAULTS } from './constants.js';
 
 export const state = {
   individuals: new Map(),   // id -> indi object
@@ -66,6 +66,8 @@ export const state = {
   _lineageGen: null,   // id -> chart row, filled by computeLineageSet()
   _treeBusY: null,   // FAM id, "fam>child" and "parent~child" -> y of the sibling bar
   _treeOmitted: null,  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch markers
+  _treeLineageSide: null,  // id -> 'father' | 'mother', for the optional side colouring
+  treeLineageColoring: localStorage.getItem('treeLineageColoring') === '1',
   _revealed: new Set(),
   _birthYearRange: null,  // { min, max } saved for 3D stratification
   _genRange3D: null,  // { min, max } generation depth, same purpose
@@ -104,6 +106,12 @@ export const state = {
   // pixel across — and made 0 (the slider's own minimum) unselectable.
   famNodeSize: Number.isFinite(parseInt(localStorage.getItem('famNodeSize')))
     ? parseInt(localStorage.getItem('famNodeSize')) : 7,
+  mapDotColor: localStorage.getItem('mapDotColor') || MAP_DOT_COLOR_DEFAULT,
+  treeSpacing: { ...TREE_SPACING_DEFAULTS },
+  // Stays true until the user drags the 3D axis-spread slider by hand — until
+  // then the default tracks how many generations are actually on screen
+  // instead of sitting at one fixed number regardless of tree size.
+  _3dYHalfSpanAuto: true,
   _panelSwipe: null,  // { startY, startTranslate }
   _touchDragged: false,
   _touchStartPos: null,
@@ -161,4 +169,9 @@ if (!Number.isFinite(state.cousinDegree)) state.cousinDegree = 1;
 try {
   const saved = JSON.parse(localStorage.getItem('appearance3d') || '{}');
   Object.assign(state._3dAppearance, saved);
+} catch (e) { /* ignore */ }
+
+try {
+  const saved = JSON.parse(localStorage.getItem('treeSpacing') || '{}');
+  Object.assign(state.treeSpacing, saved);
 } catch (e) { /* ignore */ }

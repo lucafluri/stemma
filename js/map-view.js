@@ -21,6 +21,7 @@
  * over an empty background.
  */
 
+import { MAP_DOT_COLOR_DEFAULT } from './constants.js';
 import { _setDirty, escHtml, escJs } from './gedcom-io.js';
 import { showIndiDetail } from './panels.js';
 import { placeFields, placeKey } from './places.js';
@@ -301,6 +302,8 @@ export function openMapView() {
   }
   const und = _el('map-undated');
   if (und) und.checked = M.undated;
+  const dotColor = _el('map-dot-color');
+  if (dotColor) dotColor.value = state.mapDotColor;
 
   _syncSliders();
   modal.style.display = 'flex';
@@ -368,25 +371,42 @@ export function onMapFilterChange() {
   renderMap();
 }
 
+/** The dots' fill color, user-adjustable for contrast against whatever basemap
+ * area they land on — a single hue can never suit every tile colour, so this
+ * is a preference rather than a fixed choice. */
+export function setMapDotColor(color) {
+  state.mapDotColor = color;
+  localStorage.setItem('mapDotColor', color);
+  if (M.transform) _draw(); else renderMap();
+}
+
+export function resetMapDotColor() {
+  state.mapDotColor = MAP_DOT_COLOR_DEFAULT;
+  localStorage.setItem('mapDotColor', state.mapDotColor);
+  const el = _el('map-dot-color');
+  if (el) el.value = state.mapDotColor;
+  if (M.transform) _draw(); else renderMap();
+}
+
 // ── Sweeping through time ─────────────────────────────────────────────────────
 
 /**
- * Slide the window forward keeping its width. A window is what shows movement:
- * growing the range from one end only ever adds circles, so a family that left
- * a village in 1850 looks like it is still there in 1950.
+ * Grow the window forward from the "from" year the user set, which stays put —
+ * only "to" sweeps upward. That keeps the animation anchored on the start year
+ * the reader picked instead of silently overriding it, and it still shows
+ * movement: everything born or married after "from" accumulates on the map as
+ * "to" advances, then the sweep restarts from a thin window once it tops out.
  */
 export function toggleMapPlay() {
   if (M.play) return stopMapPlay();
   if (!M.range) return;
-  const span = M.range.max - M.range.min;
-  const width = Math.max(1, M.to - M.from);
+  const span = Math.max(1, M.range.max - M.from);
   const step = Math.max(1, Math.round(span / 60));
-  if (width >= span) { M.from = M.range.min; M.to = M.range.min + Math.max(1, Math.round(span / 8)); }
+  const restart = () => Math.min(M.range.max, M.from + Math.max(1, Math.round(span / 8)));
+  if (M.to >= M.range.max) M.to = restart();
   M.play = setInterval(() => {
-    const w = M.to - M.from;
-    M.from += step;
-    M.to = M.from + w;
-    if (M.to > M.range.max) { M.from = M.range.min; M.to = M.range.min + w; }
+    M.to += step;
+    if (M.to > M.range.max) M.to = restart();
     _syncSliders();
     renderMap();
   }, 350);
@@ -687,7 +707,12 @@ function _draw() {
     if (cx < -50 || cy < -50 || cx > w + 50 || cy > h + 50) return '';
     const r = _radius(g.events.length, maxN);
     const sel = g.plac === M.selected ? ' map-dot--sel' : '';
-    return `<circle class="map-dot${sel}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"
+    // A CSS class rule always wins over a plain fill="" attribute (a
+    // presentation attribute sits below the stylesheet in the cascade), so
+    // .map-dot's own `fill` silently ate the picked colour every time. An
+    // inline style="" outranks the stylesheet and actually shows through.
+    const fill = sel ? '' : ` style="fill:${state.mapDotColor}"`;
+    return `<circle class="map-dot${sel}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"${fill}
               onclick="selectMapPlace('${escJs(g.plac)}')"><title>${escHtml(g.plac)} — ${g.events.length}</title></circle>`;
   }).join('');
 }

@@ -33,7 +33,11 @@ function lift(name) {
 function constOf(name) {
   // Exponent form too — 40e6 reads better than 40000000 in the source, and a
   // helper that silently returns 40 for it is worse than no helper.
-  const m = src.match(new RegExp(`const ${name}\\s*=\\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)`));
+  //
+  // A few of these (TREE_ROW_H, TREE_COL_W, TREE_GROUP_GAP) are `let`s now,
+  // scaled at runtime from a display setting — their literal default lives in
+  // a same-named BASE_ const instead, which the optional prefix picks up.
+  const m = src.match(new RegExp(`const (?:BASE_)?${name}\\s*=\\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)`));
   assert(m, `${name} not found under js/`);
   return Number(m[1]);
 }
@@ -437,7 +441,7 @@ test('the nearest ring is kept when the budget bites', () => {
 // computeTreeLayout leans on a lot of module state, so rather than lift it out
 // we check the property that actually matters and is easy to state: everyone in
 // the same generation lands on the same row, and rows are ordered by generation.
-const treeSrc = src.match(/const TREE_ROW_H\s*=\s*(\d+)/);
+const treeSrc = src.match(/const (?:BASE_)?TREE_ROW_H\s*=\s*(\d+)/);
 assert(treeSrc, 'TREE_ROW_H not found in app.js');
 const ROW_H = Number(treeSrc[1]);
 
@@ -554,7 +558,7 @@ test('chart centring reads the offset before shifting', () => {
 console.log('\ncomputeTreeLayout (layered layout)');
 
 const LAYOUT_CONSTS = ['TREE_ROW_H', 'TREE_COL_W', 'TREE_SPOUSE_DX', 'TREE_FAM_DY',
-  'TREE_MARK_GAP', 'TREE_GROUP_GAP', 'TREE_ORDER_PASSES', 'TREE_COORD_PASSES',
+  'TREE_MARK_GAP', 'TREE_GROUP_GAP', 'TREE_SIDE_GAP', 'TREE_ORDER_PASSES', 'TREE_COORD_PASSES',
   'TREE_BUS_UP', 'TREE_LANE_DY', 'TREE_LANE_MIN', 'TREE_MARR_STEP', 'TREE_CHIP_DX', 'TREE_CHIP_DY', 'NODE_BOX_W', 'NODE_BOX_H', 'TREE_BUS_CLEARANCE'];
 
 function layoutOf({ individuals, families, focusRootId, depths }) {
@@ -566,10 +570,10 @@ function layoutOf({ individuals, families, focusRootId, depths }) {
   const state = { individuals, families, focusRootId, nodes, _lineageGen: null, _treeBusY: null, _treeOmitted: null };
   const pos = new Function(
     'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeLineageSides')}\n${lift('computeTreeLayout')}
      return computeTreeLayout();`
   )(state, () => depths, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
-  return { pos, busY: state._treeBusY };
+  return { pos, busY: state._treeBusY, side: state._treeLineageSide };
 }
 
 // Rows are the invariant everything else gives way to, so every layout fixture
@@ -1093,6 +1097,108 @@ test('no box is ever drawn on top of another', () => {
   }
 });
 
+// ── Father-/mother-side colouring ──
+// The optional display setting that outlines each ancestor in their side's
+// colour. Two bugs landed here: the side map was read before the layout pass
+// that fills it had run (fixed by refreshing after computeTreeLayout instead
+// of before it — not visible to this fixture, which calls computeTreeLayout
+// directly), and a remarried ancestor's other family was invisible to the
+// walk (the thing these tests actually cover).
+console.log('\ncomputeTreeLayout (father-/mother-side colouring)');
+
+test('the two grandparent lines are tagged apart, and nobody else is tagged', () => {
+  const { side } = layoutOf(buildPedigreeFixture());
+  for (const id of ['PGF', 'PGM', 'FA', 'Uncle', 'UncleW', 'Cousin1']) {
+    assert.strictEqual(side.get(id), 'father', `${id} should read as the father's side`);
+  }
+  for (const id of ['MGF', 'MGM', 'MO', 'Aunt', 'AuntH', 'Cousin2']) {
+    assert.strictEqual(side.get(id), 'mother', `${id} should read as the mother's side`);
+  }
+  // The subject's own generation and descendants share both sides, so neither
+  // reads as one or the other.
+  for (const id of ['Sib1', 'SUBJ', 'Sib2', 'Sp', 'Kid']) {
+    assert.ok(!side.has(id), `${id} should be untagged, not on either side`);
+  }
+});
+
+function buildRemarriageFixture() {
+  // PGF outlives PGM and remarries; the second marriage's child and
+  // grandchild are still paternal relatives, just not on the direct PGF→FA
+  // line the walk would otherwise have followed.
+  const base = buildPedigreeFixture();
+  const { individuals, families } = base;
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  individuals.get('PGF').fams.push('FP2');
+  p('PGF2', [], ['FP2']);
+  p('HalfUncle', ['FP2'], ['FHU']);
+  p('HalfCousin', ['FHU']);
+  f('FP2', 'PGF', 'PGF2', ['HalfUncle']);
+  f('FHU', 'HalfUncle', null, ['HalfCousin']);
+  return base;
+}
+
+test('a grandparent\'s remarriage still colours in as this side', () => {
+  const { side } = layoutOf(buildRemarriageFixture());
+  assert.strictEqual(side.get('PGF2'), 'father', 'the second spouse of a paternal ancestor is still paternal');
+  assert.strictEqual(side.get('HalfUncle'), 'father', 'a half-relative through that remarriage is still paternal');
+  assert.strictEqual(side.get('HalfCousin'), 'father', 'and so are their own descendants');
+});
+
+function buildDeepRemarriageFixture() {
+  // GGF (PGF's own father) remarried too — two generations up from the
+  // grandparent-level remarriage above, to make sure the fix recurses rather
+  // than only working one level up. Also covers the bug this walk actually
+  // had: sweeping PGF's siblings by walking PGF's *father*'s marriages used
+  // to also re-descend into PGF's own marriage to PGM, at every generation —
+  // which is how MO ended up wrongly tagged 'father' in the first fixture.
+  const base = buildPedigreeFixture();
+  const { individuals, families } = base;
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  individuals.get('PGF').famc = ['FGG'];
+  p('GGF', [], ['FGG', 'FGG2']);
+  p('GGM', [], ['FGG']);
+  p('GGM2', [], ['FGG2']);
+  p('GreatUncle', ['FGG2']);
+  f('FGG', 'GGF', 'GGM', ['PGF']);
+  f('FGG2', 'GGF', 'GGM2', ['GreatUncle']);
+  return base;
+}
+
+test('a remarriage two generations further up still colours in, and never crosses into the other side', () => {
+  const { side } = layoutOf(buildDeepRemarriageFixture());
+  assert.strictEqual(side.get('GGF'), 'father');
+  assert.strictEqual(side.get('GGM'), 'father');
+  assert.strictEqual(side.get('GGM2'), 'father', "GGF's remarriage partner is still paternal");
+  assert.strictEqual(side.get('GreatUncle'), 'father', 'and their child is too');
+  // The actual bug: walking up through a paternal ancestor must never end up
+  // tagging anyone on the mother's own line as 'father'.
+  for (const id of ['MO', 'MGF', 'MGM', 'Aunt', 'AuntH', 'Cousin2']) {
+    assert.strictEqual(side.get(id), 'mother', `${id} must stay the mother's side`);
+  }
+});
+
+function buildHalfSiblingFixture() {
+  // FA also married W2 before/after MO, and had HALFSIB with her — the
+  // subject's own half-sibling, sharing only the father.
+  const base = buildPedigreeFixture();
+  const { individuals, families } = base;
+  const p = (id, famc = [], fams = []) => individuals.set(id, { famc, fams, displayName: id });
+  const f = (id, husb, wife, chil) => families.set(id, { husb, wife, chil });
+  individuals.get('FA').fams.push('FH');
+  p('W2', [], ['FH']);
+  p('HALFSIB', ['FH']);
+  f('FH', 'FA', 'W2', ['HALFSIB']);
+  return base;
+}
+
+test('the subject\'s own half-sibling reads as the shared parent\'s side', () => {
+  const { side } = layoutOf(buildHalfSiblingFixture());
+  assert.strictEqual(side.get('HALFSIB'), 'father', 'shares only the father, so reads as his side');
+  assert.strictEqual(side.get('W2'), 'father', 'the other parent of a half-sibling reads the same way');
+});
+
 test('a chain of remarriages is seated side by side', () => {
   // W married H1 and then H2, and H2 had a first wife W2 of his own. All four
   // belong in one row, each next to somebody they married — seating only the
@@ -1158,7 +1264,7 @@ test('a "+N" chip sits at the junction, with nothing drawn to it', () => {
   const tlState = { individuals, families, focusRootId: 'Shown', nodes, _lineageGen: null, _treeBusY: null, _treeOmitted: null };
   const r = new Function(
     'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeLineageSides')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: state._treeOmitted };`
   )(tlState, () => depths, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
@@ -1208,7 +1314,7 @@ function chipsFor(individuals, families, focusRootId, focusLimit, revealed) {
     _lineageGen: fsState._lineageGen, _treeBusY: null, _treeOmitted: null };
   const r = new Function(
     'state', 'computeGenerationDepths', 'famMarkerSize', ...LAYOUT_CONSTS,
-    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeTreeLayout')}
+    `${lift('_assignBusLanes')}\n${lift('_defaultFocusRoot')}\n${lift('treeAnchorId')}\n${lift('computeLineageSides')}\n${lift('computeTreeLayout')}
      const pos = computeTreeLayout();
      return { pos, omitted: state._treeOmitted };`
   )(tlState, () => tlState._lineageGen, () => constOf('FAM_MARKER_MIN'), ...LAYOUT_CONSTS.map(constOf));
