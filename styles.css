@@ -3274,7 +3274,7 @@ body.relation-picking * { cursor: crosshair !important; }
   background: var(--c-1);
   border: 1px solid var(--c-5);
   border-radius: var(--r-lg);
-  width: min(560px, 94vw);
+  width: min(760px, 94vw);
   height: min(88vh, 900px);
   display: flex;
   flex-direction: column;
@@ -3283,23 +3283,113 @@ body.relation-picking * { cursor: crosshair !important; }
   box-shadow: var(--sh-3);
 }
 /* The figures were written for a 220px sidebar; with the room a window gives,
-   two columns keep the whole report on one screen instead of one long scroll. */
+   two columns keep the whole report readable instead of one long scroll.
+   A CSS grid, not `columns:` — a multi-column layout balances its column
+   heights *before* it knows the box will scroll, and a `column-span: all`
+   element (the tiles row, the sex bar, the timeline) in the middle of that
+   is exactly the combination that miscalculates the balance: everything
+   below the span used to come out squeezed into far less height than its
+   own content needed. Grid just flows each row at its natural height. */
 #stats-body {
+  flex: 1;
+  min-height: 0;
   padding: 10px 4px 6px 0;
   overflow-y: auto;
-  columns: 240px 2;
-  column-gap: 26px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  align-content: start;
 }
-#stats-body > * { break-inside: avoid; }
+@media (max-width: 620px) {
+  #stats-body { grid-template-columns: 1fr; }
+}
+
+/* Headline numbers, read before any of the detail — the four figures anyone
+   opening the window is really here for. */
+.stat-tiles {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.stat-tile {
+  background: var(--c-2);
+  border: 1px solid var(--c-4);
+  border-radius: var(--r-md);
+  padding: 10px 8px;
+  text-align: center;
+}
+.stat-tile-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--c-13);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.15;
+}
+.stat-tile-label {
+  font-size: 10px;
+  color: var(--c-8);
+  margin-top: 2px;
+}
+@media (max-width: 480px) {
+  .stat-tiles { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Sex split as one bar, so the shape of the tree reads before the numbers do. */
+.stat-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  height: 6px;
+  border-radius: var(--r-xs);
+  overflow: hidden;
+  margin: 2px 0 12px;
+}
+.stat-seg-M { background: #4a90d9; }
+.stat-seg-F { background: #e0608a; }
+.stat-seg-U { background: #7e8fa8; }
+.stat-bar span { cursor: pointer; }
+.stat-bar span:hover { filter: brightness(1.25); }
+
+/* One card per topic, instead of a running list broken up by rules — the
+   grouping is what makes a two-column report scannable rather than a wall of
+   rows to hunt through. */
+.stat-card {
+  background: var(--c-2);
+  border: 1px solid var(--c-4);
+  border-radius: var(--r-md);
+  padding: 8px 10px 4px;
+  margin: 0 0 10px;
+}
+.stat-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-11);
+  margin-bottom: 2px;
+}
+
 .stat-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
   font-size: 11px;
-  padding: 3px 0;
+  padding: 4px 2px;
+  margin: 0 -2px;
+  border-radius: var(--r-xs);
   color: var(--c-9);
 }
+/* A row that opens the people behind it reads as a button, not as one more
+   line of text — the whole point of making the figures clickable is lost if
+   nothing on screen says which ones are. */
+.stat-row--clickable { cursor: pointer; }
+.stat-row--clickable:hover, .stat-row--clickable:focus-visible {
+  background: var(--c-4);
+  color: var(--c-12);
+  outline: none;
+}
+.stat-row--clickable:hover .stat-label,
+.stat-row--clickable:focus-visible .stat-label { color: var(--c-12); }
 .stat-label { flex: 1; min-width: 0; }
 .stat-value {
   color: var(--c-11);
@@ -3318,7 +3408,6 @@ body.relation-picking * { cursor: crosshair !important; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.stat-sep { border-top: 1px solid var(--c-3); margin: 6px 0 4px; }
 .stat-group-title, .stat-group .stat-group-title {
   font-size: 10px;
   text-transform: uppercase;
@@ -3332,9 +3421,13 @@ body.relation-picking * { cursor: crosshair !important; }
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
-  padding: 2px 0;
+  padding: 3px 4px;
+  margin: 0 -4px;
+  border-radius: var(--r-xs);
   color: var(--c-9);
 }
+.stat-list li.stat-row--clickable:hover,
+.stat-list li.stat-row--clickable:focus-visible { background: var(--c-3); }
 .stat-list li span:first-child {
   min-width: 0;
   overflow: hidden;
@@ -3348,11 +3441,89 @@ body.relation-picking * { cursor: crosshair !important; }
    showed up the moment the lists went to ten. */
 .stat-list li .stat-hint { flex: none; max-width: none; }
 .stat-empty { font-size: 11px; color: var(--c-7); padding: 6px 0; }
-/* Sex split as one bar, so the shape of the tree reads before the numbers do. */
-.stat-bar { display: flex; height: 6px; border-radius: var(--r-xs); overflow: hidden; margin: 4px 0 8px; }
-.stat-seg-M { background: #4a90d9; }
-.stat-seg-F { background: #e0608a; }
-.stat-seg-U { background: #7e8fa8; }
+
+/* Births-per-decade column chart. One series, so one flat colour per column —
+   height alone carries the magnitude, nothing is shaded by it — and no
+   legend box (the group title already says what is plotted). Spans both
+   #stats-body columns: a timeline squeezed into 240px is unreadable. */
+.stat-timeline { grid-column: 1 / -1; }
+.stat-timeline-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 64px;
+  padding-bottom: 16px;
+  overflow-x: auto;
+}
+.stat-timeline-bar {
+  position: relative;
+  flex: 1 0 6px;
+  min-width: 6px;
+  max-width: 22px;
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+}
+.stat-timeline-bar:hover { filter: brightness(1.3); }
+.stat-timeline-bar--empty { cursor: default; }
+.stat-timeline-bar--empty:hover { filter: none; }
+.stat-timeline-label {
+  position: absolute;
+  bottom: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--c-7);
+  white-space: nowrap;
+}
+
+/* ── Stat detail list — the people behind one figure ──
+   Replaces #stats-body in place, same modal, same close/back affordance as
+   the rest of the app's drill-down panels. */
+#stats-detail {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  padding-top: 8px;
+}
+#stats-detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--c-4);
+  margin-bottom: 8px;
+}
+#stats-detail-back {
+  background: var(--c-3);
+  border: 1px solid var(--c-5);
+  color: var(--c-10);
+  border-radius: var(--r-sm);
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+#stats-detail-back:hover { background: var(--c-5); color: var(--c-12); }
+#stats-detail-title { font-size: 13px; font-weight: 600; color: var(--c-12); flex: 1; min-width: 0; }
+#stats-detail-count { font-size: 11px; color: var(--c-8); flex-shrink: 0; }
+#stats-detail-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--c-4);
+  border-radius: var(--r-md);
+  background: var(--c-2);
+  padding: 6px;
+}
 
 /* ══════════════════════════════════════
    PLACE-NAME CLEANUP DIALOG
