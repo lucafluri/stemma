@@ -46,11 +46,11 @@ const person = (id, extra = {}) => ({
 
   await test('births, deaths and marriages with a place all land on the map', async () => {
     load([
-      person('a', { birth: { date: '3 JAN 1820', plac: 'Luterbach' },
-                    death: { date: '1890', plac: 'Solothurn', caus: '' } }),
+      person('a', { birth: { date: '3 JAN 1820', plac: 'Rivertown' },
+                    death: { date: '1890', plac: 'Mountainville', caus: '' } }),
       person('b', { birth: { date: '', plac: '' } }),
     ], [
-      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '12 MAY 1845', plac: 'Bern', types: [] }] },
+      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '12 MAY 1845', plac: 'Central', types: [] }] },
     ]);
     const events = map.collectMapEvents();
     assert.strictEqual(events.length, 3, 'exactly the three placed events');
@@ -66,21 +66,21 @@ const person = (id, extra = {}) => ({
   });
 
   await test('a place with no date still counts as a place', async () => {
-    load([person('a', { birth: { date: '', plac: 'Luterbach' } })]);
+    load([person('a', { birth: { date: '', plac: 'Rivertown' } })]);
     const [e] = map.collectMapEvents();
-    assert.strictEqual(e.plac, 'Luterbach');
+    assert.strictEqual(e.plac, 'Rivertown');
     assert.strictEqual(e.year, null, 'no date means no year, not year zero');
   });
 
   await test('a marriage is named after both partners', async () => {
     load([
-      person('a', { name: 'Hans Fluri' }),
-      person('b', { name: 'Anna Meier' }),
+      person('a', { name: 'Otto Bauer' }),
+      person('b', { name: 'Emma Weber' }),
     ], [
-      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '1845', plac: 'Bern', types: [] }] },
+      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '1845', plac: 'Central', types: [] }] },
     ]);
     const [e] = map.collectMapEvents();
-    assert.ok(e.name.includes('Hans Fluri') && e.name.includes('Anna Meier'), `got "${e.name}"`);
+    assert.ok(e.name.includes('Otto Bauer') && e.name.includes('Emma Weber'), `got "${e.name}"`);
     assert.ok(state.individuals.has(e.id), 'clicking the row has to reach a real person');
   });
 
@@ -128,15 +128,15 @@ const person = (id, extra = {}) => ({
   });
 
   await test('coordinates are looked up by the folded name, so case and accents share one', async () => {
-    const coords = new Map([['zurich', [47.37, 8.54]]]);
-    const groups = map.groupByPlace([{ type: 'birth', plac: 'Zürich ', year: 1800 }], coords);
+    const coords = new Map([['malmo', [47.37, 8.54]]]);
+    const groups = map.groupByPlace([{ type: 'birth', plac: 'Malmö ', year: 1800 }], coords);
     assert.deepStrictEqual(groups[0].ll, [47.37, 8.54]);
   });
 
   await test('Web Mercator puts the origin where the tile servers do', async () => {
     const [x, y] = map.project(0, 0);
     assert.ok(Math.abs(x - 0.5) < 1e-9 && Math.abs(y - 0.5) < 1e-9, 'null island is the centre');
-    const [gx, gy] = map.project(8.54, 47.37);           // Zürich
+    const [gx, gy] = map.project(8.54, 47.37);           // Malmö
     assert.ok(gx > 0.5 && gy < 0.5, 'east of Greenwich and north of the equator');
     // The projection runs to infinity at the poles; clamping is what keeps a
     // coordinate at 90°N from producing a NaN transform for the whole map.
@@ -147,25 +147,25 @@ const person = (id, extra = {}) => ({
 
   const geoFixture = () => {
     load([
-      person('a', { birth: { date: '1820', plac: 'Bern' },
-                    death: { date: '1890', plac: 'Bern', caus: '' } }),
-      person('b', { birth: { date: '1850', plac: 'Solothurn' } }),
+      person('a', { birth: { date: '1820', plac: 'Central' },
+                    death: { date: '1890', plac: 'Central', caus: '' } }),
+      person('b', { birth: { date: '1850', plac: 'Mountainville' } }),
     ], [
-      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '1845', plac: 'Bern', types: [] }] },
+      { id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '1845', plac: 'Central', types: [] }] },
     ]);
-    return new Map([['bern', [46.948, 7.4474]], ['solothurn', [47.2078, 7.5375]]]);
+    return new Map([['central', [46.948, 7.4474]], ['mountainville', [47.2078, 7.5375]]]);
   };
 
   await test('a cached coordinate is offered for every field that names the place', async () => {
     const coords = geoFixture();
     const targets = map.coordWriteTargets(coords);
-    assert.deepStrictEqual([...targets.keys()].sort(), ['Bern', 'Solothurn']);
-    assert.strictEqual(targets.get('Bern').fields.length, 3, 'two events and a marriage');
+    assert.deepStrictEqual([...targets.keys()].sort(), ['Central', 'Mountainville']);
+    assert.strictEqual(targets.get('Central').fields.length, 3, 'two events and a marriage');
   });
 
   await test('approving a place writes it, and not approving one leaves it alone', async () => {
     const coords = geoFixture();
-    const changed = map.applyMapCoords(new Set(['Bern']), coords);
+    const changed = map.applyMapCoords(new Set(['Central']), coords);
     assert.strictEqual(changed, 3);
     const a = state.individuals.get('a');
     assert.deepStrictEqual(a.birth.map, [46.948, 7.4474]);
@@ -177,25 +177,25 @@ const person = (id, extra = {}) => ({
 
   await test('a place already carrying its coordinate is not offered again', async () => {
     const coords = geoFixture();
-    map.applyMapCoords(new Set(['Bern', 'Solothurn']), coords);
+    map.applyMapCoords(new Set(['Central', 'Mountainville']), coords);
     assert.strictEqual(map.coordWriteTargets(coords).size, 0, 'nothing left to approve');
-    assert.strictEqual(map.applyMapCoords(new Set(['Bern']), coords), 0, 'and re-approving is a no-op');
+    assert.strictEqual(map.applyMapCoords(new Set(['Central']), coords), 0, 'and re-approving is a no-op');
   });
 
   await test('a coordinate that changed is offered again rather than silently kept', async () => {
     const coords = geoFixture();
-    map.applyMapCoords(new Set(['Bern']), coords);
-    coords.set('bern', [47.0, 8.0]);   // a better answer arrived
+    map.applyMapCoords(new Set(['Central']), coords);
+    coords.set('central', [47.0, 8.0]);   // a better answer arrived
     const targets = map.coordWriteTargets(coords);
-    assert.ok(targets.has('Bern'), 'the records disagree with the cache, so it is a decision again');
+    assert.ok(targets.has('Central'), 'the records disagree with the cache, so it is a decision again');
   });
 
   await test('renaming a place drops the coordinates that were looked up for the old name', async () => {
     const places = await import(url('places.js'));
     const coords = geoFixture();
-    map.applyMapCoords(new Set(['Bern']), coords);
-    places.applyPlaceRenames(new Map([['Bern', 'Bern, Schweiz']]));
-    assert.strictEqual(state.individuals.get('a').birth.plac, 'Bern, Schweiz');
+    map.applyMapCoords(new Set(['Central']), coords);
+    places.applyPlaceRenames(new Map([['Central', 'Central, Republic']]));
+    assert.strictEqual(state.individuals.get('a').birth.plac, 'Central, Republic');
     assert.strictEqual(state.individuals.get('a').birth.map, undefined,
       'coordinates found for one name must not be asserted about another');
   });
@@ -203,18 +203,18 @@ const person = (id, extra = {}) => ({
   await test('tidying spacing is not a rename and keeps the coordinates', async () => {
     const places = await import(url('places.js'));
     const coords = geoFixture();
-    state.individuals.get('a').birth.plac = 'Bern ,CH';
-    coords.set(places.placeKey('Bern ,CH'), [46.948, 7.4474]);
-    map.applyMapCoords(new Set(['Bern ,CH']), coords);
+    state.individuals.get('a').birth.plac = 'Central ,RP';
+    coords.set(places.placeKey('Central ,RP'), [46.948, 7.4474]);
+    map.applyMapCoords(new Set(['Central ,RP']), coords);
     places.applyPlaceRenames(new Map(), { tidy: true });
-    assert.strictEqual(state.individuals.get('a').birth.plac, 'Bern, CH');
+    assert.strictEqual(state.individuals.get('a').birth.plac, 'Central, RP');
     assert.deepStrictEqual(state.individuals.get('a').birth.map, [46.948, 7.4474]);
   });
 
   await test('a record that already carries coordinates draws without any lookup', async () => {
     // A GEDCOM with MAP subtrees is located the moment it loads. Requiring a
     // geocode run for coordinates the file already stated would be absurd.
-    load([person('a', { birth: { date: '1820', plac: 'Bern', map: [46.948, 7.4474] } })]);
+    load([person('a', { birth: { date: '1820', plac: 'Central', map: [46.948, 7.4474] } })]);
     const groups = map.groupByPlace(map.collectMapEvents(), new Map());
     assert.deepStrictEqual(groups[0].ll, [46.948, 7.4474]);
     assert.strictEqual(map.coordWriteTargets(new Map()).size, 0, 'and there is nothing to approve');
@@ -223,13 +223,13 @@ const person = (id, extra = {}) => ({
   await test('a corrected coordinate outranks the one in the record', async () => {
     // Otherwise pressing "this one" in the fix list would appear to do nothing
     // until the write was also approved.
-    load([person('a', { birth: { date: '1820', plac: 'Bern', map: [46.948, 7.4474] } })]);
-    const groups = map.groupByPlace(map.collectMapEvents(), new Map([['bern', [47, 8]]]));
+    load([person('a', { birth: { date: '1820', plac: 'Central', map: [46.948, 7.4474] } })]);
+    const groups = map.groupByPlace(map.collectMapEvents(), new Map([['central', [47, 8]]]));
     assert.deepStrictEqual(groups[0].ll, [47, 8]);
   });
 
   await test('a half-written coordinate is not treated as a location', async () => {
-    load([person('a', { birth: { date: '1820', plac: 'Bern', map: [46.948, null] } })]);
+    load([person('a', { birth: { date: '1820', plac: 'Central', map: [46.948, null] } })]);
     assert.strictEqual(map.groupByPlace(map.collectMapEvents(), new Map())[0].ll, null);
   });
 
@@ -237,10 +237,10 @@ const person = (id, extra = {}) => ({
     localStorage.removeItem('placeCoords');
     const coords = map.placeCoords();
     coords.clear();
-    assert.strictEqual(map.rememberPlaceCoords('Bern', [46.948, 7.4474]), true);
-    assert.strictEqual(map.rememberPlaceCoords('Bern', [1, 1]), false, 'a second answer must not win');
-    assert.deepStrictEqual(coords.get('bern'), [46.948, 7.4474]);
-    assert.strictEqual(map.rememberPlaceCoords('Bern', [null, 1]), false, 'and rubbish is not an answer');
+    assert.strictEqual(map.rememberPlaceCoords('Central', [46.948, 7.4474]), true);
+    assert.strictEqual(map.rememberPlaceCoords('Central', [1, 1]), false, 'a second answer must not win');
+    assert.deepStrictEqual(coords.get('central'), [46.948, 7.4474]);
+    assert.strictEqual(map.rememberPlaceCoords('Central', [null, 1]), false, 'and rubbish is not an answer');
     coords.clear();
   });
 
@@ -253,41 +253,41 @@ const person = (id, extra = {}) => ({
     const { _tiParseGedcomForMerge } = await import(url('import-parse.js'));
     _tiParseGedcomForMerge([
       '0 @I1@ INDI',
-      '1 NAME Hans /Fluri/',
+      '1 NAME Otto /Bauer/',
       '1 BIRT',
-      '2 PLAC Bern',
+      '2 PLAC Central',
       '3 MAP',
       '4 LATI N46.947975',
       '4 LONG E7.447447',
       '1 DEAT',
-      '2 PLAC Valparaíso',
+      '2 PLAC Harbor City',
       '3 MAP',
       '4 LATI S33.045720',
       '4 LONG W71.619560',
       '0 @F1@ FAM',
       '1 HUSB @I1@',
       '1 MARR',
-      '2 PLAC Solothurn',
+      '2 PLAC Mountainville',
       '3 MAP',
       '4 LATI N47.207780',
       '4 LONG E7.537500',
       '0 TRLR',
     ].join('\n'));
     const coords = map.placeCoords();
-    assert.deepStrictEqual(coords.get('bern'), [46.947975, 7.447447]);
-    assert.deepStrictEqual(coords.get('valparaiso'), [-33.04572, -71.61956], 'south and west stay negative');
-    assert.deepStrictEqual(coords.get('solothurn'), [47.20778, 7.5375], 'marriages count too');
+    assert.deepStrictEqual(coords.get('central'), [46.947975, 7.447447]);
+    assert.deepStrictEqual(coords.get('harbor city'), [-33.04572, -71.61956], 'south and west stay negative');
+    assert.deepStrictEqual(coords.get('mountainville'), [47.20778, 7.5375], 'marriages count too');
     coords.clear();
   });
 
   console.log('\nediting a place');
 
   await test('changing a place drops the coordinates found for the old name', async () => {
-    // The bug this exists for: retype "Bern" as "Basel" in the detail panel and
-    // the record kept Bern's pin.
+    // The bug this exists for: retype "Central" as "Northport" in the detail panel and
+    // the record kept Central's pin.
     const { setPlace } = await import(url('places.js'));
-    const birth = { date: '1820', plac: 'Bern', map: [46.948, 7.4474] };
-    assert.strictEqual(setPlace(birth, 'Basel'), true);
+    const birth = { date: '1820', plac: 'Central', map: [46.948, 7.4474] };
+    assert.strictEqual(setPlace(birth, 'Northport'), true);
     assert.strictEqual(birth.map, undefined);
   });
 
@@ -295,8 +295,8 @@ const person = (id, extra = {}) => ({
     // Every edit-panel save writes every field back, so a no-op write must be a
     // no-op — otherwise editing an occupation would silently unlocate a person.
     const { setPlace } = await import(url('places.js'));
-    const birth = { date: '1820', plac: 'Bern', map: [46.948, 7.4474] };
-    assert.strictEqual(setPlace(birth, '  Bern  '), false, 'trimming is not a change');
+    const birth = { date: '1820', plac: 'Central', map: [46.948, 7.4474] };
+    assert.strictEqual(setPlace(birth, '  Central  '), false, 'trimming is not a change');
     assert.deepStrictEqual(birth.map, [46.948, 7.4474]);
   });
 

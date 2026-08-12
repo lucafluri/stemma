@@ -165,7 +165,7 @@ const p = (id, o = {}) => Object.assign({
 
   await test('coverage is the share of people with each fact recorded', async () => {
     const s = load(new Map([
-      ['a', p('a', { birthYear: 1900, death: { date: '1970' }, birth: { plac: 'Bern' } })],
+      ['a', p('a', { birthYear: 1900, death: { date: '1970' }, birth: { plac: 'Central' } })],
       ['b', p('b', { birthYear: 1910 })],
       ['c', p('c')], ['d', p('d')],
     ]));
@@ -175,55 +175,55 @@ const p = (id, o = {}) => Object.assign({
   });
 
   await test('given names are counted by the first one only', async () => {
-    // "Hans Peter" and "Hans" are the same name being handed down, which is the
+    // "Otto Karl" and "Otto" are the same name being handed down, which is the
     // thing the list is for.
     const s = load(new Map([
-      ['a', p('a', { givn: 'Hans', surn: 'Fluri', sex: 'M' })],
-      ['b', p('b', { givn: 'Hans Peter', surn: 'Fluri', sex: 'M' })],
-      ['c', p('c', { givn: 'Anna', surn: 'Meier', sex: 'F' })],
+      ['a', p('a', { givn: 'Otto', surn: 'Bauer', sex: 'M' })],
+      ['b', p('b', { givn: 'Otto Karl', surn: 'Bauer', sex: 'M' })],
+      ['c', p('c', { givn: 'Emma', surn: 'Weber', sex: 'F' })],
     ]));
-    assert.deepStrictEqual(s.top.givenM[0], ['Hans', 2]);
-    assert.deepStrictEqual(s.top.surnames[0], ['Fluri', 2]);
+    assert.deepStrictEqual(s.top.givenM[0], ['Otto', 2]);
+    assert.deepStrictEqual(s.top.surnames[0], ['Bauer', 2]);
   });
 
   await test('the given-name ranking is kept per sex, ten of each', async () => {
     // Pooled, a tree with more men than women shows a list of men's names with
     // the odd woman's name in it, and neither pattern is readable.
     const s = load(new Map([
-      ['a', p('a', { givn: 'Hans',  sex: 'M' })],
-      ['b', p('b', { givn: 'Hans',  sex: 'M' })],
-      ['c', p('c', { givn: 'Hans',  sex: 'M' })],
-      ['d', p('d', { givn: 'Anna',  sex: 'F' })],
-      ['e', p('e', { givn: 'Anna',  sex: 'F' })],
-      ['f', p('f', { givn: 'Marie', sex: 'F' })],
+      ['a', p('a', { givn: 'Otto',  sex: 'M' })],
+      ['b', p('b', { givn: 'Otto',  sex: 'M' })],
+      ['c', p('c', { givn: 'Otto',  sex: 'M' })],
+      ['d', p('d', { givn: 'Emma',  sex: 'F' })],
+      ['e', p('e', { givn: 'Emma',  sex: 'F' })],
+      ['f', p('f', { givn: 'Clara', sex: 'F' })],
     ]));
-    assert.deepStrictEqual(s.top.givenM, [['Hans', 3]]);
-    assert.deepStrictEqual(s.top.givenF, [['Anna', 2], ['Marie', 1]]);
+    assert.deepStrictEqual(s.top.givenM, [['Otto', 3]]);
+    assert.deepStrictEqual(s.top.givenF, [['Emma', 2], ['Clara', 1]]);
     assert.deepStrictEqual(s.top.givenU, []);
   });
 
   await test('a name is only counted under the sex actually recorded', async () => {
-    // Andrea is a man's name in Italy and a woman's in Germany — pooling them
+    // Sasha is a man's name in Italy and a woman's in Germany — pooling them
     // would report a count that belongs to neither list.
     const s = load(new Map([
-      ['a', p('a', { givn: 'Andrea', sex: 'M' })],
-      ['b', p('b', { givn: 'Andrea', sex: 'F' })],
-      ['c', p('c', { givn: 'Andrea' })],
+      ['a', p('a', { givn: 'Sasha', sex: 'M' })],
+      ['b', p('b', { givn: 'Sasha', sex: 'F' })],
+      ['c', p('c', { givn: 'Sasha' })],
     ]));
-    assert.deepStrictEqual(s.top.givenM, [['Andrea', 1]]);
-    assert.deepStrictEqual(s.top.givenF, [['Andrea', 1]]);
-    assert.deepStrictEqual(s.top.givenU, [['Andrea', 1]],
+    assert.deepStrictEqual(s.top.givenM, [['Sasha', 1]]);
+    assert.deepStrictEqual(s.top.givenF, [['Sasha', 1]]);
+    assert.deepStrictEqual(s.top.givenU, [['Sasha', 1]],
       'people with no recorded sex still have to appear somewhere');
   });
 
   await test('a married woman counts towards the family she was born into as well', async () => {
-    // She is a Meier by birth and a Fluri by marriage, and belongs to both
+    // She is a Weber by birth and a Bauer by marriage, and belongs to both
     // lines — which is the entire reason the maiden name is recorded.
     const s = load(new Map([
-      ['a', p('a', { surn: 'Fluri' })],
-      ['b', p('b', { surn: 'Fluri', maidenName: 'Meier' })],
+      ['a', p('a', { surn: 'Bauer' })],
+      ['b', p('b', { surn: 'Bauer', maidenName: 'Weber' })],
     ]));
-    assert.deepStrictEqual(s.top.surnames, [['Fluri', 2], ['Meier', 1]]);
+    assert.deepStrictEqual(s.top.surnames, [['Bauer', 2], ['Weber', 1]]);
   });
 
   await test('the statistics and the sidebar legend report the same family sizes', async () => {
@@ -232,10 +232,10 @@ const p = (id, o = {}) => Object.assign({
     // different sizes depending on which list you read.
     const { buildSurnameColorMap } = await import(url('colors.js'));
     const people = new Map([
-      ['a', p('a', { surn: 'Fluri' })],
-      ['b', p('b', { surn: 'Fluri', maidenName: 'Meier' })],
-      ['c', p('c', { surn: ' Fluri ' })],          // stray whitespace is the same family
-      ['d', p('d', { surn: 'Meier' })],
+      ['a', p('a', { surn: 'Bauer' })],
+      ['b', p('b', { surn: 'Bauer', maidenName: 'Weber' })],
+      ['c', p('c', { surn: ' Bauer ' })],          // stray whitespace is the same family
+      ['d', p('d', { surn: 'Weber' })],
       ['e', p('e', { surn: '' })],                  // no family name at all
     ]);
     const s = load(people);
@@ -244,14 +244,14 @@ const p = (id, o = {}) => Object.assign({
     for (const [name, n] of s.top.surnames) {
       assert.strictEqual(legend.get(name), n, `${name}: legend and statistics disagree`);
     }
-    assert.strictEqual(legend.get('Fluri'), 3, 'the untrimmed name belongs to the same row');
+    assert.strictEqual(legend.get('Bauer'), 3, 'the untrimmed name belongs to the same row');
   });
 
   await test('ties in a top list are ordered predictably, not by chance', async () => {
     const s = load(new Map([
-      ['a', p('a', { surn: 'Zwahlen' })], ['b', p('b', { surn: 'Aebi' })],
+      ['a', p('a', { surn: 'Zorn' })], ['b', p('b', { surn: 'Althaus' })],
     ]));
-    assert.deepStrictEqual(s.top.surnames.map(x => x[0]), ['Aebi', 'Zwahlen'],
+    assert.deepStrictEqual(s.top.surnames.map(x => x[0]), ['Althaus', 'Zorn'],
       'equal counts should fall back to alphabetical');
   });
 
@@ -272,13 +272,13 @@ const p = (id, o = {}) => Object.assign({
 
   await test('the panel renders the figures into the sidebar', async () => {
     load(new Map([
-      ['a', p('a', { sex: 'M', surn: 'Fluri', givn: 'Hans', birthYear: 1900,
+      ['a', p('a', { sex: 'M', surn: 'Bauer', givn: 'Otto', birthYear: 1900,
                      death: { date: '1970' }, deceased: true })],
-      ['b', p('b', { sex: 'F', surn: 'Meier', givn: 'Anna', birthYear: 1910 })],
+      ['b', p('b', { sex: 'F', surn: 'Weber', givn: 'Emma', birthYear: 1910 })],
     ]));
     renderStats();
     const html = body().innerHTML;
-    assert.ok(html.includes('Fluri'), 'the top surname should appear');
+    assert.ok(html.includes('Bauer'), 'the top surname should appear');
     assert.ok(/\b70\b/.test(html), 'the lifespan should appear');
     assert.ok(html.includes('stat-bar'), 'the sex split bar should be drawn');
   });
@@ -290,18 +290,18 @@ const p = (id, o = {}) => Object.assign({
     // different sizes on screen at once.
     const { refreshStats, openStatsTool, closeStatsTool } = await import(url('stats.js'));
 
-    load(new Map([['a', p('a', { surn: 'Fluri' })]]));
+    load(new Map([['a', p('a', { surn: 'Bauer' })]]));
     openStatsTool();
-    assert.ok(body().textContent.includes('Fluri'), 'precondition: the window is showing');
+    assert.ok(body().textContent.includes('Bauer'), 'precondition: the window is showing');
 
-    load(new Map([['a', p('a', { surn: 'Fluri' })], ['b', p('b', { surn: 'Meier' })]]));
+    load(new Map([['a', p('a', { surn: 'Bauer' })], ['b', p('b', { surn: 'Weber' })]]));
     refreshStats();
-    assert.ok(body().textContent.includes('Meier'), 'a person added while it is open must appear');
+    assert.ok(body().textContent.includes('Weber'), 'a person added while it is open must appear');
 
     // ...and a closed window still costs nothing to leave alone.
     closeStatsTool();
     const before = body().innerHTML;
-    load(new Map([['c', p('c', { surn: 'Zwahlen' })]]));
+    load(new Map([['c', p('c', { surn: 'Zorn' })]]));
     refreshStats();
     assert.strictEqual(body().innerHTML, before, 'a closed window should not be re-rendered');
   });
@@ -309,11 +309,11 @@ const p = (id, o = {}) => Object.assign({
   await test('a long name keeps its count and stays readable on hover', async () => {
     // Ranks six to ten are where the long place names live, and a name long
     // enough to be ellipsised used to squeeze the number off the right edge.
-    const place = 'Tettnang, Bodenseekreis, Tübingen, Baden-Württemberg, DE';
+    const place = 'Farawaytown, Bigdistrict, Regiontown, Greenstate, RA';
     load(new Map([['a', p('a', { birth: { date: '', plac: place } })]]));
     renderStats();
     const li = [...body().querySelectorAll('.stat-list li')]
-      .find(el => el.textContent.includes('Tettnang'));
+      .find(el => el.textContent.includes('Farawaytown'));
     assert.ok(li, 'the place should be listed');
     assert.strictEqual(li.children[0].getAttribute('title'), place, 'the full name belongs in the title');
     assert.strictEqual(li.children[1].textContent, '1', 'the count must survive next to it');

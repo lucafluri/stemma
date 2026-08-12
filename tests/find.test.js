@@ -43,37 +43,37 @@ const p = (id, o = {}) => Object.assign({
   console.log('\nmatching on a name');
 
   await test('a name matches given, family and maiden alike', () => {
-    const hans = p('a', { givn: 'Hans', surn: 'Fluri' });
-    const anna = p('b', { givn: 'Anna', surn: 'Fluri', maidenName: 'Meier' });
-    assert.ok(find.matchPerson(hans, { name: 'fluri' }));
-    assert.ok(find.matchPerson(anna, { name: 'meier' }), 'her birth name is a name she has');
-    assert.ok(!find.matchPerson(hans, { name: 'meier' }));
+    const otto = p('a', { givn: 'Otto', surn: 'Bauer' });
+    const emma = p('b', { givn: 'Emma', surn: 'Bauer', maidenName: 'Weber' });
+    assert.ok(find.matchPerson(otto, { name: 'bauer' }));
+    assert.ok(find.matchPerson(emma, { name: 'weber' }), 'her birth name is a name she has');
+    assert.ok(!find.matchPerson(otto, { name: 'weber' }));
   });
 
   await test('accents and case do not have to be typed', () => {
-    const m = p('a', { givn: 'Jürg', surn: 'Müller' });
-    assert.ok(find.matchPerson(m, { name: 'muller' }));
-    assert.ok(find.matchPerson(m, { name: 'JÜRG' }));
+    const m = p('a', { givn: 'Björn', surn: 'Schmidt' });
+    assert.ok(find.matchPerson(m, { name: 'schmidt' }));
+    assert.ok(find.matchPerson(m, { name: 'Björn' }));
   });
 
   console.log('\nmatching on a place');
 
   await test('any recorded place counts, including where they married', () => {
     load(
-      [p('a', { birth: { date: '', plac: 'Luterbach' } }),
-       p('b', { death: { date: '', plac: 'Bern', caus: '' } }),
+      [p('a', { birth: { date: '', plac: 'Rivertown' } }),
+       p('b', { death: { date: '', plac: 'Central', caus: '' } }),
        p('c', { fams: ['F1'] }),
        p('d')],
-      [{ id: 'F1', husb: 'c', wife: null, chil: [], marriages: [{ date: '', plac: 'Olten' }], div: false, divDate: '' }],
+      [{ id: 'F1', husb: 'c', wife: null, chil: [], marriages: [{ date: '', plac: 'Eastgate' }], div: false, divDate: '' }],
     );
-    assert.deepStrictEqual(ids({ place: 'luterbach' }), ['a']);
-    assert.deepStrictEqual(ids({ place: 'bern' }), ['b']);
-    assert.deepStrictEqual(ids({ place: 'olten' }), ['c'], 'the marriage place is a place too');
+    assert.deepStrictEqual(ids({ place: 'rivertown' }), ['a']);
+    assert.deepStrictEqual(ids({ place: 'central' }), ['b']);
+    assert.deepStrictEqual(ids({ place: 'eastgate' }), ['c'], 'the marriage place is a place too');
   });
 
   await test('a place matches on part of the name', () => {
-    load([p('a', { birth: { date: '', plac: 'Luterbach, Solothurn, Schweiz' } })]);
-    assert.deepStrictEqual(ids({ place: 'solothurn' }), ['a']);
+    load([p('a', { birth: { date: '', plac: 'Rivertown, Mountainville, Republic' } })]);
+    assert.deepStrictEqual(ids({ place: 'mountainville' }), ['a']);
   });
 
   console.log('\nmatching on dates');
@@ -130,15 +130,15 @@ const p = (id, o = {}) => Object.assign({
 
   await test('every filled-in field has to match, not just one', () => {
     load([
-      p('a', { givn: 'Hans', sex: 'M', birth: { date: '1901', plac: 'Bern' } }),
-      p('b', { givn: 'Hans', sex: 'M', birth: { date: '1901', plac: 'Basel' } }),
-      p('c', { givn: 'Anna', sex: 'F', birth: { date: '1901', plac: 'Bern' } }),
+      p('a', { givn: 'Otto', sex: 'M', birth: { date: '1901', plac: 'Central' } }),
+      p('b', { givn: 'Otto', sex: 'M', birth: { date: '1901', plac: 'Northport' } }),
+      p('c', { givn: 'Emma', sex: 'F', birth: { date: '1901', plac: 'Central' } }),
     ]);
-    assert.deepStrictEqual(ids({ name: 'hans', place: 'bern', sex: 'M' }), ['a']);
+    assert.deepStrictEqual(ids({ name: 'otto', place: 'central', sex: 'M' }), ['a']);
   });
 
   await test('an empty form is the whole tree, in name order', () => {
-    load([p('c', { displayName: 'Zora' }), p('a', { displayName: 'Anna' }), p('b', { displayName: 'Marc' })]);
+    load([p('c', { displayName: 'Zoe' }), p('a', { displayName: 'Emma' }), p('b', { displayName: 'Miles' })]);
     assert.deepStrictEqual(ids({}), ['a', 'b', 'c']);
   });
 
@@ -158,7 +158,7 @@ const p = (id, o = {}) => Object.assign({
   await test('the other gaps are findable too', () => {
     load([
       p('a'),
-      p('b', { sex: 'F', famc: ['F1'], birth: { date: '', plac: 'Bern' } }),
+      p('b', { sex: 'F', famc: ['F1'], birth: { date: '', plac: 'Central' } }),
     ]);
     assert.deepStrictEqual(ids({ missing: 'place' }), ['a']);
     assert.deepStrictEqual(ids({ missing: 'sex' }), ['a']);

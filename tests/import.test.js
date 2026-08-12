@@ -41,11 +41,11 @@ function test(name, fn) {
   catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); failed++; }
 }
 
-// One person already in the tree: born 1902 in Bern, no death recorded.
+// One person already in the tree: born 1902 in Central, no death recorded.
 function buildTree() {
   return new Map([['@I1@', {
-    name: 'Hans Muster',
-    birth: { date: '1902', plac: 'Bern' },
+    name: 'Otto Example',
+    birth: { date: '1902', plac: 'Central' },
     death: { date: '', plac: '' },
     sex: 'M',
     note: '',
@@ -57,11 +57,11 @@ function buildAction() {
   return {
     id: 'a1', kind: 'person', status: 'pending',
     fields: {
-      'Name': 'Hans Muster', 'Birth Date': '1901', 'Birth Place': '',
+      'Name': 'Otto Example', 'Birth Date': '1901', 'Birth Place': '',
       'Death Date': '1978', 'Death Place': '', 'Sex': 'M', 'Notes': '',
     },
     _person: {
-      fullName: 'Hans Muster', birthDate: '1901', birthPlace: '',
+      fullName: 'Otto Example', birthDate: '1901', birthPlace: '',
       deathDate: '1978', deathPlace: '', sex: 'M', notes: '',
     },
   };
@@ -121,7 +121,7 @@ test('unlink puts the card back exactly, including edits made by hand', () => {
   const individuals = buildTree();
   const action = buildAction();
   const api = makeApi(individuals, [action]);
-  action.fields['Birth Place'] = 'Thun';          // typed before linking
+  action.fields['Birth Place'] = 'Westford';          // typed before linking
   const before = JSON.stringify(action.fields);
 
   api._imLinkExisting(action, '@I1@');
@@ -210,7 +210,7 @@ test('an empty imported value is never written over a real one', () => {
   const api = makeApi(individuals, [action]);
   api._imLinkExisting(action, '@I1@');
   const indi = applyUpdate(individuals, action);
-  assert.strictEqual(indi.birth.plac, 'Bern', 'the import had no birth place to offer');
+  assert.strictEqual(indi.birth.plac, 'Central', 'the import had no birth place to offer');
 });
 
 // ── Merging a second file into a tree that is already loaded ────────────────
@@ -218,15 +218,15 @@ test('an empty imported value is never written over a real one', () => {
 // The three questions the diff table has to answer: what is new, what already
 // matches, and what would float off on its own if imported as-is.
 
-// Hans + Anna, married, with one child Peter.
+// Otto + Emma, married, with one child Karl.
 function buildFamilyTree() {
   const individuals = new Map([
-    ['@I1@', { id:'@I1@', name:'Hans Muster', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
-    ['@I2@', { id:'@I2@', name:'Anna Muster', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
-    ['@I3@', { id:'@I3@', name:'Peter Muster', sex:'M', birth:{date:'1930',plac:''}, death:{date:'',plac:''}, note:'', fams:[], famc:['@F1@'] }],
+    ['@I1@', { id:'@I1@', name:'Otto Example', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I2@', { id:'@I2@', name:'Emma Example', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I3@', { id:'@I3@', name:'Max Example', sex:'M', birth:{date:'1930',plac:''}, death:{date:'',plac:''}, note:'', fams:[], famc:['@F1@'] }],
   ]);
   const families = new Map([
-    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:['@I3@'], marriages:[{date:'1928',plac:'Bern',types:[]}], div:false, divDate:'' }],
+    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:['@I3@'], marriages:[{date:'1928',plac:'Central',types:[]}], div:false, divDate:'' }],
   ]);
   return { individuals, families };
 }
@@ -249,13 +249,13 @@ function mergeApi(individuals, families) {
 }
 
 // The same couple as the tree has, but the file knows a second child.
-function personHansWithTwoKids() {
+function personOttoWithTwoKids() {
   return {
-    fullName:'Hans Muster', sex:'M', birthDate:'1900', birthPlace:'',
+    fullName:'Otto Example', sex:'M', birthDate:'1900', birthPlace:'',
     deathDate:'', deathPlace:'', fatherName:'', motherName:'', notes:'',
     sourceNote:'', marriages:[{
-      spouseName:'Anna Muster', date:'1928', place:'Bern',
-      children:[{ fullName:'Peter Muster' }, { fullName:'Klara Muster' }],
+      spouseName:'Emma Example', date:'1928', place:'Central',
+      children:[{ fullName:'Max Example' }, { fullName:'Lena Example' }],
     }],
   };
 }
@@ -273,7 +273,7 @@ console.log('\nmerging a second file (diff, connection, children)');
 test('a person the tree already holds identically is reported, not hidden', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([bareperson('Peter Muster', '1930')]);
+  const actions = api._tiGenerateActions([bareperson('Max Example', '1930')]);
   const same = actions.filter(a => a.kind === 'same');
   assert.strictEqual(same.length, 1, 'the row has to exist — "identical" is an answer');
   assert.strictEqual(same[0].status, 'skipped', 'but nothing about it needs approving');
@@ -283,41 +283,41 @@ test('a person the tree already holds identically is reported, not hidden', () =
 test('a child the tree lacks is hung off the family the tree already has', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids()]);
+  const actions = api._tiGenerateActions([personOttoWithTwoKids()]);
   const marr = actions.filter(a => a.kind === 'marriage');
   assert.strictEqual(marr.length, 1, 'the couple is known, so this is a child addition');
   assert.strictEqual(marr[0].existingFamId, '@F1@');
-  assert.strictEqual(marr[0].fields['Children'], 'Klara Muster',
-    'Peter is already in that family — only Klara is news');
+  assert.strictEqual(marr[0].fields['Children'], 'Lena Example',
+    'Karl is already in that family — only Lena is news');
 });
 
 test('a couple the tree has with no new children makes no row at all', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const p = personHansWithTwoKids();
-  p.marriages[0].children = [{ fullName: 'Peter Muster' }];
+  const p = personOttoWithTwoKids();
+  p.marriages[0].children = [{ fullName: 'Max Example' }];
   assert.strictEqual(api._tiGenerateActions([p]).filter(a => a.kind === 'marriage').length, 0);
 });
 
 test('applying it puts the child in the existing family, not a duplicate one', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids(), bareperson('Klara Muster')]);
+  const actions = api._tiGenerateActions([personOttoWithTwoKids(), bareperson('Lena Example')]);
   actions.forEach(a => { if (a.kind !== 'same') a.status = 'approved'; });
   api._tiApplyActions(actions);
 
   assert.strictEqual(families.size, 1, 'no second @F@ record for a couple already recorded');
   const fam = families.get('@F1@');
-  assert.strictEqual(fam.chil.length, 2, 'Peter and Klara');
-  const klaraId = fam.chil.find(id => individuals.get(id)?.name === 'Klara Muster');
-  assert(klaraId, 'Klara made it into the family');
+  assert.strictEqual(fam.chil.length, 2, 'Karl and Lena');
+  const klaraId = fam.chil.find(id => individuals.get(id)?.name === 'Lena Example');
+  assert(klaraId, 'Lena made it into the family');
   assert.deepStrictEqual(individuals.get(klaraId).famc, ['@F1@'], 'and points back at it');
 });
 
 test('applying it twice does not list the same child twice', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids(), bareperson('Klara Muster')]);
+  const actions = api._tiGenerateActions([personOttoWithTwoKids(), bareperson('Lena Example')]);
   actions.forEach(a => { if (a.kind !== 'same') a.status = 'approved'; });
   api._tiApplyActions(actions);
   api._tiApplyActions(actions);
@@ -329,16 +329,16 @@ console.log('\nwould this import land connected to the tree?');
 test('a person reachable through an existing family counts as connected', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids(), bareperson('Klara Muster')]);
-  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Klara Muster');
-  assert(klara, 'Klara is a new person');
+  const actions = api._tiGenerateActions([personOttoWithTwoKids(), bareperson('Lena Example')]);
+  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Lena Example');
+  assert(klara, 'Lena is a new person');
   assert.strictEqual(api._tiConnectivity(actions).get(klara.id), true);
 });
 
 test('a person with no tie to anything in the tree is flagged', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([bareperson('Fremder Mann', '1880')]);
+  const actions = api._tiGenerateActions([bareperson('Loner One', '1880')]);
   const loner = actions.find(a => a.kind === 'person');
   assert.strictEqual(api._tiConnectivity(actions).get(loner.id), false);
 });
@@ -346,9 +346,9 @@ test('a person with no tie to anything in the tree is flagged', () => {
 test('an island of imported people connected only to each other is still an island', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const dad = bareperson('Fremder Mann', '1880');
-  dad.marriages = [{ spouseName:'Fremde Frau', date:'', place:'', children:[{ fullName:'Fremdes Kind' }] }];
-  const actions = api._tiGenerateActions([dad, bareperson('Fremde Frau'), bareperson('Fremdes Kind')]);
+  const dad = bareperson('Loner One', '1880');
+  dad.marriages = [{ spouseName:'Loner Two', date:'', place:'', children:[{ fullName:'Loner Three' }] }];
+  const actions = api._tiGenerateActions([dad, bareperson('Loner Two'), bareperson('Loner Three')]);
   const conn = api._tiConnectivity(actions);
   for (const a of actions.filter(a => a.kind === 'person')) {
     assert.strictEqual(conn.get(a.id), false, `${a.fields['Name']} is on the island`);
@@ -356,13 +356,13 @@ test('an island of imported people connected only to each other is still an isla
 });
 
 test('a tie sitting in a card nobody approved yet does not count as written', () => {
-  // The preview counts every card still in play, so Klara reads as connected.
-  // What will actually be written is another matter: approving only Klara puts
+  // The preview counts every card still in play, so Lena reads as connected.
+  // What will actually be written is another matter: approving only Lena puts
   // her in the file with nothing holding her to anybody.
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids(), bareperson('Klara Muster')]);
-  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Klara Muster');
+  const actions = api._tiGenerateActions([personOttoWithTwoKids(), bareperson('Lena Example')]);
+  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Lena Example');
   const marr  = actions.find(a => a.kind === 'marriage');
 
   klara.status = 'approved';
@@ -379,8 +379,8 @@ test('a tie sitting in a card nobody approved yet does not count as written', ()
 test('skipping the card that carried the tie strands the people it held', () => {
   const { individuals, families } = buildFamilyTree();
   const api = mergeApi(individuals, families);
-  const actions = api._tiGenerateActions([personHansWithTwoKids(), bareperson('Klara Muster')]);
-  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Klara Muster');
+  const actions = api._tiGenerateActions([personOttoWithTwoKids(), bareperson('Lena Example')]);
+  const klara = actions.find(a => a.kind === 'person' && a.fields['Name'] === 'Lena Example');
   assert.strictEqual(api._tiConnectivity(actions).get(klara.id), true);
   actions.find(a => a.kind === 'marriage').status = 'skipped';
   assert.strictEqual(api._tiConnectivity(actions).get(klara.id), false,

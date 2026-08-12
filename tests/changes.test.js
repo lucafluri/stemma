@@ -56,8 +56,8 @@ const tree = (indis, fams = []) => ({
   console.log('\nnothing happened');
 
   await test('an untouched tree reports no changes at all', async () => {
-    const before = tree([person('a', { name: 'Hans Fluri' })], [family('F1')]);
-    const after  = tree([person('a', { name: 'Hans Fluri' })], [family('F1')]);
+    const before = tree([person('a', { name: 'Otto Bauer' })], [family('F1')]);
+    const after  = tree([person('a', { name: 'Otto Bauer' })], [family('F1')]);
     const d = changes.diffTrees(before, after);
     assert.strictEqual(d.counts.total, 0, JSON.stringify(only(d)));
   });
@@ -66,8 +66,8 @@ const tree = (indis, fams = []) => ({
     // displayName and birthYear are recomputed from the name and the birth
     // date. If the diff walked the objects generically, every save would look
     // like an edit to every person who had ever been opened in the editor.
-    const before = tree([person('a', { name: 'Hans Fluri', displayName: 'Hans Fluri', birthYear: null })]);
-    const after  = tree([person('a', { name: 'Hans Fluri', displayName: 'Hans F.', birthYear: 1820,
+    const before = tree([person('a', { name: 'Otto Bauer', displayName: 'Otto Bauer', birthYear: null })]);
+    const after  = tree([person('a', { name: 'Otto Bauer', displayName: 'Otto F.', birthYear: 1820,
                                        _unknown: ['1 SOUR @S1@'] })]);
     assert.strictEqual(changes.diffTrees(before, after).counts.total, 0);
   });
@@ -75,38 +75,38 @@ const tree = (indis, fams = []) => ({
   console.log('\nwhat changed');
 
   await test('a new person is reported as added, with no field list', async () => {
-    const d = changes.diffTrees(tree([]), tree([person('a', { name: 'Hans Fluri' })]));
+    const d = changes.diffTrees(tree([]), tree([person('a', { name: 'Otto Bauer' })]));
     assert.deepStrictEqual(d.counts, { added: 1, changed: 0, removed: 0, total: 1 });
     assert.strictEqual(d.people[0].kind, 'added');
-    assert.strictEqual(d.people[0].label, 'Hans Fluri');
+    assert.strictEqual(d.people[0].label, 'Otto Bauer');
     assert.strictEqual(d.people[0].fields.length, 0, 'everything about a new person is new');
   });
 
   await test('a deleted person is reported under the name they had', async () => {
-    const d = changes.diffTrees(tree([person('a', { name: 'Hans Fluri' })]), tree([]));
+    const d = changes.diffTrees(tree([person('a', { name: 'Otto Bauer' })]), tree([]));
     assert.deepStrictEqual(d.counts, { added: 0, changed: 0, removed: 1, total: 1 });
     assert.strictEqual(d.people[0].kind, 'removed');
-    assert.strictEqual(d.people[0].label, 'Hans Fluri');
+    assert.strictEqual(d.people[0].label, 'Otto Bauer');
   });
 
   await test('an edited field is reported both before and after', async () => {
-    const before = tree([person('a', { name: 'Hans', birth: { date: '1820', plac: 'Bern' } })]);
-    const after  = tree([person('a', { name: 'Hans', birth: { date: '3 JAN 1820', plac: 'Basel' } })]);
-    const f = fieldsOf(changes.diffTrees(before, after), 'Hans');
+    const before = tree([person('a', { name: 'Otto', birth: { date: '1820', plac: 'Central' } })]);
+    const after  = tree([person('a', { name: 'Otto', birth: { date: '3 JAN 1820', plac: 'Northport' } })]);
+    const f = fieldsOf(changes.diffTrees(before, after), 'Otto');
     assert.deepStrictEqual(f.birthDate, ['1820', '3 JAN 1820']);
-    assert.deepStrictEqual(f.birthPlace, ['Bern', 'Basel']);
+    assert.deepStrictEqual(f.birthPlace, ['Central', 'Northport']);
     assert.strictEqual(Object.keys(f).length, 2, 'and nothing else');
   });
 
   await test('clearing a field is a change, not an absence of one', async () => {
-    const before = tree([person('a', { occu: 'Schmied' })]);
+    const before = tree([person('a', { occu: 'Craftsman' })]);
     const after  = tree([person('a', { occu: '' })]);
-    assert.deepStrictEqual(fieldsOf(changes.diffTrees(before, after), 'a').occupation, ['Schmied', '']);
+    assert.deepStrictEqual(fieldsOf(changes.diffTrees(before, after), 'a').occupation, ['Craftsman', '']);
   });
 
   await test('coordinates written onto a place show up as their own change', async () => {
-    const before = tree([person('a', { birth: { date: '', plac: 'Bern' } })]);
-    const after  = tree([person('a', { birth: { date: '', plac: 'Bern', map: [46.948, 7.4474] } })]);
+    const before = tree([person('a', { birth: { date: '', plac: 'Central' } })]);
+    const after  = tree([person('a', { birth: { date: '', plac: 'Central', map: [46.948, 7.4474] } })]);
     const f = fieldsOf(changes.diffTrees(before, after), 'a');
     assert.deepStrictEqual(f.birthCoords, ['', '46.94800, 7.44740']);
     assert.ok(!f.birthPlace, 'the place itself did not move');
@@ -120,42 +120,42 @@ const tree = (indis, fams = []) => ({
   console.log('\nfamilies');
 
   await test('relationship changes are named, not listed as xrefs', async () => {
-    // "children: Emil → Emil, Marta" is readable; "@I3@ → @I3@, @I4@" is not.
+    // "children: Felix → Felix, Nora" is readable; "@I3@ → @I3@, @I4@" is not.
     const people = [
-      person('h', { name: 'Hans Fluri' }),
-      person('w', { name: 'Anna Meier' }),
-      person('c1', { name: 'Emil Fluri' }),
-      person('c2', { name: 'Marta Fluri' }),
+      person('h', { name: 'Otto Bauer' }),
+      person('w', { name: 'Emma Weber' }),
+      person('c1', { name: 'Felix Bauer' }),
+      person('c2', { name: 'Nora Bauer' }),
     ];
     const before = tree(people, [family('F1', { husb: 'h', wife: 'w', chil: ['c1'] })]);
     const after  = tree(people, [family('F1', { husb: 'h', wife: 'w', chil: ['c1', 'c2'] })]);
     const d = changes.diffTrees(before, after);
-    assert.strictEqual(d.families[0].label, 'Hans Fluri & Anna Meier');
-    assert.deepStrictEqual(fieldsOf(d, 'Hans Fluri & Anna Meier').children,
-      ['Emil Fluri', 'Emil Fluri, Marta Fluri']);
+    assert.strictEqual(d.families[0].label, 'Otto Bauer & Emma Weber');
+    assert.deepStrictEqual(fieldsOf(d, 'Otto Bauer & Emma Weber').children,
+      ['Felix Bauer', 'Felix Bauer, Nora Bauer']);
   });
 
   await test('a relationship change is reported once, on the family', async () => {
     // The person's FAMS/FAMC say the same thing from the other end. Reporting
     // both would double every relationship edit in the log.
-    const before = tree([person('h', { name: 'Hans', fams: [] })], [family('F1', { husb: null })]);
-    const after  = tree([person('h', { name: 'Hans', fams: ['F1'] })], [family('F1', { husb: 'h' })]);
+    const before = tree([person('h', { name: 'Otto', fams: [] })], [family('F1', { husb: null })]);
+    const after  = tree([person('h', { name: 'Otto', fams: ['F1'] })], [family('F1', { husb: 'h' })]);
     const d = changes.diffTrees(before, after);
     assert.strictEqual(d.people.length, 0, 'the person record says nothing new');
-    assert.deepStrictEqual(fieldsOf(d, 'Hans').husband, ['', 'Hans']);
+    assert.deepStrictEqual(fieldsOf(d, 'Otto').husband, ['', 'Otto']);
   });
 
   await test('a marriage date and place read as one line', async () => {
     const before = tree([], [family('F1', { marriages: [{ date: '', plac: '', types: [] }] })]);
-    const after  = tree([], [family('F1', { marriages: [{ date: '1845', plac: 'Bern', types: [] }] })]);
-    assert.deepStrictEqual(fieldsOf(changes.diffTrees(before, after), 'F1').marriages, ['—', '1845, Bern']);
+    const after  = tree([], [family('F1', { marriages: [{ date: '1845', plac: 'Central', types: [] }] })]);
+    assert.deepStrictEqual(fieldsOf(changes.diffTrees(before, after), 'F1').marriages, ['—', '1845, Central']);
   });
 
   console.log('\nordering and the baseline');
 
   await test('additions come first and deletions last', async () => {
     const before = tree([person('gone', { name: 'Gone' }), person('edit', { name: 'Edit' })]);
-    const after  = tree([person('edit', { name: 'Edit', occu: 'Schmied' }), person('new', { name: 'New' })]);
+    const after  = tree([person('edit', { name: 'Edit', occu: 'Craftsman' }), person('new', { name: 'New' })]);
     assert.deepStrictEqual(changes.diffTrees(before, after).people.map(r => r.kind),
       ['added', 'changed', 'removed']);
   });
@@ -167,48 +167,48 @@ const tree = (indis, fams = []) => ({
   });
 
   await test('the baseline is the tree as it stood when it was captured', async () => {
-    state.individuals = new Map([['a', person('a', { name: 'Hans', occu: 'Schmied' })]]);
+    state.individuals = new Map([['a', person('a', { name: 'Otto', occu: 'Craftsman' })]]);
     state.families = new Map();
     changes.captureBaseline();
     assert.strictEqual(changes.currentChanges().counts.total, 0, 'capturing means "this is now the reference"');
 
-    state.individuals.get('a').occu = 'Müller';
+    state.individuals.get('a').occu = 'Schmidt';
     const d = changes.currentChanges();
     assert.strictEqual(d.counts.changed, 1);
-    assert.deepStrictEqual(fieldsOf(d, 'Hans').occupation, ['Schmied', 'Müller']);
+    assert.deepStrictEqual(fieldsOf(d, 'Otto').occupation, ['Craftsman', 'Schmidt']);
   });
 
   await test('the baseline is a copy, not a window onto the live records', async () => {
     // Holding the records themselves would compare each one against itself and
     // report a permanently clean tree, which is the one failure mode that looks
     // exactly like success.
-    state.individuals = new Map([['a', person('a', { name: 'Hans', occu: 'Schmied' })]]);
+    state.individuals = new Map([['a', person('a', { name: 'Otto', occu: 'Craftsman' })]]);
     state.families = new Map();
     changes.captureBaseline();
-    state.individuals.get('a').occu = 'Bäcker';
-    assert.strictEqual(changes.baselineTree().individuals.get('a').occu, 'Schmied');
+    state.individuals.get('a').occu = 'Baker';
+    assert.strictEqual(changes.baselineTree().individuals.get('a').occu, 'Craftsman');
   });
 
   console.log('\nrendering');
 
   await test('the window shows an edit, and says so plainly when there is none', async () => {
     const body = () => global.document.getElementById('changes-body');
-    state.individuals = new Map([['a', person('a', { name: 'Hans Fluri', occu: 'Schmied' })]]);
+    state.individuals = new Map([['a', person('a', { name: 'Otto Bauer', occu: 'Craftsman' })]]);
     state.families = new Map();
     changes.captureBaseline();
 
     changes.openChangesTool();
     assert.ok(/nothing|nichts/i.test(body().textContent), `expected an empty state, got: ${body().textContent}`);
 
-    state.individuals.get('a').occu = 'Müller';
+    state.individuals.get('a').occu = 'Schmidt';
     changes.refreshChanges();
     const html = body().innerHTML;
-    assert.ok(html.includes('Hans Fluri'), 'the person should be named');
-    assert.ok(html.includes('Schmied') && html.includes('Müller'), 'both sides belong in the log');
+    assert.ok(html.includes('Otto Bauer'), 'the person should be named');
+    assert.ok(html.includes('Craftsman') && html.includes('Schmidt'), 'both sides belong in the log');
 
     changes.closeChangesTool();
     const before = body().innerHTML;
-    state.individuals.get('a').occu = 'Bäcker';
+    state.individuals.get('a').occu = 'Baker';
     changes.refreshChanges();
     assert.strictEqual(body().innerHTML, before, 'a closed window should not be re-rendered');
   });

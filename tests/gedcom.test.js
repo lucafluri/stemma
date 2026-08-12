@@ -48,97 +48,97 @@ test('parses a simple individual', () => {
   const ged = `0 HEAD
 1 SOUR Test
 0 @I1@ INDI
-1 NAME John /Doe/
-2 GIVN John
-2 SURN Doe
+1 NAME Otto /Example/
+2 GIVN Otto
+2 SURN Example
 1 SEX M
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
   assert.ok(i, 'individual exists');
-  assert.strictEqual(i.givn, 'John');
-  assert.strictEqual(i.surn, 'Doe');
-  assert.strictEqual(i.name, 'John Doe');
+  assert.strictEqual(i.givn, 'Otto');
+  assert.strictEqual(i.surn, 'Example');
+  assert.strictEqual(i.name, 'Otto Example');
   assert.strictEqual(i.sex, 'M');
   assert.strictEqual(i.maidenName, '');
 });
 
 test('parses birth/death dates and places', () => {
   const ged = `0 @I1@ INDI
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 1 BIRT
 2 DATE 15 MAR 1950
-2 PLAC Berlin
+2 PLAC Capital
 1 DEAT
 2 DATE 3 JAN 2020
-2 PLAC Hamburg
-2 CAUS Herzversagen
+2 PLAC Port
+2 CAUS Heart failure
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
   assert.strictEqual(i.birth.date, '15 MAR 1950');
-  assert.strictEqual(i.birth.plac, 'Berlin');
+  assert.strictEqual(i.birth.plac, 'Capital');
   assert.strictEqual(i.birthYear, 1950);
   assert.strictEqual(i.death.date, '3 JAN 2020');
-  assert.strictEqual(i.death.plac, 'Hamburg');
-  assert.strictEqual(i.death.caus, 'Herzversagen');
+  assert.strictEqual(i.death.plac, 'Port');
+  assert.strictEqual(i.death.caus, 'Heart failure');
   assert.strictEqual(i.deceased, true);
 });
 
 test('parses maiden name from NAME TYPE birth/married (new format)', () => {
   const ged = `0 @I1@ INDI
-1 NAME Jane /Doe/
-2 GIVN Jane
-2 SURN Doe
+1 NAME Emma /Example/
+2 GIVN Emma
+2 SURN Example
 2 TYPE birth
-1 NAME Jane /Smith/
-2 GIVN Jane
-2 SURN Smith
+1 NAME Emma /Schulz/
+2 GIVN Emma
+2 SURN Schulz
 2 TYPE married
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
-  assert.strictEqual(i.givn, 'Jane');
-  assert.strictEqual(i.surn, 'Smith');
-  assert.strictEqual(i.name, 'Jane Smith');
-  assert.strictEqual(i.maidenName, 'Doe');
+  assert.strictEqual(i.givn, 'Emma');
+  assert.strictEqual(i.surn, 'Schulz');
+  assert.strictEqual(i.name, 'Emma Schulz');
+  assert.strictEqual(i.maidenName, 'Example');
 });
 
 test('parses maiden name from legacy _MARN tag', () => {
   const ged = `0 @I1@ INDI
-1 NAME Jane /Smith/
-2 GIVN Jane
-2 SURN Smith
-1 _MARN Doe
+1 NAME Emma /Schulz/
+2 GIVN Emma
+2 SURN Schulz
+1 _MARN Example
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
-  assert.strictEqual(i.surn, 'Smith');
-  assert.strictEqual(i.maidenName, 'Doe');
+  assert.strictEqual(i.surn, 'Schulz');
+  assert.strictEqual(i.maidenName, 'Example');
 });
 
 test('parses maiden name from second NAME record (legacy no-TYPE format)', () => {
   const ged = `0 @I1@ INDI
-1 NAME Jane /Smith/
-1 NAME Jane /Doe/
+1 NAME Emma /Schulz/
+1 NAME Emma /Example/
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
-  assert.strictEqual(i.surn, 'Smith');
-  assert.strictEqual(i.maidenName, 'Doe');
+  assert.strictEqual(i.surn, 'Schulz');
+  assert.strictEqual(i.maidenName, 'Example');
 });
 
 test('_MARN is ignored if NAME TYPE birth already found', () => {
   const ged = `0 @I1@ INDI
-1 NAME Jane /Doe/
+1 NAME Emma /Example/
 2 TYPE birth
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 2 TYPE married
-1 _MARN Mueller
+1 _MARN Schmidt
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const i = individuals.get('@I1@');
-  assert.strictEqual(i.maidenName, 'Doe');
+  assert.strictEqual(i.maidenName, 'Example');
 });
 
 test('parses FAM record with marriage and children', () => {
@@ -149,7 +149,7 @@ test('parses FAM record with marriage and children', () => {
 1 CHIL @I4@
 1 MARR
 2 DATE 10 JUN 1975
-2 PLAC Munich
+2 PLAC Meadow
 0 TRLR`;
   const { families } = parseGEDCOM(ged);
   const f = families.get('@F1@');
@@ -157,7 +157,7 @@ test('parses FAM record with marriage and children', () => {
   assert.strictEqual(f.wife, '@I2@');
   deepEqual(f.chil, ['@I3@', '@I4@']);
   assert.strictEqual(f.marriages[0].date, '10 JUN 1975');
-  assert.strictEqual(f.marriages[0].plac, 'Munich');
+  assert.strictEqual(f.marriages[0].plac, 'Meadow');
 });
 
 test('parses FAM with divorce', () => {
@@ -174,19 +174,19 @@ test('parses FAM with divorce', () => {
 });
 
 test('parses UTF-8 BOM', () => {
-  const ged = '﻿0 HEAD\n0 @I1@ INDI\n1 NAME Max /Muster/\n0 TRLR';
+  const ged = '﻿0 HEAD\n0 @I1@ INDI\n1 NAME Leo /Example/\n0 TRLR';
   const { individuals } = parseGEDCOM(ged);
   assert.ok(individuals.has('@I1@'));
 });
 
 test('generates displayName correctly', () => {
   const ged = `0 @I1@ INDI
-1 NAME Hans /Mueller/
+1 NAME Otto /Schmidt/
 0 @I2@ INDI
-1 NAME Bartholomäus /Langnamensmann/
+1 NAME Konstantin /Verylongname/
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
-  assert.strictEqual(individuals.get('@I1@').displayName, 'Hans Mueller');
+  assert.strictEqual(individuals.get('@I1@').displayName, 'Otto Schmidt');
   // Long name should be abbreviated
   const i2 = individuals.get('@I2@');
   assert.ok(i2.displayName.length <= 24);
@@ -222,9 +222,9 @@ console.log('\nGEDCOM Serializer');
 
 test('serializes maiden name as TYPE birth/married (not _MARN)', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Jane /Doe/
+1 NAME Emma /Example/
 2 TYPE birth
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 2 TYPE married
 0 TRLR`);
   const out = serializeGEDCOM(individuals, families);
@@ -235,21 +235,21 @@ test('serializes maiden name as TYPE birth/married (not _MARN)', () => {
 
 test('serializes maiden name with correct NAME lines', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Jane /Smith/
-1 _MARN Doe
+1 NAME Emma /Schulz/
+1 _MARN Example
 0 TRLR`);
   const out = serializeGEDCOM(individuals, families);
-  assert.ok(out.includes('1 NAME Jane /Doe/'), 'birth name line');
-  assert.ok(out.includes('2 SURN Doe'), 'birth SURN');
+  assert.ok(out.includes('1 NAME Emma /Example/'), 'birth name line');
+  assert.ok(out.includes('2 SURN Example'), 'birth SURN');
   assert.ok(out.includes('2 TYPE birth'));
-  assert.ok(out.includes('1 NAME Jane /Smith/'), 'married name line');
+  assert.ok(out.includes('1 NAME Emma /Schulz/'), 'married name line');
   assert.ok(out.includes('2 TYPE married'));
   assert.ok(!out.includes('_MARN'));
 });
 
 test('serializes individual without maiden name as single NAME', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME John /Doe/
+1 NAME Otto /Example/
 0 TRLR`);
   const out = serializeGEDCOM(individuals, families);
   const nameCount = (out.match(/^1 NAME/gm) || []).length;
@@ -268,16 +268,16 @@ test('serializes DEAT Y for deceased-only individuals', () => {
 });
 
 test('round-trip GEDCOM preserves all data', () => {
-  const original = `0 HEAD\r\n1 SOUR Stammbaum Vis\r\n1 GEDC\r\n2 VERS 5.5.1\r\n2 FORM LINEAGE-LINKED\r\n1 CHAR UTF-8\r\n0 @I1@ INDI\r\n1 NAME Jane /Doe/\r\n2 GIVN Jane\r\n2 SURN Doe\r\n2 TYPE birth\r\n1 NAME Jane /Smith/\r\n2 GIVN Jane\r\n2 SURN Smith\r\n2 TYPE married\r\n1 SEX F\r\n1 BIRT\r\n2 DATE 1 JAN 1960\r\n2 PLAC Berlin\r\n1 FAMS @F1@\r\n0 @F1@ FAM\r\n1 HUSB @I2@\r\n1 WIFE @I1@\r\n0 TRLR`;
+  const original = `0 HEAD\r\n1 SOUR Test Source\r\n1 GEDC\r\n2 VERS 5.5.1\r\n2 FORM LINEAGE-LINKED\r\n1 CHAR UTF-8\r\n0 @I1@ INDI\r\n1 NAME Emma /Example/\r\n2 GIVN Emma\r\n2 SURN Example\r\n2 TYPE birth\r\n1 NAME Emma /Schulz/\r\n2 GIVN Emma\r\n2 SURN Schulz\r\n2 TYPE married\r\n1 SEX F\r\n1 BIRT\r\n2 DATE 1 JAN 1960\r\n2 PLAC Capital\r\n1 FAMS @F1@\r\n0 @F1@ FAM\r\n1 HUSB @I2@\r\n1 WIFE @I1@\r\n0 TRLR`;
   const { individuals, families } = parseGEDCOM(original);
   const out = serializeGEDCOM(individuals, families);
   const { individuals: i2 } = parseGEDCOM(out);
   const jane = i2.get('@I1@');
-  assert.strictEqual(jane.givn,      'Jane');
-  assert.strictEqual(jane.surn,      'Smith');
-  assert.strictEqual(jane.maidenName,'Doe');
+  assert.strictEqual(jane.givn,      'Emma');
+  assert.strictEqual(jane.surn,      'Schulz');
+  assert.strictEqual(jane.maidenName,'Example');
   assert.strictEqual(jane.birth.date,'1 JAN 1960');
-  assert.strictEqual(jane.birth.plac,'Berlin');
+  assert.strictEqual(jane.birth.plac,'Capital');
 });
 
 test('serializes FAM marriages and divorce', () => {
@@ -286,13 +286,13 @@ test('serializes FAM marriages and divorce', () => {
 1 WIFE @I2@
 1 MARR
 2 DATE 10 JUN 1975
-2 PLAC Munich
+2 PLAC Meadow
 1 DIV Y
 2 DATE 1990
 0 TRLR`);
   const out = serializeGEDCOM(individuals, families);
   assert.ok(out.includes('2 DATE 10 JUN 1975'));
-  assert.ok(out.includes('2 PLAC Munich'));
+  assert.ok(out.includes('2 PLAC Meadow'));
   assert.ok(out.includes('1 DIV Y'));
   assert.ok(out.includes('2 DATE 1990'));
 });
@@ -315,8 +315,8 @@ console.log('\nJSON Export/Import');
 
 test('exportJSON produces valid JSON with individuals and families', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Jane /Smith/
-1 _MARN Doe
+1 NAME Emma /Schulz/
+1 _MARN Example
 0 @F1@ FAM
 1 WIFE @I1@
 0 TRLR`);
@@ -326,14 +326,14 @@ test('exportJSON produces valid JSON with individuals and families', () => {
   assert.ok(Array.isArray(data.individuals));
   assert.ok(Array.isArray(data.families));
   assert.strictEqual(data.individuals[0].id, '@I1@');
-  assert.strictEqual(data.individuals[0].maidenName, 'Doe');
+  assert.strictEqual(data.individuals[0].maidenName, 'Example');
 });
 
 test('importJSON restores individuals and families', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Jane /Doe/
+1 NAME Emma /Example/
 2 TYPE birth
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 2 TYPE married
 1 BIRT
 2 DATE 1 JAN 1960
@@ -343,20 +343,20 @@ test('importJSON restores individuals and families', () => {
   const json = exportJSON(individuals, families);
   const imported = importJSON(json);
   const jane = imported.individuals.get('@I1@');
-  assert.strictEqual(jane.maidenName, 'Doe');
-  assert.strictEqual(jane.surn, 'Smith');
+  assert.strictEqual(jane.maidenName, 'Example');
+  assert.strictEqual(jane.surn, 'Schulz');
   assert.strictEqual(jane.birth.date, '1 JAN 1960');
   assert.ok(imported.families.has('@F1@'));
 });
 
 test('JSON round-trip preserves maiden name', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Marie /Curie/
-1 _MARN Sklodowska
+1 NAME Clara /Sample/
+1 _MARN Neumann
 0 TRLR`);
   const json  = exportJSON(individuals, families);
   const imp   = importJSON(json);
-  assert.strictEqual(imp.individuals.get('@I1@').maidenName, 'Sklodowska');
+  assert.strictEqual(imp.individuals.get('@I1@').maidenName, 'Neumann');
 });
 
 test('importJSON throws on invalid data', () => {
@@ -381,35 +381,35 @@ test('exportYAML produces non-empty string starting with comment', () => {
 
 test('YAML round-trip preserves maiden name', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Jane /Doe/
+1 NAME Emma /Example/
 2 TYPE birth
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 2 TYPE married
 0 TRLR`);
   const yaml = exportYAML(individuals, families);
   const imp  = importYAML(yaml);
   const jane = imp.individuals.get('@I1@');
-  assert.strictEqual(jane.maidenName, 'Doe');
-  assert.strictEqual(jane.surn, 'Smith');
+  assert.strictEqual(jane.maidenName, 'Example');
+  assert.strictEqual(jane.surn, 'Schulz');
 });
 
 test('YAML round-trip preserves birth/death data', () => {
   const { individuals, families } = parseGEDCOM(`0 @I1@ INDI
-1 NAME Hans /Mueller/
+1 NAME Otto /Schmidt/
 1 BIRT
 2 DATE 5 MAY 1900
-2 PLAC Vienna
+2 PLAC Riverview
 1 DEAT
 2 DATE 3 APR 1975
 2 CAUS Old age
 0 TRLR`);
   const yaml = exportYAML(individuals, families);
   const imp  = importYAML(yaml);
-  const hans = imp.individuals.get('@I1@');
-  assert.strictEqual(hans.birth.date, '5 MAY 1900');
-  assert.strictEqual(hans.birth.plac, 'Vienna');
-  assert.strictEqual(hans.death.date, '3 APR 1975');
-  assert.strictEqual(hans.death.caus, 'Old age');
+  const otto = imp.individuals.get('@I1@');
+  assert.strictEqual(otto.birth.date, '5 MAY 1900');
+  assert.strictEqual(otto.birth.plac, 'Riverview');
+  assert.strictEqual(otto.death.date, '3 APR 1975');
+  assert.strictEqual(otto.death.caus, 'Old age');
 });
 
 test('YAML round-trip preserves families and children', () => {
@@ -420,7 +420,7 @@ test('YAML round-trip preserves families and children', () => {
 1 CHIL @I4@
 1 MARR
 2 DATE 10 JUN 1975
-2 PLAC Munich
+2 PLAC Meadow
 0 TRLR`);
   const yaml = exportYAML(individuals, families);
   const imp  = importYAML(yaml);
@@ -429,26 +429,26 @@ test('YAML round-trip preserves families and children', () => {
   assert.strictEqual(fam.wife, '@I2@');
   deepEqual(fam.chil, ['@I3@', '@I4@']);
   assert.strictEqual(fam.marriages[0].date, '10 JUN 1975');
-  assert.strictEqual(fam.marriages[0].plac, 'Munich');
+  assert.strictEqual(fam.marriages[0].plac, 'Meadow');
 });
 
 test('YAML round-trip with multiple individuals', () => {
   const ged = `0 @I1@ INDI
-1 NAME John /Doe/
+1 NAME Otto /Example/
 1 SEX M
 0 @I2@ INDI
-1 NAME Jane /Doe/
+1 NAME Emma /Example/
 2 TYPE birth
-1 NAME Jane /Smith/
+1 NAME Emma /Schulz/
 2 TYPE married
 1 SEX F
 0 TRLR`;
   const { individuals, families } = parseGEDCOM(ged);
   const yaml = exportYAML(individuals, families);
   const imp  = importYAML(yaml);
-  assert.strictEqual(imp.individuals.get('@I1@').surn, 'Doe');
-  assert.strictEqual(imp.individuals.get('@I2@').maidenName, 'Doe');
-  assert.strictEqual(imp.individuals.get('@I2@').surn, 'Smith');
+  assert.strictEqual(imp.individuals.get('@I1@').surn, 'Example');
+  assert.strictEqual(imp.individuals.get('@I2@').maidenName, 'Example');
+  assert.strictEqual(imp.individuals.get('@I2@').surn, 'Schulz');
 });
 
 test('YAML handles empty arrays and null values', () => {
@@ -485,38 +485,38 @@ console.log('\nLegacy compatibility');
 
 test('GEDCOM with _MARN is read correctly and saved with new format', () => {
   const legacyGED = `0 @I1@ INDI
-1 NAME Maria /Muster/
-2 GIVN Maria
-2 SURN Muster
-1 _MARN Schmidt
+1 NAME Elena /Example/
+2 GIVN Elena
+2 SURN Example
+1 _MARN Schneider
 1 SEX F
 0 TRLR`;
   const { individuals, families } = parseGEDCOM(legacyGED);
   const maria = individuals.get('@I1@');
   // Correctly read
-  assert.strictEqual(maria.surn, 'Muster');
-  assert.strictEqual(maria.maidenName, 'Schmidt');
+  assert.strictEqual(maria.surn, 'Example');
+  assert.strictEqual(maria.maidenName, 'Schneider');
 
   // Written in new format
   const out = serializeGEDCOM(individuals, families);
   assert.ok(!out.includes('_MARN'), 'new output must not use _MARN');
   assert.ok(out.includes('TYPE birth'), 'new output must use TYPE birth');
   assert.ok(out.includes('TYPE married'), 'new output must use TYPE married');
-  assert.ok(out.includes('1 NAME Maria /Schmidt/'), 'birth name line');
-  assert.ok(out.includes('1 NAME Maria /Muster/'), 'married name line');
+  assert.ok(out.includes('1 NAME Elena /Schneider/'), 'birth name line');
+  assert.ok(out.includes('1 NAME Elena /Example/'), 'married name line');
 });
 
 test('re-parsing the new output gives same maidenName', () => {
   const legacyGED = `0 @I1@ INDI
-1 NAME Anna /Braun/
-1 _MARN Weber
+1 NAME Emma /Grau/
+1 _MARN Schneider
 0 TRLR`;
   const { individuals, families } = parseGEDCOM(legacyGED);
   const out = serializeGEDCOM(individuals, families);
   const { individuals: i2 } = parseGEDCOM(out);
-  const anna = i2.get('@I1@');
-  assert.strictEqual(anna.surn, 'Braun');
-  assert.strictEqual(anna.maidenName, 'Weber');
+  const emma = i2.get('@I1@');
+  assert.strictEqual(emma.surn, 'Grau');
+  assert.strictEqual(emma.maidenName, 'Schneider');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -544,16 +544,16 @@ test('CONT preserves leading whitespace in note continuation', () => {
 
 test('unrecognized level-1 subtree round-trips inside INDI', () => {
   const ged = `0 @I1@ INDI
-1 NAME John /Doe/
+1 NAME Otto /Example/
 1 CHR
 2 DATE 1 JAN 1900
-2 PLAC Zurich
+2 PLAC Malmo
 0 TRLR`;
   const { individuals } = parseGEDCOM(ged);
   const out = serializeGEDCOM(individuals, new Map());
   assert.ok(out.includes('1 CHR'), 'CHR line preserved');
   assert.ok(out.includes('2 DATE 1 JAN 1900'), 'nested DATE preserved');
-  assert.ok(out.includes('2 PLAC Zurich'), 'nested PLAC preserved');
+  assert.ok(out.includes('2 PLAC Malmo'), 'nested PLAC preserved');
 
   const { individuals: i2 } = parseGEDCOM(out);
   assert.ok((i2.get('@I1@')._unknown || []).some(l => l.includes('CHR')), 'still captured as unknown after re-parse');
@@ -561,7 +561,7 @@ test('unrecognized level-1 subtree round-trips inside INDI', () => {
 
 test('unrecognized level-0 record round-trips via otherLines', () => {
   const ged = `0 @I1@ INDI
-1 NAME John /Doe/
+1 NAME Otto /Example/
 0 @S1@ SOUR
 1 TITL Church book
 0 TRLR`;
@@ -595,16 +595,16 @@ test('malicious xref with a quote is rejected', () => {
 
 test('JSON round-trip preserves unknown level-1 subtree', () => {
   const ged = `0 @I1@ INDI
-1 NAME John /Doe/
+1 NAME Otto /Example/
 1 BURI
-2 PLAC Zurich
+2 PLAC Malmo
 0 TRLR`;
   const { individuals, families } = parseGEDCOM(ged);
   const json = exportJSON(individuals, families);
   const { individuals: i2 } = importJSON(json);
   const out = serializeGEDCOM(i2, new Map());
   assert.ok(out.includes('1 BURI'), 'BURI preserved through JSON round-trip');
-  assert.ok(out.includes('2 PLAC Zurich'), 'nested PLAC preserved through JSON round-trip');
+  assert.ok(out.includes('2 PLAC Malmo'), 'nested PLAC preserved through JSON round-trip');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -732,25 +732,25 @@ const GEO_GED = [
   '1 GEDC',
   '2 VERS 5.5.1',
   '0 @I1@ INDI',
-  '1 NAME Hans /Fluri/',
+  '1 NAME Otto /Bauer/',
   '1 BIRT',
   '2 DATE 3 JAN 1820',
-  '2 PLAC Bern',
+  '2 PLAC Central',
   '3 MAP',
   '4 LATI N46.947975',
   '4 LONG E7.447447',
   '1 DEAT',
   '2 DATE 1890',
-  '2 PLAC Valparaíso',
+  '2 PLAC Harbor City',
   '3 MAP',
   '4 LATI S33.045720',
   '4 LONG W71.619560',
-  '2 CAUS Fieber',
+  '2 CAUS Fever',
   '0 @F1@ FAM',
   '1 HUSB @I1@',
   '1 MARR',
   '2 DATE 1845',
-  '2 PLAC Solothurn',
+  '2 PLAC Mountainville',
   '3 MAP',
   '4 LATI N47.207780',
   '4 LONG E7.537500',
@@ -768,9 +768,9 @@ test('coordinates are read off every kind of event', () => {
 });
 
 test('a tag after the MAP subtree is still read as part of the event', () => {
-  // "2 CAUS Fieber" sits after "4 LONG" and belongs to DEAT, not to the map.
+  // "2 CAUS Fever" sits after "4 LONG" and belongs to DEAT, not to the map.
   const { individuals } = parseGEDCOM(GEO_GED);
-  assert.strictEqual(individuals.get('@I1@').death.caus, 'Fieber');
+  assert.strictEqual(individuals.get('@I1@').death.caus, 'Fever');
 });
 
 test('coordinates survive a GEDCOM round-trip', () => {
@@ -789,12 +789,12 @@ test('a MAP belongs to its own event and does not leak into the next one', () =>
   const { individuals: i2 } = parseGEDCOM([
     '0 @I1@ INDI',
     '1 BIRT',
-    '2 PLAC Bern',
+    '2 PLAC Central',
     '3 MAP',
     '4 LATI N46.947975',
     '4 LONG E7.447447',
     '1 DEAT',
-    '2 PLAC Solothurn',
+    '2 PLAC Mountainville',
     '0 TRLR',
   ].join('\n'));
   assert.ok(individuals.get('@I1@').birth.map, 'precondition');
@@ -803,7 +803,7 @@ test('a MAP belongs to its own event and does not leak into the next one', () =>
 
 test('a place without coordinates writes no MAP lines', () => {
   const { individuals, families } = parseGEDCOM([
-    '0 @I1@ INDI', '1 BIRT', '2 PLAC Bern', '0 TRLR',
+    '0 @I1@ INDI', '1 BIRT', '2 PLAC Central', '0 TRLR',
   ].join('\n'));
   const out = serializeGEDCOM(individuals, families);
   assert.ok(!out.includes('MAP'), `an empty MAP subtree is worse than none:\n${out}`);
@@ -813,7 +813,7 @@ test('a half-written pair is not exported as if it were a location', () => {
   // Files in the wild carry "4 LATI" with no "4 LONG". Half a coordinate points
   // at the Gulf of Guinea, and writing it out would make that look deliberate.
   const { individuals, families } = parseGEDCOM([
-    '0 @I1@ INDI', '1 BIRT', '2 PLAC Bern', '3 MAP', '4 LATI N46.9', '0 TRLR',
+    '0 @I1@ INDI', '1 BIRT', '2 PLAC Central', '3 MAP', '4 LATI N46.9', '0 TRLR',
   ].join('\n'));
   const out = serializeGEDCOM(individuals, families);
   assert.ok(!out.includes('MAP'), `incomplete coordinates must not be written:\n${out}`);

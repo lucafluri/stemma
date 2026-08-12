@@ -34,24 +34,24 @@ async function test(name, fn) {
   const label = o => r2d.nodeLabelText(o);
 
   await test('the maiden name is shown after the married name', async () => {
-    assert.strictEqual(label({ displayName: 'Anna Müller', maidenName: 'Meier' }), 'Anna Müller (Meier)');
+    assert.strictEqual(label({ displayName: 'Emma Schmidt', maidenName: 'Weber' }), 'Emma Schmidt (Weber)');
   });
 
   await test('a person without one is unchanged', async () => {
-    assert.strictEqual(label({ displayName: 'Hans Fluri' }), 'Hans Fluri');
-    assert.strictEqual(label({ displayName: 'Hans Fluri', maidenName: '' }), 'Hans Fluri');
-    assert.strictEqual(label({ displayName: 'Hans Fluri', maidenName: '   ' }), 'Hans Fluri',
+    assert.strictEqual(label({ displayName: 'Otto Bauer' }), 'Otto Bauer');
+    assert.strictEqual(label({ displayName: 'Otto Bauer', maidenName: '' }), 'Otto Bauer');
+    assert.strictEqual(label({ displayName: 'Otto Bauer', maidenName: '   ' }), 'Otto Bauer',
       'a field holding only spaces is not a maiden name');
   });
 
   await test('it is not repeated when she is already shown under it', async () => {
     // A woman who kept her name, or a record with both fields filled in the same
-    // — "Anna Meier (Meier)" reads as a mistake in the data.
-    assert.strictEqual(label({ displayName: 'Anna Meier', maidenName: 'Meier' }), 'Anna Meier');
+    // — "Emma Weber (Weber)" reads as a mistake in the data.
+    assert.strictEqual(label({ displayName: 'Emma Weber', maidenName: 'Weber' }), 'Emma Weber');
   });
 
   await test('a missing display name does not produce a stray bracket', async () => {
-    assert.strictEqual(label({ maidenName: 'Meier' }), 'Meier',
+    assert.strictEqual(label({ maidenName: 'Weber' }), 'Weber',
       'with no other name the maiden name is the name, not a bracketed footnote');
     assert.strictEqual(label({}), '');
   });

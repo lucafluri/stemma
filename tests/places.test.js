@@ -43,59 +43,59 @@ const p = (id, bplac, dplac) => ({
   console.log('\nfolding a place name for comparison');
 
   await test('case, accents and punctuation all fold away', () => {
-    assert.strictEqual(places.placeKey('Zürich'), places.placeKey('ZURICH'));
-    assert.strictEqual(places.placeKey('St. Gallen'), places.placeKey('St  Gallen'));
-    assert.strictEqual(places.placeKey('  Bern, CH '), 'bern ch');
+    assert.strictEqual(places.placeKey('Malmö'), places.placeKey('MALMO'));
+    assert.strictEqual(places.placeKey('St. Brook'), places.placeKey('St  Brook'));
+    assert.strictEqual(places.placeKey('  Central, RP '), 'central rp');
   });
 
   await test('different places do not fold together', () => {
-    assert.notStrictEqual(places.placeKey('Bern'), places.placeKey('Born'));
+    assert.notStrictEqual(places.placeKey('Central'), places.placeKey('Hall'));
   });
 
   console.log('\nwhat counts as the same place');
 
   await test('a one-letter typo is a candidate', () => {
-    assert.ok(places.looksRelated('luterbach', 'luterbah'));
+    assert.ok(places.looksRelated('rivertown', 'rivertow'));
   });
 
   await test('an added qualifier is a candidate', () => {
-    assert.ok(places.looksRelated('bern', 'bern schweiz'));
+    assert.ok(places.looksRelated('central', 'central republic'));
   });
 
   await test('two unrelated names are not', () => {
-    assert.ok(!places.looksRelated('bern', 'basel'));
-    assert.ok(!places.looksRelated('bern schweiz', 'basel schweiz'),
+    assert.ok(!places.looksRelated('central', 'northport'));
+    assert.ok(!places.looksRelated('central republic', 'northport republic'),
       'sharing only the country must not be enough');
   });
 
   await test('a one-edit difference in a short name is not treated as a typo', () => {
-    assert.ok(!places.looksRelated('Bern', 'Born'), 'both are real places');
-    assert.ok(!places.looksRelated('Sion', 'Sitten'));
+    assert.ok(!places.looksRelated('Central', 'Hall'), 'both are real places');
+    assert.ok(!places.looksRelated('East', 'Eastern'));
   });
 
   console.log('\nthe locality carries the match');
 
   await test('the first component is what gets compared', () => {
-    assert.strictEqual(places.placeLocality('Luterbach, Solothurn, Schweiz'), 'luterbach');
-    assert.strictEqual(places.placeLocality('Zürich'), 'zurich');
+    assert.strictEqual(places.placeLocality('Rivertown, Mountainville, Republic'), 'rivertown');
+    assert.strictEqual(places.placeLocality('Malmö'), 'malmo');
   });
 
   await test('the same town with completely different tails still matches', () => {
-    assert.ok(places.looksRelated('Luterbach, CH', 'Luterbach, Solothurn, Schweiz'),
+    assert.ok(places.looksRelated('Rivertown, RP', 'Rivertown, Mountainville, Republic'),
       'no token of one is a subset of the other, but the town is the same');
   });
 
   await test('a typo in the town matches across different tails', () => {
-    assert.ok(places.looksRelated('Luterbah, CH', 'Luterbach, Solothurn'));
+    assert.ok(places.looksRelated('Rivertow, RP', 'Rivertown, Mountainville'));
   });
 
   await test('different towns in the same canton do not match', () => {
-    assert.ok(!places.looksRelated('Luterbach, Solothurn, CH', 'Derendingen, Solothurn, CH'),
+    assert.ok(!places.looksRelated('Rivertown, Mountainville, RP', 'Hilltown, Mountainville, RP'),
       'sharing the tail is not sharing the place');
   });
 
   await test('the same town name in two countries is still only a suggestion', () => {
-    load([p('a', 'Neuchâtel, Suisse'), p('b', 'Neuchâtel, France')]);
+    load([p('a', 'Newburg, Republic'), p('b', 'Newburg, Federation')]);
     const g = places.groupPlaces()[0];
     assert.ok(g, 'they belong in one group to be looked at');
     const other = g.variants.find(v => v.value !== g.canonical);
@@ -105,7 +105,7 @@ const p = (id, bplac, dplac) => ({
   console.log('\ngrouping a tree');
 
   await test('spellings that differ only in case and accents land in one group', () => {
-    load([p('a', 'Zürich'), p('b', 'zurich'), p('c', 'ZÜRICH')]);
+    load([p('a', 'Malmö'), p('b', 'malmo'), p('c', 'MALMÖ')]);
     const groups = places.groupPlaces();
     assert.strictEqual(groups.length, 1, `expected one group, got ${groups.length}`);
     assert.strictEqual(groups[0].total, 3);
@@ -113,51 +113,51 @@ const p = (id, bplac, dplac) => ({
   });
 
   await test('the commonest spelling is the one proposed', () => {
-    load([p('a', 'Zürich'), p('b', 'Zürich'), p('c', 'zurich')]);
-    assert.strictEqual(places.groupPlaces()[0].canonical, 'Zürich');
+    load([p('a', 'Malmö'), p('b', 'Malmö'), p('c', 'malmo')]);
+    assert.strictEqual(places.groupPlaces()[0].canonical, 'Malmö');
   });
 
   await test('an equally common spelling that kept its capital and accent wins', () => {
-    load([p('a', 'zurich'), p('b', 'Zürich')]);
-    assert.strictEqual(places.groupPlaces()[0].canonical, 'Zürich');
+    load([p('a', 'malmo'), p('b', 'Malmö')]);
+    assert.strictEqual(places.groupPlaces()[0].canonical, 'Malmö');
   });
 
   await test('the tidier punctuation wins an otherwise exact tie', () => {
-    load([p('a', 'Bern ,CH'), p('b', 'Bern, CH')]);
-    assert.strictEqual(places.groupPlaces()[0].canonical, 'Bern, CH');
+    load([p('a', 'Central ,RP'), p('b', 'Central, RP')]);
+    assert.strictEqual(places.groupPlaces()[0].canonical, 'Central, RP');
   });
 
   await test('between equally common spellings the more specific one wins', () => {
-    load([p('a', 'Bern'), p('b', 'Bern, Schweiz')]);
-    assert.strictEqual(places.groupPlaces()[0].canonical, 'Bern, Schweiz');
+    load([p('a', 'Central'), p('b', 'Central, Republic')]);
+    assert.strictEqual(places.groupPlaces()[0].canonical, 'Central, Republic');
   });
 
   await test('a looser match is offered but not pre-ticked', () => {
-    load([p('a', 'Bern'), p('b', 'Bern'), p('c', 'Bern, Schweiz')]);
+    load([p('a', 'Central'), p('b', 'Central'), p('c', 'Central, Republic')]);
     const g = places.groupPlaces()[0];
-    const loose = g.variants.find(v => v.value === 'Bern, Schweiz');
+    const loose = g.variants.find(v => v.value === 'Central, Republic');
     assert.ok(loose, 'the qualified spelling should be in the group');
     assert.strictEqual(loose.exact, false, 'it is not merely a spelling difference');
   });
 
   await test('a place with no variants is not a group', () => {
-    load([p('a', 'Bern'), p('b', 'Basel')]);
+    load([p('a', 'Central'), p('b', 'Northport')]);
     assert.deepStrictEqual(places.groupPlaces(), []);
   });
 
   console.log('\nmerging by hand');
 
   await test('two names no rule relates can be grouped anyway', () => {
-    load([p('a', 'Sankt Gallen'), p('b', 'S. Gallen')]);
+    load([p('a', 'Saint Brook'), p('b', 'St. Brook')]);
     assert.deepStrictEqual(places.groupPlaces(), [], 'nothing should relate them on its own');
-    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Sankt Gallen', 'S. Gallen']] });
+    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Saint Brook', 'St. Brook']] });
     assert.strictEqual(g.length, 1);
-    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['S. Gallen', 'Sankt Gallen']);
+    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['Saint Brook', 'St. Brook']);
   });
 
   await test('a hand-picked variant arrives ticked, unlike a guessed one', () => {
-    load([p('a', 'Sankt Gallen'), p('b', 'S. Gallen')]);
-    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Sankt Gallen', 'S. Gallen']] })[0];
+    load([p('a', 'Saint Brook'), p('b', 'St. Brook')]);
+    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Saint Brook', 'St. Brook']] })[0];
     assert.ok(g.variants.every(v => v.forced), 'the user named both of them');
   });
 
@@ -166,40 +166,40 @@ const p = (id, bplac, dplac) => ({
     // two. Dragging their old group-mates along would be the opposite of what
     // "as a new group" asks for.
     load([
-      p('a', 'Sankt Gallen'), p('b', 'sankt gallen'),
-      p('c', 'S. Gallen'), p('d', 'S Gallen'),
+      p('a', 'Saint Brook'), p('b', 'saint brook'),
+      p('c', 'St. Brook'), p('d', 'St Brook'),
     ]);
     assert.strictEqual(places.groupPlaces().length, 2, 'two separate groups to begin with');
-    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Sankt Gallen', 'S. Gallen']] });
+    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Saint Brook', 'St. Brook']] });
     assert.strictEqual(g.length, 1);
-    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['S. Gallen', 'Sankt Gallen']);
+    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['Saint Brook', 'St. Brook']);
   });
 
   await test('what a hand merge left behind is grouped automatically again', () => {
     load([
-      p('a', 'Sankt Gallen'), p('b', 'sankt gallen'), p('c', 'SANKT GALLEN'),
-      p('d', 'S. Gallen'),
+      p('a', 'Saint Brook'), p('b', 'saint brook'), p('c', 'SAINT BROOK'),
+      p('d', 'St. Brook'),
     ]);
-    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Sankt Gallen', 'S. Gallen']] });
+    const g = places.groupPlaces(places.collectPlaces(), { merges: [['Saint Brook', 'St. Brook']] });
     assert.strictEqual(g.length, 2, 'the two spellings left over still match each other');
     const leftovers = g.find(x => !x.variants.some(v => v.forced));
-    assert.deepStrictEqual(leftovers.variants.map(v => v.value).sort(), ['SANKT GALLEN', 'sankt gallen']);
+    assert.deepStrictEqual(leftovers.variants.map(v => v.value).sort(), ['SAINT BROOK', 'saint brook']);
   });
 
   await test('merging into a group joins all of it, not just its title', () => {
     // The UI hands over every member of the target group for this reason:
     // naming only the canonical would tear the group apart to admit one place.
-    load([p('a', 'Zürich'), p('b', 'zurich'), p('c', 'Genf')]);
+    load([p('a', 'Malmö'), p('b', 'malmo'), p('c', 'Lakeview')]);
     const before = places.groupPlaces()[0];
     const g = places.groupPlaces(places.collectPlaces(),
-      { merges: [['Genf', ...before.variants.map(v => v.value)]] });
+      { merges: [['Lakeview', ...before.variants.map(v => v.value)]] });
     assert.strictEqual(g.length, 1);
-    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['Genf', 'Zürich', 'zurich']);
+    assert.deepStrictEqual(g[0].variants.map(v => v.value).sort(), ['Lakeview', 'Malmö', 'malmo']);
   });
 
   await test('naming a place that is not in the tree changes nothing', () => {
-    load([p('a', 'Bern'), p('b', 'Basel')]);
-    assert.deepStrictEqual(places.groupPlaces(places.collectPlaces(), { merges: [['Bern', 'Genf']] }), [],
+    load([p('a', 'Central'), p('b', 'Northport')]);
+    assert.deepStrictEqual(places.groupPlaces(places.collectPlaces(), { merges: [['Central', 'Lakeview']] }), [],
       'a single real name is not a group');
   });
 
@@ -207,25 +207,25 @@ const p = (id, bplac, dplac) => ({
 
   await test('renames reach births, deaths and marriages alike', () => {
     load(
-      [p('a', 'zurich'), p('b', '', 'zurich')],
-      [{ id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '', plac: 'zurich', types: [] }], div: false, divDate: '' }],
+      [p('a', 'malmo'), p('b', '', 'malmo')],
+      [{ id: 'F1', husb: 'a', wife: 'b', chil: [], marriages: [{ date: '', plac: 'malmo', types: [] }], div: false, divDate: '' }],
     );
-    const n = places.applyPlaceRenames(new Map([['zurich', 'Zürich']]));
+    const n = places.applyPlaceRenames(new Map([['malmo', 'Malmö']]));
     assert.strictEqual(n, 3, `three fields hold it, ${n} were rewritten`);
-    assert.strictEqual(state.individuals.get('a').birth.plac, 'Zürich');
-    assert.strictEqual(state.individuals.get('b').death.plac, 'Zürich');
-    assert.strictEqual(state.families.get('F1').marriages[0].plac, 'Zürich');
+    assert.strictEqual(state.individuals.get('a').birth.plac, 'Malmö');
+    assert.strictEqual(state.individuals.get('b').death.plac, 'Malmö');
+    assert.strictEqual(state.families.get('F1').marriages[0].plac, 'Malmö');
   });
 
   await test('a place nobody renamed is left exactly as it was', () => {
-    load([p('a', 'zurich'), p('b', 'Basel')]);
-    places.applyPlaceRenames(new Map([['zurich', 'Zürich']]));
-    assert.strictEqual(state.individuals.get('b').birth.plac, 'Basel');
+    load([p('a', 'malmo'), p('b', 'Northport')]);
+    places.applyPlaceRenames(new Map([['malmo', 'Malmö']]));
+    assert.strictEqual(state.individuals.get('b').birth.plac, 'Northport');
   });
 
   await test('empty fields stay empty rather than becoming a place', () => {
     load([p('a', '')]);
-    const n = places.applyPlaceRenames(new Map([['', 'Zürich']]), { tidy: true });
+    const n = places.applyPlaceRenames(new Map([['', 'Malmö']]), { tidy: true });
     assert.strictEqual(n, 0);
     assert.strictEqual(state.individuals.get('a').birth.plac, '');
   });
@@ -233,17 +233,17 @@ const p = (id, bplac, dplac) => ({
   console.log('\ntidying spacing');
 
   await test('repeated spaces and stray commas settle into one form', () => {
-    assert.strictEqual(places.tidyPlace('Bern ,CH'), 'Bern, CH');
-    assert.strictEqual(places.tidyPlace('Bern,,CH'), 'Bern, CH');
-    assert.strictEqual(places.tidyPlace('  Bern   Mitte '), 'Bern Mitte');
-    assert.strictEqual(places.tidyPlace('Bern,'), 'Bern');
+    assert.strictEqual(places.tidyPlace('Central ,RP'), 'Central, RP');
+    assert.strictEqual(places.tidyPlace('Central,,RP'), 'Central, RP');
+    assert.strictEqual(places.tidyPlace('  Central   District '), 'Central District');
+    assert.strictEqual(places.tidyPlace('Central,'), 'Central');
   });
 
   await test('tidying applies even where nothing was renamed', () => {
-    load([p('a', 'Bern ,CH')]);
+    load([p('a', 'Central ,RP')]);
     const n = places.applyPlaceRenames(new Map(), { tidy: true });
     assert.strictEqual(n, 1);
-    assert.strictEqual(state.individuals.get('a').birth.plac, 'Bern, CH');
+    assert.strictEqual(state.individuals.get('a').birth.plac, 'Central, RP');
   });
 
   console.log('\n──────────────────────────────────────────────────');

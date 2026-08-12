@@ -35,11 +35,11 @@ const p = (id, o = {}) => Object.assign({
   const { state } = await import(url('state.js'));
 
   state.individuals = new Map([
-    ['a', p('a', { givn: 'Hans',       surn: 'Fluri',  occu: 'Bäcker', birth: { plac: 'Luterbach' } })],
-    ['b', p('b', { givn: 'Hans Peter', surn: 'Fluri' })],
-    ['c', p('c', { givn: 'Anna',       surn: 'Meier',  maidenName: 'Zaugg' })],
-    ['d', p('d', { givn: 'Anna',       surn: 'Egger' })],
-    ['e', p('e', { givn: 'Anna',       surn: 'Fluri' })],
+    ['a', p('a', { givn: 'Otto',       surn: 'Bauer',  occu: 'Baker', birth: { plac: 'Rivertown' } })],
+    ['b', p('b', { givn: 'Otto Karl', surn: 'Bauer' })],
+    ['c', p('c', { givn: 'Emma',       surn: 'Weber',  maidenName: 'Klein' })],
+    ['d', p('d', { givn: 'Emma',       surn: 'Huber' })],
+    ['e', p('e', { givn: 'Emma',       surn: 'Bauer' })],
   ]);
   state.families = new Map();
 
@@ -47,29 +47,29 @@ const p = (id, o = {}) => Object.assign({
 
   await test('given names come back commonest first', async () => {
     const names = panels._acGivenNames();
-    assert.strictEqual(names[0], 'Anna', `three Annas should lead, got ${names.slice(0, 3)}`);
-    assert.ok(names.includes('Hans'));
+    assert.strictEqual(names[0], 'Emma', `three Emmas should lead, got ${names.slice(0, 3)}`);
+    assert.ok(names.includes('Otto'));
   });
 
   await test('a double given name also offers its parts', async () => {
-    // "Hans Peter" should be findable by typing either half — a whole-string
-    // match would never surface it from "Peter".
+    // "Otto Karl" should be findable by typing either half — a whole-string
+    // match would never surface it from "Karl".
     const names = panels._acGivenNames();
-    assert.ok(names.includes('Hans Peter'), 'the full name should be offered');
-    assert.ok(names.includes('Peter'), 'and so should the second part');
+    assert.ok(names.includes('Otto Karl'), 'the full name should be offered');
+    assert.ok(names.includes('Karl'), 'and so should the second part');
   });
 
   await test('maiden names are offered as surnames', async () => {
     // They are surnames the tree already knows, and exactly what someone is
     // reaching for when filling in a woman's birth name.
-    assert.ok(panels._acSurnames().includes('Zaugg'));
-    assert.strictEqual(panels._acSurnames()[0], 'Fluri', 'the commonest surname should lead');
+    assert.ok(panels._acSurnames().includes('Klein'));
+    assert.strictEqual(panels._acSurnames()[0], 'Bauer', 'the commonest surname should lead');
   });
 
   await test('ties are ordered predictably rather than by chance', async () => {
     const s = panels._acSurnames();
-    const ones = s.filter(x => ['Egger', 'Meier', 'Zaugg'].includes(x));
-    assert.deepStrictEqual(ones, ['Egger', 'Meier', 'Zaugg'],
+    const ones = s.filter(x => ['Huber', 'Weber', 'Klein'].includes(x));
+    assert.deepStrictEqual(ones, ['Huber', 'Klein', 'Weber'],
       'equal counts should fall back to alphabetical');
   });
 

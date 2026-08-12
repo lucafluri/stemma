@@ -91,7 +91,7 @@ function installFakeIndexedDB() {
   // person would be testing the fixture.
   const loadFixture = () => {
     const parsed = global.GEDCOMModule.parseGEDCOM(
-      ['0 @I1@ INDI', '1 NAME Ada /Byron/', '2 GIVN Ada', '2 SURN Byron',
+      ['0 @I1@ INDI', '1 NAME Eve /Poet/', '2 GIVN Eve', '2 SURN Poet',
        '1 BIRT', '2 DATE 10 DEC 1815', '0 TRLR'].join('\n'));
     state.individuals = parsed.individuals;
     state.families = parsed.families;
@@ -115,7 +115,7 @@ function installFakeIndexedDB() {
     }
     assert.ok(seen['tree.ged'].includes('0 @I1@ INDI'), '.ged should get GEDCOM lines');
     assert.ok(seen['tree.ged'].startsWith('﻿'), '.ged should keep the BOM the download path writes');
-    assert.deepStrictEqual(JSON.parse(seen['tree.json']).individuals[0].givn, 'Ada',
+    assert.deepStrictEqual(JSON.parse(seen['tree.json']).individuals[0].givn, 'Eve',
       '.json should get parseable JSON');
     assert.ok(seen['tree.yaml'].includes('format: gedcom-vis-yaml'), '.yaml should get YAML');
     assert.ok(!seen['tree.json'].includes('0 @I1@ INDI'), '.json must not receive GEDCOM lines');
@@ -258,12 +258,12 @@ function installFakeIndexedDB() {
     assert.strictEqual(saveBtn.style.display, 'none',
       'with nothing open there is no file to save into');
 
-    state._fileHandle = fakeHandle('Fluri-Stammbaum.ged');
+    state._fileHandle = fakeHandle('sample-tree.ged');
     await io.updateFileButtons();
     assert.strictEqual(saveBtn.style.display, 'inline-block');
-    assert.ok(saveBtn.innerHTML.includes('Fluri-Stammbaum.ged'),
+    assert.ok(saveBtn.innerHTML.includes('sample-tree.ged'),
       `the save button must name its target, got ${saveBtn.innerHTML}`);
-    assert.ok(openBtn.innerHTML.includes('Fluri-Stammbaum.ged'),
+    assert.ok(openBtn.innerHTML.includes('sample-tree.ged'),
       'the open button should offer the same file back');
   });
 

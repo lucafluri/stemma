@@ -24,18 +24,18 @@ function test(name, fn) {
   catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); failed++; }
 }
 
-// Hans and Anna are in the tree, childless. The file being merged gives Hans a
+// Otto and Emma are in the tree, childless. The file being merged gives Otto a
 // birthplace he does not have on file (→ an update row), repeats the marriage
 // with a daughter the tree lacks (→ a marriage row and a new-person row), and
 // adds somebody tied to nobody at all (→ a new-person row that would land
 // detached). One of every kind the chips filter by, except 'same'.
 function seedTree(state) {
   state.individuals = new Map([
-    ['@I1@', { id:'@I1@', name:'Hans Muster', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
-    ['@I2@', { id:'@I2@', name:'Anna Muster', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I1@', { id:'@I1@', name:'Otto Example', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I2@', { id:'@I2@', name:'Emma Example', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
   ]);
   state.families = new Map([
-    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:[], marriages:[{date:'1928',plac:'Bern',types:[]}], div:false, divDate:'' }],
+    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:[], marriages:[{date:'1928',plac:'Central',types:[]}], div:false, divDate:'' }],
   ]);
 }
 
@@ -46,9 +46,9 @@ const person = (fullName, extra = {}) => ({
 
 function parsedFile() {
   return [
-    person('Hans Muster', { sex:'M', birthDate:'1900', birthPlace:'Bern', marriages:[
-      { spouseName:'Anna Muster', date:'1928', place:'Bern', children:[{ fullName:'Klara Muster' }] }] }),
-    person('Klara Muster', { sex:'F', birthDate:'1935' }),
+    person('Otto Example', { sex:'M', birthDate:'1900', birthPlace:'Central', marriages:[
+      { spouseName:'Emma Example', date:'1928', place:'Central', children:[{ fullName:'Lena Example' }] }] }),
+    person('Lena Example', { sex:'F', birthDate:'1935' }),
     person('Zzz Island',   { sex:'M', birthDate:'1800' }),
   ];
 }
@@ -118,7 +118,7 @@ const chipCount = key => Number(chipByKey(key).querySelector('b').textContent);
   });
 
   test('a name out of the imported file cannot inject markup into the table', () => {
-    review([person('<img src=x onerror=alert(1)>Evil Muster', { sex:'M' })]);
+    review([person('<img src=x onerror=alert(1)>Bad Example', { sex:'M' })]);
     const table = document.querySelector('.import-diff-table');
     assert.strictEqual(table.querySelectorAll('img').length, 0, 'the name must not become an element');
     assert.ok(table.textContent.includes('<img src=x'), 'it should still be readable as text');
@@ -128,7 +128,7 @@ const chipCount = key => Number(chipByKey(key).querySelector('b').textContent);
 
   test('each chip counts the kind it filters to', () => {
     review();
-    // One update (Hans gains a birthplace), one marriage, two new people.
+    // One update (Otto gains a birthplace), one marriage, two new people.
     assert.strictEqual(chipCount('all'), 4, 'all');
     assert.strictEqual(chipCount('new'), 2, 'new');
     assert.strictEqual(chipCount('changed'), 1, 'changed');

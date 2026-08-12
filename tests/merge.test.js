@@ -22,22 +22,22 @@ function test(name, fn) {
   catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); failed++; }
 }
 
-// Hans and Anna are in the tree and childless. The file being merged says they
-// have a daughter, Klara — so Klara is a new person whose only tie to anything
+// Otto and Emma are in the tree and childless. The file being merged says they
+// have a daughter, Lena — so Lena is a new person whose only tie to anything
 // is the family row sitting next to her in the same review.
 function seed(state) {
   state.individuals = new Map([
-    ['@I1@', { id:'@I1@', name:'Hans Muster', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
-    ['@I2@', { id:'@I2@', name:'Anna Muster', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I1@', { id:'@I1@', name:'Otto Example', sex:'M', birth:{date:'1900',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
+    ['@I2@', { id:'@I2@', name:'Emma Example', sex:'F', birth:{date:'1902',plac:''}, death:{date:'',plac:''}, note:'', fams:['@F1@'], famc:[] }],
   ]);
   state.families = new Map([
-    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:[], marriages:[{date:'1928',plac:'Bern',types:[]}], div:false, divDate:'' }],
+    ['@F1@', { id:'@F1@', husb:'@I1@', wife:'@I2@', chil:[], marriages:[{date:'1928',plac:'Central',types:[]}], div:false, divDate:'' }],
   ]);
   return [
-    { fullName:'Hans Muster', sex:'M', birthDate:'1900', birthPlace:'', deathDate:'', deathPlace:'',
+    { fullName:'Otto Example', sex:'M', birthDate:'1900', birthPlace:'', deathDate:'', deathPlace:'',
       fatherName:'', motherName:'', notes:'', sourceNote:'s', marriages:[
-        { spouseName:'Anna Muster', date:'1928', place:'Bern', children:[{ fullName:'Klara Muster' }] }] },
-    { fullName:'Klara Muster', sex:'F', birthDate:'1935', birthPlace:'', deathDate:'', deathPlace:'',
+        { spouseName:'Emma Example', date:'1928', place:'Central', children:[{ fullName:'Lena Example' }] }] },
+    { fullName:'Lena Example', sex:'F', birthDate:'1935', birthPlace:'', deathDate:'', deathPlace:'',
       fatherName:'', motherName:'', notes:'', sourceNote:'s', marriages:[] },
   ];
 }
@@ -56,7 +56,7 @@ function seed(state) {
   Imp._renderImportReview();
 
   const list  = document.getElementById('import-actions-list');
-  const klara = state._importActions.find(a => a.kind === 'person' && a.fields['Name'] === 'Klara Muster');
+  const klara = state._importActions.find(a => a.kind === 'person' && a.fields['Name'] === 'Lena Example');
   const marr  = state._importActions.find(a => a.kind === 'marriage');
   assert(klara && marr, 'the fixture produced the two rows the test is about');
 
@@ -116,7 +116,7 @@ function seed(state) {
     click(marr.id, 'approved');
     Imp._tiApplyActions(state._importActions);
     const chil = state.families.get('@F1@').chil.map(id => state.individuals.get(id)?.name);
-    assert.deepStrictEqual(chil, ['Klara Muster']);
+    assert.deepStrictEqual(chil, ['Lena Example']);
     assert.strictEqual(state.families.size, 1, 'into the existing family, not a copy of it');
   });
 
