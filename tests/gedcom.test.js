@@ -832,6 +832,89 @@ test('coordinates travel through JSON and YAML too', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Both directions of a family link
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A family membership is stated twice in GEDCOM: on the FAM record
+// (HUSB/WIFE/CHIL) and on each person (FAMS/FAMC). The chart is built from the
+// first and every walk over the tree — focus, ancestors, descendants, the
+// relation finder — reads the second. A file that states only one of the two
+// used to draw all its connections and then behave as though nobody was
+// related to anybody.
+console.log('\nreciprocal family pointers');
+
+test('a file that names members only on the FAM record still links them', () => {
+  const { individuals, families } = parseGEDCOM([
+    '0 HEAD',
+    '0 @P0@ INDI', '1 NAME Child /Doe/',
+    '0 @P1@ INDI', '1 NAME Father /Doe/', '1 SEX M',
+    '0 @P2@ INDI', '1 NAME Mother /Roe/', '1 SEX F',
+    '0 @F0@ FAM', '1 HUSB @P1@', '1 WIFE @P2@', '1 CHIL @P0@',
+    '0 TRLR',
+  ].join('\n'));
+  deepEqual(individuals.get('@P0@').famc, ['@F0@'], 'the child knows its family');
+  deepEqual(individuals.get('@P1@').fams, ['@F0@'], 'and so does the father');
+  deepEqual(individuals.get('@P2@').fams, ['@F0@'], '...and the mother');
+  assert.strictEqual(families.size, 1);
+});
+
+test('a file that names them only on the people fills the FAM record', () => {
+  const { families } = parseGEDCOM([
+    '0 HEAD',
+    '0 @P0@ INDI', '1 NAME Child /Doe/', '1 FAMC @F0@',
+    '0 @P1@ INDI', '1 NAME Father /Doe/', '1 SEX M', '1 FAMS @F0@',
+    '0 @P2@ INDI', '1 NAME Mother /Roe/', '1 SEX F', '1 FAMS @F0@',
+    '0 @F0@ FAM',
+    '0 TRLR',
+  ].join('\n'));
+  const f = families.get('@F0@');
+  assert.strictEqual(f.husb, '@P1@');
+  assert.strictEqual(f.wife, '@P2@');
+  deepEqual(f.chil, ['@P0@']);
+});
+
+test('a file that states both directions is left exactly as it is', () => {
+  // The common case, and the one this must not touch: no duplicated ids, no
+  // spouse slot rewritten.
+  const src = [
+    '0 HEAD',
+    '0 @P0@ INDI', '1 NAME Child /Doe/', '1 FAMC @F0@',
+    '0 @P1@ INDI', '1 NAME Father /Doe/', '1 SEX M', '1 FAMS @F0@',
+    '0 @P2@ INDI', '1 NAME Mother /Roe/', '1 SEX F', '1 FAMS @F0@',
+    '0 @F0@ FAM', '1 HUSB @P1@', '1 WIFE @P2@', '1 CHIL @P0@',
+    '0 TRLR',
+  ].join('\n');
+  const { individuals, families } = parseGEDCOM(src);
+  deepEqual(individuals.get('@P0@').famc, ['@F0@'], 'no duplicate famc');
+  deepEqual(individuals.get('@P1@').fams, ['@F0@'], 'no duplicate fams');
+  deepEqual(families.get('@F0@').chil, ['@P0@'], 'no duplicate child');
+  assert.strictEqual(families.get('@F0@').husb, '@P1@');
+});
+
+test('a pointer to a family that is not in the file is not invented', () => {
+  const { individuals, families } = parseGEDCOM([
+    '0 HEAD',
+    '0 @P0@ INDI', '1 NAME Orphan /Doe/', '1 FAMC @NOPE@',
+    '0 TRLR',
+  ].join('\n'));
+  assert.strictEqual(families.size, 0, 'no family conjured from a dangling pointer');
+  deepEqual(individuals.get('@P0@').famc, ['@NOPE@'], 'the pointer itself is left alone');
+});
+
+test('the repair survives a JSON round trip', () => {
+  const { individuals, families } = parseGEDCOM([
+    '0 HEAD',
+    '0 @P0@ INDI', '1 NAME Child /Doe/',
+    '0 @P1@ INDI', '1 NAME Father /Doe/', '1 SEX M',
+    '0 @F0@ FAM', '1 HUSB @P1@', '1 CHIL @P0@',
+    '0 TRLR',
+  ].join('\n'));
+  const back = importJSON(exportJSON(individuals, families));
+  deepEqual(back.individuals.get('@P0@').famc, ['@F0@']);
+  deepEqual(back.individuals.get('@P1@').fams, ['@F0@']);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);

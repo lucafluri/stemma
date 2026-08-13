@@ -92,6 +92,62 @@
    * @param {string} raw  Raw GEDCOM text (UTF-8, with or without BOM).
    * @returns {{ individuals: Map, families: Map }}
    */
+  /**
+   * Make the two directions of every family link agree.
+   *
+   * GEDCOM states each membership twice: the FAM record points at its members
+   * (HUSB/WIFE/CHIL) and each member points back at the family (FAMS/FAMC).
+   * Plenty of files in the wild state only one of the two — a hand-edited file,
+   * a converter that dropped the back-pointers, or this app's own text importer,
+   * which builds families and never wrote FAMC/FAMS onto the people.
+   *
+   * That was not a cosmetic gap. The chart is built from the FAM side
+   * (buildGraphData reads husb/wife/chil) while every walk over the tree —
+   * focus, ancestors, descendants, the relation finder, marriage ages — reads
+   * the INDI side. A one-sided file therefore drew all its connections and then
+   * behaved as though nobody was related to anybody: focusing a person showed
+   * that person alone, and "show ancestors" highlighted nothing.
+   *
+   * Repairing it here, at the end of every importer, is the one place all three
+   * of them pass through. Idempotent: a file that states both directions (which
+   * is most of them) comes out unchanged.
+   */
+  function _linkFamilyPointers(individuals, families) {
+    const add = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
+
+    for (const [fid, fam] of families) {
+      for (const pid of [fam.husb, fam.wife]) {
+        const indi = pid && individuals.get(pid);
+        if (indi) add(indi.fams = indi.fams || [], fid);
+      }
+      for (const cid of fam.chil || []) {
+        const indi = individuals.get(cid);
+        if (indi) add(indi.famc = indi.famc || [], fid);
+      }
+    }
+
+    // ...and the other way, for a file that names the family on the person but
+    // left the FAM record's own member list short.
+    for (const [pid, indi] of individuals) {
+      for (const fid of indi.fams || []) {
+        const fam = families.get(fid);
+        if (!fam) continue;
+        // Only fill an empty slot. Which of husband/wife an unsexed person
+        // belongs in is not ours to decide, and overwriting a stated one would
+        // be inventing a fact.
+        if (fam.husb === pid || fam.wife === pid) continue;
+        if (!fam.husb && indi.sex === 'M')      fam.husb = pid;
+        else if (!fam.wife && indi.sex === 'F') fam.wife = pid;
+        else if (!fam.husb)                     fam.husb = pid;
+        else if (!fam.wife)                     fam.wife = pid;
+      }
+      for (const fid of indi.famc || []) {
+        const fam = families.get(fid);
+        if (fam) add(fam.chil = fam.chil || [], pid);
+      }
+    }
+  }
+
   function parseGEDCOM(raw) {
     if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // strip BOM
 
@@ -353,6 +409,8 @@
       }
     }
 
+    _linkFamilyPointers(individuals, families);
+
     return { individuals, families, otherLines };
   }
 
@@ -501,6 +559,7 @@
     for (const f of (data.families || [])) {
       families.set(f.id, Object.assign(_makeFam(f.id), f));
     }
+    _linkFamilyPointers(individuals, families);
     return { individuals, families };
   }
 
@@ -761,10 +820,11 @@
     for (const f of (data.families || [])) {
       families.set(f.id, Object.assign(_makeFam(f.id), f));
     }
+    _linkFamilyPointers(individuals, families);
     return { individuals, families };
   }
 
   // ─── Public API ──────────────────────────────────────────────────────────────
 
-  return { parseGEDCOM, serializeGEDCOM, exportJSON, importJSON, exportYAML, importYAML };
+  return { parseGEDCOM, serializeGEDCOM, exportJSON, importJSON, exportYAML, importYAML, _linkFamilyPointers };
 });

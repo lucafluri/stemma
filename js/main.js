@@ -13,13 +13,14 @@ import * as Render3dMod from './render-3d.js';
 import * as StatsMod from './stats.js';
 import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
-import { _fullRebuildGraph, _tryRestoreAutosave, showDataUI, updateFileButtons } from './gedcom-io.js';
+import { _downloadBlob, _fullRebuildGraph, _tryRestoreAutosave, showDataUI, updateFileButtons } from './gedcom-io.js';
 import { focusOnPerson, updateFocusUI } from './graph-data.js';
 import { openNodeContextMenu } from './context-menu.js';
 import { closeDetailPanel, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
-import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, refreshTreeLineageColoring, renderPresetList, resetView, schedulePhysicsParams, syncNodeDragBtn, toggleNodeDrag, zoomToFit } from './render-2d.js';
+import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, refreshTreeLineageColoring, renderPresetList, resetView, schedulePhysicsParams, syncLabelStyleUI, syncNodeDragBtn, syncPhysicsUI, toggleNodeDrag, zoomToFit } from './render-2d.js';
 import { _push3DData, apply3DPhysics, build3DTimeline, cull3D, setCull3D, toggleView, update3DNames, update3DSceneInfo, updateViewToggleUI } from './render-3d.js';
+import { exportSettings, importSettings, readSetting, resetSettings, saveSetting, writeSetting } from './settings.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
 
@@ -229,6 +230,12 @@ document.addEventListener('DOMContentLoaded', () => {
   updateFocusUI();
   showDataUI();   // sets the first-run state; the autosave restore above may already have replaced it
 
+  // The physics sliders are restored from storage now, so the panel has to be
+  // put where the settings actually are before any listener is attached —
+  // otherwise it shows the markup's shipped numbers over a differently-tuned
+  // simulation, and the first touch of any slider jumps the layout.
+  syncPhysicsUI();
+
   for (const { sid, nid, key, fmt } of SLIDER_MAP) {
     const slider = document.getElementById(sid);
     const numIn  = document.getElementById(nid);
@@ -242,6 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Coalesced to one apply per frame, and no Y repin: no physics slider
         // changes what the stratification pins depend on.
         schedulePhysicsParams({ repin: false });
+        saveSetting('physics', state.physicsParams);
       });
     }
 
@@ -254,6 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.physicsParams[key] = v;
         if (slider) slider.value = v;
         schedulePhysicsParams({ repin: false });
+        saveSetting('physics', state.physicsParams);
       });
     }
   }
@@ -269,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _syncColorModeLabel();
     colorBySurnameToggle.addEventListener('change', function () {
       state.colorBySurname = this.checked;
-      localStorage.setItem('colorBySurname', state.colorBySurname);
+      saveSetting('colorBySurname', state.colorBySurname);
       _syncColorModeLabel();
       _rerenderNodes();       // 2D circles + labels
       update3DNames();        // rebuild 3D name sprites with new color
@@ -284,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.stratify3D !== 'off' ? 'block' : 'none';
     stratSel.addEventListener('change', function () {
       state.stratify3D = this.value;
-      localStorage.setItem('stratify3D', state.stratify3D);
+      saveSetting('stratify3D', state.stratify3D);
       document.getElementById('time-spread-row').style.display =
         state.stratify3D !== 'off' ? 'block' : 'none';
       if (state.graph3d) {
@@ -302,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateSpread(v) {
     state._3dYHalfSpanAuto = false;   // the reader has an opinion now — stop overriding it on rebuild
     state._3dYHalfSpan = v;
+    saveSetting('timeSpread3D', v);   // ...and it survives the reload, like every other slider
     if (spreadSlider) spreadSlider.value = v;
     if (spreadNum) spreadNum.value = v;
     if (state.graph3d && state.stratify3D !== 'off') {
@@ -324,17 +334,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 3D: show/hide visual timeline axis (independent of Y stratification)
-  document.getElementById('show-timeline-toggle').addEventListener('change', function () {
-    state.showTimeline3D = this.checked;
-    build3DTimeline();
-  });
+  // 3D: show/hide visual timeline axis (independent of Y stratification).
+  // Both of these boxes are written `checked` in the markup and used to be left
+  // that way, so the panel stated the opposite of the setting whenever the
+  // setting was off — which show3DNames is by default on anything under 768px.
+  const tlCb = document.getElementById('show-timeline-toggle');
+  if (tlCb) {
+    tlCb.checked = state.showTimeline3D;
+    tlCb.addEventListener('change', function () {
+      state.showTimeline3D = this.checked;
+      saveSetting('showTimeline3D', state.showTimeline3D);
+      build3DTimeline();
+    });
+  }
 
   // 3D: show names instead of spheres
-  document.getElementById('show-names-3d-toggle').addEventListener('change', function () {
-    state.show3DNames = this.checked;
-    update3DNames();
-  });
+  const namesCb = document.getElementById('show-names-3d-toggle');
+  if (namesCb) {
+    namesCb.checked = state.show3DNames;
+    namesCb.addEventListener('change', function () {
+      state.show3DNames = this.checked;
+      saveSetting('show3DNames', state.show3DNames);
+      update3DNames();
+    });
+  }
 
   // The instanced-rendering switch is persisted, so the box has to be set from
   // the setting rather than from whatever the markup happens to say.
@@ -346,21 +369,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const cullRow = document.getElementById('sc-draw-max-row');
   if (cullRow) cullRow.style.display = state.cull3d ? '' : 'none';
 
-  // Link color pickers
+  // Link and node colour pickers. Both used to change the running app and
+  // nothing else: the value was never written to storage and the input was
+  // never read back from it, so a recoloured chart came back in the shipped
+  // colours on reload while the tree spacing beside it survived.
   for (const key of ['spouse', 'father', 'mother', 'parent']) {
     const el = document.getElementById('lc-' + key);
-    if (el) el.addEventListener('input', function () {
+    if (!el) continue;
+    el.value = state.linkColors[key];
+    el.addEventListener('input', function () {
       state.linkColors[key] = this.value;
+      saveSetting('linkColors', state.linkColors);
       updateLinkColors();
     });
   }
 
-  // Node color pickers
   const NC_MAP = { male: 'nc-male', female: 'nc-female', unknown: 'nc-unknown', fam: 'nc-fam', famDiv: 'nc-fam-div' };
   for (const [key, id] of Object.entries(NC_MAP)) {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', function () {
+    if (!el) continue;
+    el.value = state.nodeColors[key];
+    el.addEventListener('input', function () {
       state.nodeColors[key] = this.value;
+      saveSetting('nodeColors', state.nodeColors);
       updateNodeColors();
     });
   }
@@ -374,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
     famSizeSlider.addEventListener('input', function () {
       state.famNodeSize = parseInt(this.value);
       if (famSizeVal) famSizeVal.textContent = state.famNodeSize;
-      localStorage.setItem('famNodeSize', state.famNodeSize);
+      saveSetting('famNodeSize', state.famNodeSize);
       _applyFamNodeSize();
     });
   }
@@ -391,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lineageColorToggle.checked = state.treeLineageColoring;
     lineageColorToggle.addEventListener('change', function () {
       state.treeLineageColoring = this.checked;
-      localStorage.setItem('treeLineageColoring', state.treeLineageColoring ? '1' : '0');
+      saveSetting('treeLineageColoring', state.treeLineageColoring);
       refreshTreeLineageColoring();
     });
   }
@@ -438,6 +469,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // leaving it is where the value gets tidied back to what actually took.
     num?.addEventListener('blur', () => show(apValue(c)));
   }
+  // The label panel and the perf-log switch, both from the stored setting
+  // rather than from whatever the markup happens to say.
+  syncLabelStyleUI();
+  const perfCb = document.getElementById('perf-log-toggle');
+  if (perfCb) {
+    perfCb.checked = readSetting('perfLog');
+    // constants.js reads this once at module scope (it cannot import settings.js
+    // without a cycle), so the switch only takes effect on the next load. That
+    // is what the tooltip says.
+    perfCb.addEventListener('change', function () { writeSetting('perfLog', this.checked); });
+  }
+
   update3DSceneInfo();
 });
 
@@ -453,7 +496,7 @@ const AP_CONTROLS = [
   { id: 'ap-point',        key: 'pointLight',   dp: 1,    apply: v => { if (state._3dPointLight)   state._3dPointLight.intensity   = v; } },
   { id: 'ap-link-width',   key: 'linkWidth',    dp: 1,    apply: v => state.graph3d?.linkWidth(v) },
   { id: 'ap-node-size',    key: 'nodeRelSize',  dp: 1,    apply: v => state.graph3d?.nodeRelSize(v) },
-  { id: 'ap-font-size',    key: '_3dFontSize',  dp: 0, store: 'top', apply: () => update3DNames() },
+  { id: 'ap-font-size',    key: '_3dFontSize',  dp: 0, store: 'top', setting: 'font3D', apply: () => update3DNames() },
 
   // ── Scene budgets ──
   // How many people the scene builds and how many it draws. Changing what is
@@ -469,8 +512,12 @@ const apBag = c => c.store === 'top' ? state : c.store === 'scene' ? state.scene
 function apValue(c) { return apBag(c)[c.key]; }
 function apSet(c, v) { apBag(c)[c.key] = v; }
 function apPersist(c) {
-  if (c.store === 'scene') localStorage.setItem('scene3d', JSON.stringify(state.scene3d));
-  else localStorage.setItem('appearance3d', JSON.stringify(state._3dAppearance));
+  // `top` is the one control whose value does not live in the _3dAppearance
+  // bag, so writing that bag saved everything about it except itself — the 3D
+  // label size was the one slider in the panel that did not survive a reload.
+  if (c.setting)                saveSetting(c.setting, state[c.key]);
+  else if (c.store === 'scene') saveSetting('scene3d', state.scene3d);
+  else                          saveSetting('appearance3d', state._3dAppearance);
 }
 
 // Rebuilding the scene is a visible pause on a large file, and these arrive one
@@ -487,6 +534,45 @@ function _apRebuildScene() {
     update3DNames();
     updateFocusUI();          // the omitted-people count just changed
   }, 350);
+}
+
+// ── The settings themselves, as a thing you can carry ──────────────────────
+//
+// Everything the app remembers is one JSON object (see js/settings.js). That
+// makes three operations possible that were not before: put it all back, take
+// it to another browser, and bring it from one. A tuned physics/appearance
+// setup is half an hour of slider dragging, and it used to be locked to the
+// machine it was made on.
+
+export function exportSettingsFile() {
+  _downloadBlob(JSON.stringify(exportSettings(), null, 2),
+    'gedcom-vis-settings.json', 'application/json');
+}
+
+export function importSettingsFile(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  input.value = '';   // so choosing the same file twice still fires
+  file.text().then(text => {
+    let bag;
+    try { bag = JSON.parse(text); }
+    catch { alert(t('settings.importBadFile')); return; }
+    const n = importSettings(bag);
+    if (!n) { alert(t('settings.importBadFile')); return; }
+    // Half of these are read once at module scope and half are baked into a
+    // live simulation, so there is no honest way to apply them in place.
+    if (confirm(t('settings.importDone', { n }))) location.reload();
+  });
+}
+
+export function resetAllSettings() {
+  if (!confirm(t('settings.resetConfirm'))) return;
+  // resetSettings() touches only the keys the registry owns — the autosaved
+  // GEDCOM and the geocoded place cache live in the same storage and are not
+  // settings. Losing either to a "put the colours back" click would be
+  // unforgivable.
+  resetSettings();
+  location.reload();
 }
 
 // These labels are built in JS, so data-i18n can't retranslate them.
@@ -535,4 +621,7 @@ queueMicrotask(() => Object.assign(window, ChangesMod, ColorsMod, FindMod, Gedco
     _initTouchDragGuard,
     wasTouchDrag,
     _onLanguageChanged,
+    exportSettingsFile,
+    importSettingsFile,
+    resetAllSettings,
   }));

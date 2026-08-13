@@ -51,7 +51,7 @@ Then open `http://localhost:8000`. The app is a static page; `js/` is loaded as 
 | `styles.css` | all styling |
 | `gedcom.js` | GEDCOM/JSON/YAML parser and serializer |
 | `i18n.js` | German and English strings |
-| `js/` | app modules (state, rendering, import, map, etc.) |
+| `js/` | app modules (state, settings, rendering, import, map, etc.) |
 | `vendor/` | vendored runtime dependencies (d3, three.js, etc.) |
 | `tests/` | plain Node test suites |
 
@@ -93,9 +93,28 @@ Nothing is written without that tick: a geocoder asked for "Freiburg" picks one 
 
 Coordinates already in a loaded file are used as they are, with no lookup. Changing a place name anywhere — the detail panel, an import, the place-name tool — drops that field's coordinates, since they were found for the old spelling.
 
-## Configuration
+## Settings
 
-Set `localStorage.perfLog = '1'` to enable render/rebuild timings in the console.
+Every setting the app has — the surname colours, node and link colours, label
+style, tree spacing, physics, 3D appearance and scene budgets, the view you were
+last in — is declared in one table in `js/settings.js` and stored in
+`localStorage` under its own key. Nothing else in the app reads or writes those
+keys directly.
+
+The **Settings** panel at the bottom of the sidebar is the whole surface of that:
+
+- **Save settings** writes the lot to a JSON file.
+- **Load settings** reads one back. Keys the registry does not own are ignored,
+  so a file from a newer version cannot wedge an older one.
+- **Reset everything** puts every setting back to its default. It clears only
+  the keys the registry owns — the autosaved tree (`gedcomAutosave`) and the
+  geocoded place cache (`placeCoords`) are data, not settings, and are kept.
+- **Render timings in the console** is the old `localStorage.perfLog = '1'`,
+  with a switch. It takes effect on the next load.
+
+A stored value that is missing, unparseable, or outside the range its setting
+declares falls back to the default rather than reaching the renderer — object
+settings key by key, so one bad number does not discard a tuned scene.
 
 ## Deployment
 

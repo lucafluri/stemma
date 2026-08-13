@@ -1,5 +1,6 @@
 import { state } from './state.js';
-import { LINK_COLOR_DEFAULTS, NODE_COLOR_DEFAULTS } from './constants.js';
+import { defaultOf, lsSet, saveSetting } from './settings.js';
+import { DECEASED_OPACITY, GRAPH_BG, LINK_COLOR_DEFAULTS, NODE_COLOR_DEFAULTS } from './constants.js';
 import { escAttr, escHtml } from './gedcom-io.js';
 import { _applyFamNodeSize } from './relations.js';
 import { _rerenderNodes, applyFilter, linkColor, refreshTreeLineageColoring, updateLabelColors, updateLabels } from './render-2d.js';
@@ -48,14 +49,15 @@ export function setSurnameColor(surname, color) {
   } else {
     state.surnameCustomColors.set(surname, color);
   }
-  // Persist
-  debouncedLsWrite('surnameCustomColors', JSON.stringify(Object.fromEntries(state.surnameCustomColors)));
+  saveSetting('surnameCustomColors', Object.fromEntries(state.surnameCustomColors));
 }
 
+// Kept for the non-registry keys (the autosaved GEDCOM, the geocode cache) that
+// are data rather than settings. Registry settings go through saveSetting().
 export function debouncedLsWrite(key, value, delay = 200) {
   clearTimeout(state._lsWriteTimeouts[key]);
   state._lsWriteTimeouts[key] = setTimeout(() => {
-    localStorage.setItem(key, value);
+    lsSet(key, value);
   }, delay);
 }
 
@@ -201,18 +203,69 @@ export function nodeBaseColor(n) {
   return indiColor(n.data);
 }
 
-export function contrastTextColor(hex) {
+function _rgb(hex) {
   const c = (hex || '').replace('#', '');
-  if (c.length !== 6) return '#ffffff';
+  if (c.length !== 6) return null;
   const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? [r, g, b] : null;
+}
+
+export function contrastTextColor(hex) {
+  const rgb = _rgb(hex);
+  if (!rgb) return '#ffffff';
+  const yiq = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000;
   return yiq >= 140 ? '#1a1a1a' : '#ffffff';
 }
 
+/** How opaque a person's box is drawn. The dead are faded; everyone else is
+ *  solid. The single definition of it — see DECEASED_OPACITY. */
+export function nodeOpacity(n) {
+  return (n.type === 'INDI' && n.data?.deceased) ? DECEASED_OPACITY : 1;
+}
+
+/**
+ * The colour a box is *actually* drawn as: its fill mixed with the page behind
+ * it in proportion to how opaque it is.
+ *
+ * This is the difference between the colour the box is set to and the colour a
+ * reader sees, and for a faded box those are not close. A mid-orange surname
+ * (#d08539) reads as light — luminance 147 against a threshold of 140 — so the
+ * label was drawn in near-black. Faded to 0.55 over a near-black page it is
+ * actually luminance 85: dark text on a dark box. That was every dead person in
+ * the file, which in an ordinary genealogy is most of it.
+ */
+export function nodeEffectiveColor(n) {
+  const rgb = _rgb(nodeBaseColor(n));
+  if (!rgb) return '#ffffff';
+  const a = nodeOpacity(n);
+  if (a >= 1) return nodeBaseColor(n);
+  const bg = _rgb(GRAPH_BG) || [0, 0, 0];
+  const mix = rgb.map((v, i) => Math.round(v * a + bg[i] * (1 - a)));
+  return '#' + mix.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/** The label colour for a node — contrast against what is on screen, not
+ *  against the fill the box was assigned. */
+export function nodeTextColor(n) {
+  return contrastTextColor(nodeEffectiveColor(n));
+}
+
+// Same question as familyNamesOf() above, answered without building the Set.
+//
+// It reads as the poorer version of `[...familyNamesOf(indi)].some(...)` and is
+// here because of where it is called from: isIndiVisible(), which the filter
+// runs once per person *and* once per family member, so a 50,000-person file
+// asks this upwards of 130,000 times per filter change. The Set form allocated
+// a Set and two intermediate arrays on each of those. Same answer, no garbage.
 export function hasEnabledFamilyName(indi) {
-  const names = familyNamesOf(indi);
-  if (!names.size) return state.surnameEnabled.get(null) !== false;
-  return [...names].some(name => state.surnameEnabled.get(name) !== false);
+  const surn   = (indi.surn || '').trim();
+  const maiden = (indi.maidenName || '').trim();
+  if (!surn && !maiden) return state.surnameEnabled.get(null) !== false;
+  if (surn && state.surnameEnabled.get(surn) !== false) return true;
+  // The `!== surn` is what the Set was doing: a woman shown under her birth
+  // name has both fields set to it, and that is one family, not two.
+  if (maiden && maiden !== surn && state.surnameEnabled.get(maiden) !== false) return true;
+  return false;
 }
 
 export function updateSurnameShownCount() {
@@ -333,6 +386,7 @@ export function updateLinkColors() {
 
 export function resetLinkColors() {
   Object.assign(state.linkColors, LINK_COLOR_DEFAULTS);
+  saveSetting('linkColors', state.linkColors);
   // Sync pickers
   for (const [key, val] of Object.entries(LINK_COLOR_DEFAULTS)) {
     const el = document.getElementById('lc-' + key);
@@ -347,13 +401,17 @@ export function updateNodeColors() {
 
 export function resetNodeColors() {
   Object.assign(state.nodeColors, NODE_COLOR_DEFAULTS);
+  saveSetting('nodeColors', state.nodeColors);
   const map = { male: 'nc-male', female: 'nc-female', unknown: 'nc-unknown', fam: 'nc-fam', famDiv: 'nc-fam-div' };
   for (const [key, id] of Object.entries(map)) {
     const el = document.getElementById(id);
     if (el) el.value = NODE_COLOR_DEFAULTS[key];
   }
-  state.famNodeSize = 1;
-  localStorage.setItem('famNodeSize', state.famNodeSize);
+  // 7, not 1: 1 is a marker a single pixel across. "Reset" put the panel in a
+  // state a fresh install has never been in, and the slider gave no hint that
+  // the number it was showing was not the default.
+  state.famNodeSize = defaultOf('famNodeSize');
+  saveSetting('famNodeSize', state.famNodeSize);
   const famSizeSlider = document.getElementById('fam-node-size');
   const famSizeVal    = document.getElementById('fam-node-size-val');
   if (famSizeSlider) famSizeSlider.value = state.famNodeSize;

@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { TREE_SPACING_DEFAULTS } from './constants.js';
+import { saveSetting } from './settings.js';
 import { _defaultFocusRoot, _refocus, computeActiveData, computeGenerationDepths, estimateBirthYear } from './graph-data.js';
 import { row } from './panels.js';
 import { NODE_BOX_H, NODE_BOX_RX, NODE_BOX_W, onSimEnd, refreshTreeLineageColoring, tick } from './render-2d.js';
@@ -58,7 +59,7 @@ export function setTreeSpacing(key, v) {
   const val = Math.max(lo, Math.min(10, parseFloat(v)));
   if (!Number.isFinite(val) || !(key in state.treeSpacing)) return;
   state.treeSpacing[key] = val;
-  localStorage.setItem('treeSpacing', JSON.stringify(state.treeSpacing));
+  saveSetting('treeSpacing', state.treeSpacing);
   applyTreeSpacing();
   _syncTreeSpacingInput(key, val);
   if (useTreeLayout()) applyTreeLayout();
@@ -75,7 +76,7 @@ function _syncTreeSpacingInput(key, val) {
 
 export function resetTreeSpacing() {
   Object.assign(state.treeSpacing, TREE_SPACING_DEFAULTS);
-  localStorage.setItem('treeSpacing', JSON.stringify(state.treeSpacing));
+  saveSetting('treeSpacing', state.treeSpacing);
   applyTreeSpacing();
   for (const key of Object.keys(TREE_SPACING_DEFAULTS)) _syncTreeSpacingInput(key, state.treeSpacing[key]);
   if (useTreeLayout()) applyTreeLayout();
@@ -1029,7 +1030,7 @@ export function revealHidden(ids) {
 
 export function setTreeLayout(on) {
   state.treeLayout = !!on;
-  localStorage.setItem('treeLayout', state.treeLayout ? '1' : '0');
+  saveSetting('treeLayout', state.treeLayout);
   // The chart no longer needs a subject to be picked for it — without one it
   // draws everybody, anchored on the most-connected person. It also decides
   // which relatives a focus means, so both views rebuild.
@@ -1128,11 +1129,17 @@ export function frameTreeChart() {
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth, H = svgEl.clientHeight;
 
-  const xs = state.nodes.map(n => n.x).filter(v => v != null);
-  const ys = state.nodes.map(n => n.y).filter(v => v != null);
-  if (!xs.length) return;
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  // One pass over the nodes, skipping any coordinate that is not a real
+  // number — see zoomToFit(), which had the same NaN-poisons-the-extent trap.
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of state.nodes) {
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+    if (n.x < x0) x0 = n.x;
+    if (n.x > x1) x1 = n.x;
+    if (n.y < y0) y0 = n.y;
+    if (n.y > y1) y1 = n.y;
+  }
+  if (x0 === Infinity) return;
 
   const fit = Math.min(W / ((x1 - x0) + 160), H / ((y1 - y0) + 160), 1.4);
   const legible = fit >= TREE_MIN_LEGIBLE_SCALE;

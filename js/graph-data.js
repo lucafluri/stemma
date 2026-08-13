@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { saveSetting } from './settings.js';
 import { hasEnabledFamilyName, updateSurnameShownCount } from './colors.js';
 import { _autoMarkDeceasedByAge, _fullRebuildGraph } from './gedcom-io.js';
 import { row } from './panels.js';
@@ -565,10 +566,16 @@ export function famAvgYear(fam) {
 
 export const GEN_GAP = 28;  // average generation gap in years
 
+// The max here is walked rather than spread: `Math.max(...depths.values())` is
+// one argument per person, which a 50k-person file overflows the call stack
+// with. Inline rather than via the shared minMax() helper because the test
+// suite lifts these two functions out by source text and runs them with no
+// module scope around them.
 export function generationNumbers() {
   if (state._genNumbers) return state._genNumbers;
   const depths = computeGenerationDepths();
-  const max = depths.size ? Math.max(...depths.values()) : 0;
+  let max = 0;
+  for (const d of depths.values()) if (d > max) max = d;
   state._genNumbers = new Map();
   for (const [id, d] of depths) state._genNumbers.set(id, max - d);
   return state._genNumbers;
@@ -576,7 +583,10 @@ export function generationNumbers() {
 
 export function generationCount() {
   const g = generationNumbers();
-  return g.size ? Math.max(...g.values()) + 1 : 0;
+  if (!g.size) return 0;
+  let max = 0;
+  for (const v of g.values()) if (v > max) max = v;
+  return max + 1;
 }
 
 export function personAgeYears(id) {
@@ -701,14 +711,24 @@ export function estimateBirthYear(n) {
 }
 
 export function computeActiveData() {
-  const visIds = new Set(state.allNodes.filter(n => isNodeVisible(n)).map(n => n.id));
-
   // Focus is a filter on the data, not a property of the renderer: pick a
   // person and both views show that person's relatives. It used to be applied
   // only in 2D, so switching to 3D silently threw the selection away and
   // returned the whole file — the one thing a filter must not do.
+  //
+  // It is computed *first* and tested first because it is the cheaper of the
+  // two questions by a wide margin, and on a large file it is the one that
+  // answers "no" almost every time. isNodeVisible() walks a family's members
+  // and their spouses; a Set lookup does not. Testing the whole file for
+  // visibility and then throwing away all but the focused hundred — which is
+  // what this did — paid the expensive question 70,000 times to keep 120
+  // answers. Neither test has side effects, so the order is free to choose.
   const focusIds = computeFocusSet();
-  if (focusIds) for (const id of [...visIds]) if (!focusIds.has(id)) visIds.delete(id);
+  const visIds = new Set();
+  for (const n of state.allNodes) {
+    if (focusIds && !focusIds.has(n.id)) continue;
+    if (isNodeVisible(n)) visIds.add(n.id);
+  }
 
   state.nodes = state.allNodes.filter(n => visIds.has(n.id));
   state.links = state.allLinks
@@ -768,7 +788,7 @@ export function setCousinDegree(v) {
   const max = maxCousinDegree();
   state.cousinDegree = Math.max(0, Math.min(max, parseInt(v)));
   if (!Number.isFinite(state.cousinDegree)) state.cousinDegree = 1;
-  localStorage.setItem('cousinDegree', state.cousinDegree);
+  saveSetting('cousinDegree', state.cousinDegree);
   const out = document.getElementById('cousin-degree-val');
   if (out) out.textContent = cousinLevelLabel(state.cousinDegree, max);
   if (state.focusRootId) _refocus();
@@ -797,7 +817,7 @@ export function updateCousinDegreeUI() {
 
 export function setIncludeSpouseFamily(on) {
   state.includeSpouseFamily = !!on;
-  localStorage.setItem('includeSpouseFamily', state.includeSpouseFamily ? '1' : '0');
+  saveSetting('includeSpouseFamily', state.includeSpouseFamily);
   if (state.focusRootId) _refocus();
 }
 
@@ -807,7 +827,7 @@ export function maxFocusLimit() {
 
 export function setFocusLimit(v) {
   state.focusLimit = Math.max(10, parseInt(v) || 120);
-  localStorage.setItem('focusLimit', state.focusLimit);
+  saveSetting('focusLimit', state.focusLimit);
   const out = document.getElementById('focus-limit-val');
   if (out) out.textContent = state.focusLimit;
   if (state.focusRootId) _refocus();

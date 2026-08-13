@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { nodeOpacity } from './colors.js';
 import { refreshNodeColors } from './colors.js';
 import { escHtml, escJs } from './gedcom-io.js';
 import { linkBaseOpacity } from './render-2d.js';
@@ -75,7 +76,7 @@ export function applyHighlight() {
 
   state.nodeSel.each(function(d) {
     const inHL = !hasHL || state.hlSet.has(d.id);
-    const baseOp = (d.type === 'INDI' && d.data.deceased) ? 0.5 : 1.0;
+    const baseOp = nodeOpacity(d);
     d3.select(this).selectAll('rect.indi-box, polygon')
       .attr('opacity', inHL ? baseOp : 0.07)
       .attr('filter', inHL && d.id === state.selectedIndiId ? 'url(#glow)' : null);

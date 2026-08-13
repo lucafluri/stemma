@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { familyNamesOf } from './colors.js';
 import { escAttr, escHtml, escJs } from './gedcom-io.js';
+import { arrMax, arrMin, minMax } from './constants.js';
 import { computeGenerationDepths } from './graph-data.js';
 import { showIndiDetail } from './panels.js';
 import { collectAncestors, collectDescendants } from './relations.js';
@@ -27,8 +28,10 @@ const median = a => {
   const h = s.length >> 1;
   return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
 };
-const max = a => a.length ? Math.max(...a) : null;
-const min = a => a.length ? Math.min(...a) : null;
+// Not Math.max(...a): these run over whole-file arrays, which spread onto the
+// call stack and throw RangeError once a file is big enough. See minMax().
+const max = arrMax;
+const min = arrMin;
 
 const topN = (counts, n) => [...counts.entries()]
   .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -179,7 +182,8 @@ export function computeStats() {
   // ── Time span and generations ──
   const birthYears = people.map(p => p.birthYear || year(p.birth?.date)).filter(Boolean);
   const depths = computeGenerationDepths();
-  const generations = depths.size ? (Math.max(...depths.values()) - Math.min(...depths.values()) + 1) : 0;
+  const depthSpan = minMax(depths.values());
+  const generations = depthSpan ? depthSpan.max - depthSpan.min + 1 : 0;
 
   // ── Spread of the tree ──
   // How many people carry the tree forward versus how many are leaves. A
@@ -205,8 +209,8 @@ export function computeStats() {
     // Every decade in the span, not only the ones with a birth — a gap decade
     // is itself the finding (a war, an emigration), and dropping it would
     // silently pull its neighbours together and hide exactly that.
-    const d0 = Math.floor(Math.min(...birthYears) / 10) * 10;
-    const d1 = Math.floor(Math.max(...birthYears) / 10) * 10;
+    const d0 = Math.floor(min(birthYears) / 10) * 10;
+    const d1 = Math.floor(max(birthYears) / 10) * 10;
     for (let d = d0; d <= d1; d += 10) timeline.push({ decade: d, n: decadeCounts.get(d) || 0 });
   }
 
@@ -338,10 +342,10 @@ export function computeStats() {
     },
 
     span: {
-      earliest: birthYears.length ? Math.min(...birthYears) : null,
-      latest:   birthYears.length ? Math.max(...birthYears) : null,
+      earliest: min(birthYears),
+      latest:   max(birthYears),
       generations,
-      firstMarriage: marriageYears.length ? Math.min(...marriageYears) : null,
+      firstMarriage: min(marriageYears),
     },
 
     families2: {
@@ -431,7 +435,7 @@ function statList(label, entries, kind) {
  * who was actually born that decade. */
 function statTimeline(label, timeline) {
   if (timeline.length < 2) return '';
-  const maxN = Math.max(...timeline.map(d => d.n), 1);
+  const maxN = Math.max(arrMax(timeline.map(d => d.n)) ?? 1, 1);
   // A label on every column collides past a dozen or so decades; thin them
   // out to roughly eight, spread evenly, rather than truncating the axis.
   const labelEvery = Math.max(1, Math.round(timeline.length / 8));

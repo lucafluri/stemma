@@ -2,7 +2,7 @@
 // Everything here used to be a top-level `let` in the original monolithic
 // app.js; call sites elsewhere now read/write it as `state.<name>` instead of
 // a bare identifier.
-import { LINK_COLOR_DEFAULTS, MAP_DOT_COLOR_DEFAULT, NODE_COLOR_DEFAULTS, PHYSICS_DEFAULTS, SCENE_DEFAULTS, TREE_SPACING_DEFAULTS } from './constants.js';
+import { readSetting, resetSettings } from './settings.js';
 
 export const state = {
   individuals: new Map(),   // id -> indi object
@@ -39,97 +39,76 @@ export const state = {
   surnameColors: new Map(),   // surname -> color string
   surnameEnabled: new Map(),   // surname -> bool
   surnameCustomColors: new Map(), // surname -> user-picked color (persisted)
-  colorBySurname: true,        // global toggle for surname coloring
+  colorBySurname: readSetting('colorBySurname'),   // global toggle for surname coloring
   _surnameColorCache: new Map(), // memoized hash colors
-  labelStyle: {
-  textColor: '#cccccc',
-  textOpacity: 1.0,  // Fully opaque
-  fontSize: 13,      // screen px — updateLabels divides by the zoom to keep it constant
-  fontWeight: 'normal',
-  bgEnabled: false,
-  bgColor: '#0a0a0a',
-  bgOpacity: 0.7
-},
+  labelStyle: readSetting('labelStyle'),
   _lsWriteTimeouts: {},
   _gedcomDirty: false,
   _autosaveTimer: null,
   _autosaveCaptured: false,   // the current edits have been written to the autosave slot
-  physicsParams: { ...PHYSICS_DEFAULTS },
+  physicsParams: readSetting('physics'),
   graph3d: null,
   _g3dById: null,     // Map<id, node> over what the 3D scene actually holds
   _3dOmitted: 0,      // people the scene budget left out, reported in the focus panel
-  scene3d: { ...SCENE_DEFAULTS },   // the budgets above, as the reader has set them
+  scene3d: readSetting('scene3d'),   // the budgets above, as the reader has set them
   // Draw the 3D scene as three instanced layers instead of one Three.js object
   // per node and per link. Strictly faster, but it replaces the library's own
   // rendering and picking, so the switch stays reachable — off falls back to
   // the per-object path, which is still there and still works.
-  instanced3d: localStorage.getItem('instanced3d') !== '0',
+  instanced3d: readSetting('instanced3d'),
   // Draw only the nearest `scene3d.drawMax` nodes and hide the rest. This
   // existed because every node was its own draw call and a few thousand of them
   // was all a frame could carry. With the instanced renderer the whole scene is
   // three draw calls whatever its size, so the reason is gone and the default is
   // off — everything in the scene is drawn. The switch stays for the case the
   // budget still helps: a weak GPU, or a scene pushed far past what fits.
-  cull3d: localStorage.getItem('cull3d') === '1',
-  currentView: localStorage.getItem('viewMode') === '2d' ? '2d' : '3d',   // '2d' | '3d'
+  cull3d: readSetting('cull3d'),
+  currentView: readSetting('viewMode'),   // '2d' | '3d'
   focusRootId: null,
-  focusLimit: parseInt(localStorage.getItem('focusLimit')) || 120,
-  cousinDegree: parseInt(localStorage.getItem('cousinDegree')),
+  focusLimit: readSetting('focusLimit'),
+  cousinDegree: readSetting('cousinDegree'),
   genRange: null,   // { min, max } | null
-  treeLayout: localStorage.getItem('treeLayout') !== '0',
+  treeLayout: readSetting('treeLayout'),
   // Tree-layout focus normally stops at the focus person's blood relatives —
   // a spouse gets a box but their own parents/siblings are not walked. This
   // pulls those in too, one hop, when the reader wants the in-laws on screen.
-  includeSpouseFamily: localStorage.getItem('includeSpouseFamily') === '1',
+  includeSpouseFamily: readSetting('includeSpouseFamily'),
   _lineageGen: null,   // id -> chart row, filled by computeLineageSet()
   _treeBusY: null,   // FAM id, "fam>child" and "parent~child" -> y of the sibling bar
   _treeOmitted: null,  // [{x, y, n, anchor:{x,y}}] — "+N" cut-branch markers
   _treeLineageSide: null,  // id -> 'father' | 'mother', for the optional side colouring
-  treeLineageColoring: localStorage.getItem('treeLineageColoring') === '1',
+  treeLineageColoring: readSetting('treeLineageColoring'),
   _revealed: new Set(),
   _birthYearRange: null,  // { min, max } saved for 3D stratification
   _genRange3D: null,  // { min, max } generation depth, same purpose
   _3dMousePos: { x: 0, y: 0 },
   _3dGestureDragged: false,  // the pointer travelled, so the click that follows is not a tap
-  stratify3D: localStorage.getItem('stratify3D') || 'time',
-  showTimeline3D: true,   // show the visual timeline axis (spine + rings)
-  // Labels default off on a phone. Every one of them is its own canvas texture,
-  // and a hundred of them on a 390px screen is an unreadable mat of boxes that
-  // also costs more texture memory than the whole rest of the scene. The toggle
-  // is still there for anyone who wants them.
-  show3DNames: typeof window === 'undefined' || window.innerWidth > 768,
+  stratify3D: readSetting('stratify3D'),
+  showTimeline3D: readSetting('showTimeline3D'),   // the visual timeline axis (spine + rings)
+  show3DNames: readSetting('show3DNames'),
   _nodeDragEnabled: false, // node dragging disabled by default
   _timeline3DObj: null,   // THREE.Group holding timeline meshes in the 3D scene
-  _3dYHalfSpan: 750,   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
-  _3dFontSize: 18,    // name label font size in 3D view
+  _3dYHalfSpan: readSetting('timeSpread3D') ?? 750,   // half-range of Y axis in 3D sim units (older→+half, newer→-half)
+  _3dFontSize: readSetting('font3D'),    // name label font size in 3D view
   _orbitControls3d: null,  // OrbitControls instance (replaces TrackballControls)
   _orbitTargetAnim: null,  // { from, to, start, duration } for smooth orbit target transition
   _orbitTrackNodeId: null,  // node id whose live position the orbit target tracks
-  _3dAppearance: {
-  bgColor:     '#000000',
-  nodeOpacity: 1.0,   // 1.00 from screenshot
-  linkOpacity: 1.0,   // 1.00 from screenshot
-  ambientLight: 0.6,  // 0.6 from screenshot
-  pointLight:  0.5,   // 0.5 from screenshot
-  linkWidth:   3.1,   // 3.1 from screenshot
-  nodeRelSize: 5.5,   // 5.5 from screenshot
-},
+  _3dAppearance: readSetting('appearance3d'),
   _3dAmbientLight: null,
   _3dPointLight: null,
   _isNewRecord: false, // true while editing a freshly created INDI/FAM
-  linkColors: { ...LINK_COLOR_DEFAULTS },
-  nodeColors: { ...NODE_COLOR_DEFAULTS },
+  linkColors: readSetting('linkColors'),
+  nodeColors: readSetting('nodeColors'),
   // 7 is the reference size the 3D sphere volume is scaled against (see
-  // _famNodeVal); `|| 1` here meant a fresh install started at 1 — a marker one
-  // pixel across — and made 0 (the slider's own minimum) unselectable.
-  famNodeSize: Number.isFinite(parseInt(localStorage.getItem('famNodeSize')))
-    ? parseInt(localStorage.getItem('famNodeSize')) : 7,
-  mapDotColor: localStorage.getItem('mapDotColor') || MAP_DOT_COLOR_DEFAULT,
-  treeSpacing: { ...TREE_SPACING_DEFAULTS },
+  // _famNodeVal).
+  famNodeSize: readSetting('famNodeSize'),
+  mapDotColor: readSetting('mapDotColor'),
+  treeSpacing: readSetting('treeSpacing'),
   // Stays true until the user drags the 3D axis-spread slider by hand — until
   // then the default tracks how many generations are actually on screen
-  // instead of sitting at one fixed number regardless of tree size.
-  _3dYHalfSpanAuto: true,
+  // instead of sitting at one fixed number regardless of tree size. A stored
+  // timeSpread3D *is* a value set by hand, so restoring one turns auto off.
+  _3dYHalfSpanAuto: readSetting('timeSpread3D') == null,
   _panelSwipe: null,  // { startY, startTranslate }
   _touchDragged: false,
   _touchStartPos: null,
@@ -172,36 +151,15 @@ export const state = {
   _acIdx: -1,    // keyboard-selected index
 };
 
-// One-time initialization from persisted (localStorage) settings.
-const _lsSurnameColors = localStorage.getItem('surnameCustomColors');
-if (_lsSurnameColors) {
-  try {
-    const parsed = JSON.parse(_lsSurnameColors);
-    state.surnameCustomColors = new Map(Object.entries(parsed));
-  } catch (e) { /* ignore */ }
+// The one setting whose live form is a Map rather than a plain object. The
+// registry stores and validates it like any other object setting; the
+// conversion lives here so nothing downstream has to know that.
+state.surnameCustomColors = new Map(Object.entries(readSetting('surnameCustomColors')));
+
+/** Put every setting back to its default and reload — the only honest way to
+ *  apply a wholesale change, since half of these are read once at module scope
+ *  and half are baked into a live simulation. */
+export function reloadWithDefaults() {
+  resetSettings();
+  location.reload();
 }
-state.colorBySurname = localStorage.getItem('colorBySurname') !== 'false'; // default true
-if (!Number.isFinite(state.cousinDegree)) state.cousinDegree = 1;
-
-// Every other display setting survives a reload; these did not, so a tuned 3D
-// scene reset itself every time the page was opened.
-try {
-  const saved = JSON.parse(localStorage.getItem('appearance3d') || '{}');
-  Object.assign(state._3dAppearance, saved);
-} catch (e) { /* ignore */ }
-
-try {
-  const saved = JSON.parse(localStorage.getItem('treeSpacing') || '{}');
-  Object.assign(state.treeSpacing, saved);
-} catch (e) { /* ignore */ }
-
-try {
-  const saved = JSON.parse(localStorage.getItem('scene3d') || '{}');
-  // Only finite positive numbers: a corrupted or hand-edited entry that put a
-  // zero or a string in here would empty the 3D scene with no way back short of
-  // clearing site data.
-  for (const k of Object.keys(SCENE_DEFAULTS)) {
-    const v = Number(saved[k]);
-    if (Number.isFinite(v) && v >= 0) state.scene3d[k] = v;
-  }
-} catch (e) { /* ignore */ }

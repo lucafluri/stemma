@@ -1,5 +1,22 @@
 // Shared numeric/style constants used by more than one module.
 
+// `Math.max(...arr)` passes every element as a separate argument, and every
+// engine caps how many a call can take — V8 gives up somewhere above 100k with
+// a RangeError. That is not a theoretical limit here: this app is built for
+// files of 50,000 people and reduces over "every birth year", "every generation
+// depth", "every x coordinate". One of those arrays crossing the line takes the
+// whole load down. These walk the iterable instead, so size stops mattering.
+export function minMax(iter) {
+  let min = Infinity, max = -Infinity;
+  for (const v of iter) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return min === Infinity ? null : { min, max };
+}
+export function arrMin(iter) { return minMax(iter)?.min ?? null; }
+export function arrMax(iter) { return minMax(iter)?.max ?? null; }
+
 // Render and rebuild timings. These used to be bare console.time calls, so every
 // repaint wrote a dozen lines into the console of anyone actually using the app —
 // and on a big tree that is a repaint per interaction. Kept rather than deleted,
@@ -125,6 +142,47 @@ export const NODE_COLOR_DEFAULTS = {
 // water — the previous default (a soft blue at 45% opacity) all but vanished
 // over water and over the tile grid's own blue road shields.
 export const MAP_DOT_COLOR_DEFAULT = '#ff7a1a';
+
+// How the name and the birth–death line inside each 2D box are drawn.
+//
+// This bag used to carry four more keys — textColor, bgEnabled, bgColor,
+// bgOpacity — that nothing read. They were left over from a design where the
+// label floated over the chart on its own background; it lives inside the box
+// now, so the colour is computed for contrast against the box fill
+// (contrastTextColor) and a background behind it would be a rectangle drawn on
+// top of a rectangle. Settings that do nothing are worse than no setting: they
+// are a control the reader turns and is told nothing by.
+// A dead person's box is drawn faded. One number, because it used to be two
+// that disagreed: the initial draw used 0.55 and applyHighlight() — which runs
+// on any selection or highlight — repainted the same boxes at 0.5, so a chart
+// changed appearance slightly the first time anything was clicked.
+export const DECEASED_OPACITY = 0.55;
+
+// What the chart is drawn on: --c-0 in styles.css. Needed as a number here
+// because a faded box is part box colour and part whatever is behind it, and
+// that mixture is what the label has to stay legible against.
+export const GRAPH_BG = '#07090c';
+
+export const LABEL_STYLE_DEFAULTS = {
+  // In graph units, so it scales with the box rather than with the screen.
+  // NODE_BOX_H is 30 and holds two lines, which is what caps this at 14.
+  fontSize:    10,
+  textOpacity: 1.0,
+  fontWeight:  'normal',
+};
+export const LABEL_FONT_MAX = 14;
+
+// The 3D scene's look. Same story as LABEL_STYLE_DEFAULTS: these were inline
+// on state with nothing to reset them to.
+export const APPEARANCE_3D_DEFAULTS = {
+  bgColor:      '#000000',
+  nodeOpacity:  1.0,
+  linkOpacity:  1.0,
+  ambientLight: 0.6,
+  pointLight:   0.5,
+  linkWidth:    3.1,
+  nodeRelSize:  5.5,
+};
 
 export const TREE_SPACING_DEFAULTS = {
   row:   1,   // vertical distance between generations

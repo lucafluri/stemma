@@ -30,12 +30,20 @@ const ORDER = [
   'find.test.js',
   'import-ui.test.js',
   'autosave.test.js',
+  'settings.test.js',
   'scale.test.js',
   'wiring.test.js'
 ];
 
-const present = new Set(fs.readdirSync(__dirname).filter(f => f.endsWith('.test.js')));
-const files = ORDER.filter(f => present.has(f));
+// ORDER is a preference, not a whitelist. It used to be the latter, which meant
+// a new suite dropped into this directory was silently never run — the worst
+// possible failure mode for a test runner, since it reports success.
+const present = fs.readdirSync(__dirname).filter(f => f.endsWith('.test.js'));
+const known = new Set(ORDER);
+const files = [
+  ...ORDER.filter(f => present.includes(f)),
+  ...present.filter(f => !known.has(f)).sort(),
+];
 
 let failed = 0;
 for (const file of files) {

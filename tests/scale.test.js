@@ -372,6 +372,74 @@ function bigGedcom(n) {
     assert.ok(checked > 0, 'the fixture should contain couples');
   });
 
+  console.log('\nrange over a whole file');
+
+  await test('the min/max of a file-sized array does not overflow the stack', async () => {
+    // `Math.max(...arr)` puts one argument on the call stack per element and
+    // throws RangeError past about 100k. Every "earliest birth year", "deepest
+    // generation", "leftmost node" in the app reduces over exactly such an
+    // array, on files this app is explicitly built to open.
+    const { minMax, arrMin, arrMax } = await import(pathToFileURL(path.join(__dirname, '..', 'js', 'constants.js')).href);
+    const big = Array.from({ length: 200000 }, (_, i) => i % 1000);
+    assert.throws(() => Math.max(...big), RangeError, 'the spread form should still be the trap it was');
+    assert.deepStrictEqual(minMax(big), { min: 0, max: 999 });
+    assert.strictEqual(arrMin(big), 0);
+    assert.strictEqual(arrMax(big), 999);
+  });
+
+  await test('an empty range is null rather than ±Infinity', async () => {
+    const { minMax, arrMin, arrMax } = await import(pathToFileURL(path.join(__dirname, '..', 'js', 'constants.js')).href);
+    assert.strictEqual(minMax([]), null);
+    assert.strictEqual(arrMin([]), null);
+    assert.strictEqual(arrMax([]), null);
+  });
+
+  console.log('\nlabel contrast against a faded box');
+
+  const colorsMod = () => import(url('colors.js'));
+
+  await test('a dead person on a light box gets light text, not near-black', async () => {
+    // A dead person's box is drawn faded, so the colour a reader sees is part
+    // box and part page. Judging contrast against the *assigned* fill said
+    // "this is light, use dark text" for a mid-orange surname — and then drew
+    // it at 55% over a near-black page, where it is dark. Dark text on a dark
+    // box, for every dead person in the file, which in a genealogy is most of
+    // it.
+    const { nodeTextColor, nodeEffectiveColor, contrastTextColor } = await colorsMod();
+    state.colorBySurname = false;
+    state.nodeColors.male = '#d08539';   // luminance 147: "light", on its own
+
+    const dead = { type: 'INDI', id: 'X', data: { surn: '', sex: 'M', deceased: true } };
+    const live = { type: 'INDI', id: 'Y', data: { surn: '', sex: 'M', deceased: false } };
+
+    assert.strictEqual(contrastTextColor('#d08539'), '#1a1a1a',
+      'undimmed, this box really does want dark text');
+    assert.strictEqual(nodeTextColor(live), '#1a1a1a', 'and a living person still gets it');
+    assert.strictEqual(nodeTextColor(dead), '#ffffff',
+      'but faded towards the page it needs light text');
+    assert.notStrictEqual(nodeEffectiveColor(dead), nodeEffectiveColor(live),
+      'the two are not drawn as the same colour');
+  });
+
+  await test('a fully opaque box is still judged on its own colour', async () => {
+    const { nodeEffectiveColor } = await colorsMod();
+    state.colorBySurname = false;
+    state.nodeColors.female = '#e0608a';
+    assert.strictEqual(
+      nodeEffectiveColor({ type: 'INDI', id: 'Z', data: { surn: '', sex: 'F', deceased: false } }),
+      '#e0608a');
+  });
+
+  await test('the faded opacity has one definition, not two', async () => {
+    // It was 0.55 at the initial draw and 0.5 in applyHighlight(), so the chart
+    // shifted slightly the first time anything was clicked.
+    const { nodeOpacity } = await colorsMod();
+    const { DECEASED_OPACITY } = await import(url('constants.js'));
+    assert.strictEqual(nodeOpacity({ type: 'INDI', data: { deceased: true } }), DECEASED_OPACITY);
+    assert.strictEqual(nodeOpacity({ type: 'INDI', data: { deceased: false } }), 1);
+    assert.strictEqual(nodeOpacity({ type: 'FAM', data: {} }), 1, 'a family marker is never faded');
+  });
+
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

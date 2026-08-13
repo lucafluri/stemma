@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { lsGet, lsRemove, lsSet } from './settings.js';
 import { AUTO_FOCUS_THRESHOLD, perf } from './constants.js';
 import { buildSurnameColorMap, buildSurnameList } from './colors.js';
 import { DECEASED_AGE_THRESHOLD, _defaultFocusRoot, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
@@ -22,7 +23,7 @@ export function _setDirty(v) {
   for (const id of ['dl-btn', 'save-file-btn']) {
     document.getElementById(id)?.classList.toggle('has-unsaved', v);
   }
-  if (v) _autosave(); else { localStorage.removeItem('gedcomAutosave'); state._autosaveCaptured = false; }
+  if (v) _autosave(); else { lsRemove('gedcomAutosave'); state._autosaveCaptured = false; }
 }
 
 // Leaving with edits that exist nowhere but this tab is worth interrupting for.
@@ -37,22 +38,23 @@ window.addEventListener('beforeunload', e => {
 export function _autosave() {
   clearTimeout(state._autosaveTimer);
   state._autosaveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem('gedcomAutosave', JSON.stringify({
-        filename: window._gedcomFilename || '',
-        ts: Date.now(),
-        ged: serializeGEDCOM()
-      }));
-      state._autosaveCaptured = true;
-    } catch (e) { /* quota exceeded — silently skip autosave */ }
+    // lsSet reports whether the write landed rather than throwing. A false here
+    // is quota (or storage switched off entirely), and leaving _autosaveCaptured
+    // alone is what keeps the beforeunload warning up: the edits really are only
+    // in this tab.
+    if (lsSet('gedcomAutosave', JSON.stringify({
+      filename: window._gedcomFilename || '',
+      ts: Date.now(),
+      ged: serializeGEDCOM(),
+    }))) state._autosaveCaptured = true;
   }, 2000);
 }
 
 export function _tryRestoreAutosave() {
-  const raw = localStorage.getItem('gedcomAutosave');
+  const raw = lsGet('gedcomAutosave');
   if (!raw) return;
   let data;
-  try { data = JSON.parse(raw); } catch (e) { localStorage.removeItem('gedcomAutosave'); return; }
+  try { data = JSON.parse(raw); } catch (e) { lsRemove('gedcomAutosave'); return; }
   const when = new Date(data.ts).toLocaleString(currentLang === 'de' ? 'de-CH' : 'en-US');
   const label = data.filename || t('autosave.unnamed');
 
@@ -73,7 +75,7 @@ export function _tryRestoreAutosave() {
   };
   discardBtn.onclick = () => {
     bar.style.display = 'none';
-    localStorage.removeItem('gedcomAutosave');
+    lsRemove('gedcomAutosave');
   };
 }
 

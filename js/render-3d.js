@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { saveSetting } from './settings.js';
 import { physicsScale } from './constants.js';
 import { seedScene3D } from './seed-3d.js';
 import { buildInstanced3D, instancedActive, pickInstanced3D, teardownInstanced3D, updateInstanced3D } from './render-3d-instanced.js';
@@ -19,7 +20,7 @@ export function setView(view) {
 
   const changed = view !== state.currentView;
   state.currentView = view;
-  localStorage.setItem('viewMode', view);
+  saveSetting('viewMode', view);
   updateViewToggleUI();               // swaps containers + 3D-only sidebar rows
 
   if (view === '3d') {
@@ -220,7 +221,7 @@ export function _push3DData() {
  */
 export function setInstanced3D(on) {
   state.instanced3d = !!on;
-  localStorage.setItem('instanced3d', state.instanced3d ? '1' : '0');
+  saveSetting('instanced3d', state.instanced3d);
   const cb = document.getElementById('instanced-3d-toggle');
   if (cb) cb.checked = state.instanced3d;
   if (!state.graph3d) return;
@@ -238,7 +239,7 @@ export function setInstanced3D(on) {
  */
 export function setCull3D(on) {
   state.cull3d = !!on;
-  localStorage.setItem('cull3d', state.cull3d ? '1' : '0');
+  saveSetting('cull3d', state.cull3d);
   const cb = document.getElementById('cull-3d-toggle');
   if (cb) cb.checked = state.cull3d;
   // The "drawn at once" budget only means something while culling is on.

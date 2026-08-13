@@ -274,6 +274,38 @@
       <button class="sidebar-btn" onclick="resetTreeSpacing()" data-i18n="treeSpacing.reset">Zurücksetzen</button>
     </details>
 
+    <!-- How the name inside each 2D box is drawn. state.labelStyle was read by
+         the renderer and had no control anywhere; these three are the keys that
+         actually change what is on screen. -->
+    <details id="label-style-panel">
+      <summary data-i18n="labelStyle.title">Beschriftung (2D)</summary>
+      <div class="phys-hint" data-i18n="labelStyle.titleHint">Wie der Name im Kästchen gezeichnet wird.</div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="labelStyle.fontSize">Schriftgrösse</span>
+          <input type="number" class="phys-num" id="label-font-size-num" min="7" max="14" step="0.5" value="10"
+                 oninput="setLabelStyle('fontSize', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="label-font-size" min="7" max="14" step="0.5" value="10"
+               oninput="setLabelStyle('fontSize', this.value)">
+      </div>
+      <div class="phys-row" style="padding:4px 0">
+        <div class="phys-row-head">
+          <span class="phys-label" data-i18n="labelStyle.opacity">Deckkraft</span>
+          <input type="number" class="phys-num" id="label-opacity-num" min="0.1" max="1" step="0.05" value="1.00"
+                 oninput="setLabelStyle('textOpacity', this.value)">
+        </div>
+        <input type="range" class="phys-slider" id="label-opacity" min="0.1" max="1" step="0.05" value="1"
+               oninput="setLabelStyle('textOpacity', this.value)">
+      </div>
+      <label class="sidebar-toggle" style="border-top:none;padding-top:2px">
+        <input type="checkbox" id="label-bold-toggle"
+               onchange="setLabelStyle('fontWeight', this.checked ? 'bold' : 'normal')">
+        <span data-i18n="labelStyle.bold">Fett</span>
+      </label>
+      <button class="sidebar-btn" onclick="resetLabelStyle()" data-i18n="labelStyle.reset">Zurücksetzen</button>
+    </details>
+
     <details id="appearance-panel">
       <summary data-i18n="appearance.title">3D Darstellung</summary>
       <div class="link-color-row">
@@ -491,6 +523,26 @@
           <button class="preset-save-btn" onclick="savePreset()" data-i18n-title="physics.savePreset" title="Aktuelle Einstellungen speichern">&#x1F4BE;</button>
         </div>
       </div>
+    </details>
+
+    <!-- Every setting in the app is one JSON object (js/settings.js), which is
+         what makes these three possible at all: save it, carry it, put it back. -->
+    <details id="settings-panel">
+      <summary data-i18n="settings.title">Einstellungen</summary>
+      <div class="phys-hint" data-i18n="settings.hint">Alle Einstellungen dieser App liegen im Browser.</div>
+      <button class="sidebar-btn" onclick="exportSettingsFile()">&#x1F4E5;
+        <span data-i18n="settings.export">Einstellungen sichern</span></button>
+      <button class="sidebar-btn" onclick="document.getElementById('settings-import-input').click()">&#x1F4C2;
+        <span data-i18n="settings.import">Einstellungen laden</span></button>
+      <input type="file" id="settings-import-input" accept="application/json,.json" style="display:none"
+             onchange="importSettingsFile(this)">
+      <label class="sidebar-toggle" style="border-top:none;padding-top:6px"
+             data-i18n-title="settings.perfLogTitle"
+             title="Schreibt bei jedem Neuzeichnen Zeitmessungen in die Browser-Konsole.">
+        <input type="checkbox" id="perf-log-toggle">
+        <span data-i18n="settings.perfLog">Render-Zeiten in der Konsole</span>
+      </label>
+      <button class="sidebar-btn" onclick="resetAllSettings()" data-i18n="settings.reset">Alles zurücksetzen</button>
     </details>
   </div>
 

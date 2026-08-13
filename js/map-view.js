@@ -21,11 +21,12 @@
  * over an empty background.
  */
 
-import { MAP_DOT_COLOR_DEFAULT } from './constants.js';
+import { MAP_DOT_COLOR_DEFAULT, minMax } from './constants.js';
 import { _setDirty, escHtml, escJs } from './gedcom-io.js';
 import { showIndiDetail } from './panels.js';
 import { placeFields, placeKey } from './places.js';
 import { zoomToNode } from './render-2d.js';
+import { lsGet, saveSetting } from './settings.js';
 import { state } from './state.js';
 
 const TILE_URL = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
@@ -50,7 +51,7 @@ export function placeCoords() {
   if (_coords) return _coords;
   _coords = new Map();
   try {
-    for (const [k, v] of Object.entries(JSON.parse(localStorage.getItem(COORD_LS) || '{}'))) {
+    for (const [k, v] of Object.entries(JSON.parse(lsGet(COORD_LS) || '{}'))) {
       _coords.set(k, v);
     }
   } catch (e) { /* corrupt cache is an empty cache */ }
@@ -135,9 +136,9 @@ export function collectMapEvents() {
 
 /** The year range the events cover, or null when none of them is dated. */
 export function eventYearRange(events) {
-  const years = events.map(e => e.year).filter(y => y != null);
-  if (!years.length) return null;
-  return { min: Math.min(...years), max: Math.max(...years) };
+  return minMax(function* () {
+    for (const e of events) if (e.year != null) yield e.year;
+  }());
 }
 
 /**
@@ -376,13 +377,13 @@ export function onMapFilterChange() {
  * is a preference rather than a fixed choice. */
 export function setMapDotColor(color) {
   state.mapDotColor = color;
-  localStorage.setItem('mapDotColor', color);
+  saveSetting('mapDotColor', color);
   if (M.transform) _draw(); else renderMap();
 }
 
 export function resetMapDotColor() {
   state.mapDotColor = MAP_DOT_COLOR_DEFAULT;
-  localStorage.setItem('mapDotColor', state.mapDotColor);
+  saveSetting('mapDotColor', state.mapDotColor);
   const el = _el('map-dot-color');
   if (el) el.value = state.mapDotColor;
   if (M.transform) _draw(); else renderMap();
@@ -591,8 +592,8 @@ function _fitTransform(located, w, h) {
   if (!located.length) return { k: k0, x: (w - k0) / 2, y: (h - k0) / 2 };
 
   const pts = located.map(g => project(g.ll[1], g.ll[0]));
-  const x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0]));
-  const y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1]));
+  const { min: x0, max: x1 } = minMax(pts.map(p => p[0]));
+  const { min: y0, max: y1 } = minMax(pts.map(p => p[1]));
   // A single place has no extent at all, and dividing by it gives Infinity —
   // fall back to a street-level scale so one located place is still readable.
   const pad = 60;

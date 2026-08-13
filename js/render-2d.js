@@ -1,6 +1,7 @@
+import { lsGet, lsSet, saveSetting } from './settings.js';
 import { state } from './state.js';
-import { contrastTextColor, nodeBaseColor, refreshNodeColors } from './colors.js';
-import { PHYSICS_DEFAULTS, perf, physicsScale } from './constants.js';
+import { nodeBaseColor, nodeOpacity, nodeTextColor, refreshNodeColors } from './colors.js';
+import { LABEL_FONT_MAX, LABEL_STYLE_DEFAULTS, PHYSICS_DEFAULTS, arrMax, minMax, perf, physicsScale } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
 import { wasTouchDrag } from './main.js';
@@ -17,6 +18,16 @@ export const NODE_BOX_H  = 30;   // two lines: name, then the years under it
 export const NODE_BOX_RX = 5;
 
 export const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, not the screen
+
+/** The size the name line is actually drawn at: NODE_BOX_FONT is the default,
+ *  state.labelStyle.fontSize is what the reader has set it to. Clamped here
+ *  rather than at the control, so a hand-edited setting cannot push text
+ *  through the bottom of the box. */
+export function labelFontSize() {
+  const v = Number(state.labelStyle?.fontSize);
+  if (!Number.isFinite(v)) return NODE_BOX_FONT;
+  return Math.min(LABEL_FONT_MAX, Math.max(LABEL_MIN_FONT, v));
+}
 
 export const NODE_YEAR_FONT = 8;
 
@@ -141,7 +152,7 @@ function _joinNodes(nodes) {
     .attr('stroke', d => _lineageStroke(d))
     .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8)
     .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
-    .attr('opacity', d => d.data.deceased ? 0.55 : 1);
+    .attr('opacity', d => nodeOpacity(d));
 
   // Ring the focus person — otherwise they're just another box in the middle
   // of the tree that was built around them.
@@ -174,9 +185,9 @@ function _joinNodes(nodes) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('dy', '-4px')
-    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
+    .attr('fill', d => nodeTextColor(d))
     .attr('fill-opacity', state.labelStyle.textOpacity)
-    .attr('font-size', NODE_BOX_FONT + 'px')
+    .attr('font-size', labelFontSize() + 'px')
     .attr('font-weight', state.labelStyle.fontWeight || 'normal')
     .attr('pointer-events', 'none')
     .text(d => nodeLabelText(d.data));
@@ -190,7 +201,7 @@ function _joinNodes(nodes) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('dy', '7px')
-    .attr('fill', d => contrastTextColor(nodeBaseColor(d)))
+    .attr('fill', d => nodeTextColor(d))
     .attr('fill-opacity', state.labelStyle.textOpacity * 0.75)
     .attr('font-size', NODE_YEAR_FONT + 'px')
     .attr('pointer-events', 'none')
@@ -262,7 +273,7 @@ function _paintOverview() {
     const h = n.type === 'INDI' ? bh : fs;
     if (x < -w || y < -h || x > W + w || y > H + h) continue;
     ctx.globalAlpha = hasHL && !state.hlSet.has(n.id) ? 0.07
-                    : (n.type === 'INDI' && n.data.deceased) ? 0.55 : 1;
+                    : nodeOpacity(n);
     ctx.fillStyle = nodeBaseColor(n);
     ctx.fillRect(x - w / 2, y - h / 2, w, h);
   }
@@ -608,12 +619,12 @@ export function updateLabelColors() {
   if (!state.labelSel || state.labelSel.empty()) return;
   const weight = state.labelStyle.fontWeight || 'normal';
   state.labelSel.each(function(d) {
-    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
+    this.setAttribute('fill',         nodeTextColor(d));
     this.setAttribute('fill-opacity', state.labelStyle.textOpacity);
     this.setAttribute('font-weight',  weight);
   });
   state.yearSel?.each(function(d) {
-    this.setAttribute('fill',         contrastTextColor(nodeBaseColor(d)));
+    this.setAttribute('fill',         nodeTextColor(d));
     this.setAttribute('fill-opacity', state.labelStyle.textOpacity * 0.75);
   });
 }
@@ -634,7 +645,7 @@ export function updateLabels(force = false) {
   // couple of thousand elements: this ran on every animation frame of a pan and
   // rewrote the text, size and display of every label on the chart, which is
   // what made dragging a large tree crawl.
-  const sig = `${hidden}|${yearsHidden}|${weight}`;
+  const sig = `${hidden}|${yearsHidden}|${weight}|${labelFontSize()}`;
   if (!force && state._labelSig === sig) return;
   state._labelSig = sig;
 
@@ -648,9 +659,9 @@ export function updateLabels(force = false) {
     // from a cache on every pass, as this did, is a DOM write per label to put
     // back the value already there.
     const full = nodeLabelText(d.data);
-    const key = full + '\\0' + weight;
+    const key = full + '\\0' + weight + '\\0' + labelFontSize();
     if (this.__fitKey !== key) {
-      _fitLabel(this, full, NODE_BOX_W - 10, NODE_BOX_FONT);
+      _fitLabel(this, full, NODE_BOX_W - 10, labelFontSize());
       this.__fitKey = key;
     }
   });
@@ -665,16 +676,17 @@ export function buildAndRunSimulation(opts = {}) {
   // the other way of stacking them. The 3D view reads both regardless of
   // which 2D layout is active, so this has to run even when the tree layout
   // is about to make the rest of this function a no-op below.
-  const birthYears = state.nodes
-    .filter(n => n.type === 'INDI' && n.data.birthYear)
-    .map(n => n.data.birthYear);
-  const minBY = birthYears.length ? Math.min(...birthYears) : 1750;
-  const maxBY = birthYears.length ? Math.max(...birthYears) : 2025;
+  const byRange = minMax(function* () {
+    for (const n of state.nodes) if (n.type === 'INDI' && n.data.birthYear) yield n.data.birthYear;
+  }());
+  const minBY = byRange ? byRange.min : 1750;
+  const maxBY = byRange ? byRange.max : 2025;
   state._birthYearRange = { min: minBY, max: maxBY };
 
   const gd = computeGenerationDepths();
-  const gs = state.nodes.filter(n => n.type === 'INDI' && gd.has(n.id)).map(n => gd.get(n.id));
-  state._genRange3D = gs.length ? { min: Math.min(...gs), max: Math.max(...gs) } : null;
+  state._genRange3D = minMax(function* () {
+    for (const n of state.nodes) if (n.type === 'INDI' && gd.has(n.id)) yield gd.get(n.id);
+  }());
 
   // The 3D axis-spread default used to be one fixed number regardless of how
   // many generations were actually on screen — cramped for a 12-generation
@@ -722,14 +734,17 @@ export function buildAndRunSimulation(opts = {}) {
   // range (e.g. a couple with a marriage date but no birth dates on file), so
   // widen the range once more to include where FAM nodes will actually be
   // pinned -- otherwise they'd be stratified past either end of the timeline.
-  const famYears = state.nodes
-    .filter(n => n.type === 'FAM')
-    .map(n => famAvgYear(n.data))
-    .filter(yr => yr != null);
-  if (famYears.length) {
+  const famRange = minMax(function* () {
+    for (const n of state.nodes) {
+      if (n.type !== 'FAM') continue;
+      const yr = famAvgYear(n.data);
+      if (yr != null) yield yr;
+    }
+  }());
+  if (famRange) {
     state._birthYearRange = {
-      min: Math.min(state._birthYearRange.min, ...famYears),
-      max: Math.max(state._birthYearRange.max, ...famYears),
+      min: Math.min(state._birthYearRange.min, famRange.min),
+      max: Math.max(state._birthYearRange.max, famRange.max),
     };
   }
 
@@ -757,7 +772,7 @@ export function buildAndRunSimulation(opts = {}) {
   perf.start('[sim] computeGenerationDepths');
   const genDepths = computeGenerationDepths();
   perf.end('[sim] computeGenerationDepths');
-  const maxGen = genDepths.size ? Math.max(...genDepths.values()) : 0;
+  const maxGen = arrMax(genDepths.values()) ?? 0;
 
   const genToY = gen => maxGen === 0 ? H / 2 : 30 + (gen / maxGen) * (H - 60);
 
@@ -975,6 +990,7 @@ export function autoSettle() {
 
 export function resetPhysics() {
   state.physicsParams = { ...PHYSICS_DEFAULTS };
+  saveSetting('physics', state.physicsParams);
   syncPhysicsUI();
   applyPhysicsParams();
 }
@@ -1007,12 +1023,20 @@ export function zoomToFit() {
   const svgEl = document.getElementById('graph-svg');
   const W = svgEl.clientWidth, H = svgEl.clientHeight;
 
-  const xs = state.nodes.map(n => n.x).filter(v => v != null);
-  const ys = state.nodes.map(n => n.y).filter(v => v != null);
-  if (!xs.length) return;
+  // One pass, and only over coordinates that are actually numbers. A single NaN
+  // slipping in from a degenerate layout used to poison the min/max and hand the
+  // zoom a NaN transform, which d3 applies without complaint — the chart simply
+  // vanished with nothing in the console to say why.
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of state.nodes) {
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+    if (n.x < x0) x0 = n.x;
+    if (n.x > x1) x1 = n.x;
+    if (n.y < y0) y0 = n.y;
+    if (n.y > y1) y1 = n.y;
+  }
+  if (x0 === Infinity) return;
 
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
   const dw = x1 - x0 || 1, dh = y1 - y0 || 1;
 
   const scale = Math.min(W / (dw + 60), H / (dh + 60), 3) * 0.92;
@@ -1170,7 +1194,7 @@ export function presetLabel(name) {
 }
 
 export function getUserPresets() {
-  try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); }
+  try { return JSON.parse(lsGet(PRESETS_KEY) || '{}'); }
   catch { return {}; }
 }
 
@@ -1179,7 +1203,7 @@ export function savePreset() {
   if (!name) return;
   const all = getUserPresets();
   all[name] = { ...state.physicsParams };
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(all));
+  lsSet(PRESETS_KEY, JSON.stringify(all));
   document.getElementById('preset-name-input').value = '';
   renderPresetList();
 }
@@ -1187,13 +1211,14 @@ export function savePreset() {
 export function deletePreset(name) {
   const all = getUserPresets();
   delete all[name];
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(all));
+  lsSet(PRESETS_KEY, JSON.stringify(all));
   renderPresetList();
 }
 
 export function applyPreset(name, builtin) {
   const src = builtin ? BUILTIN_PRESETS[name] : getUserPresets()[name];
   state.physicsParams = { ...PHYSICS_DEFAULTS, ...src };
+  saveSetting('physics', state.physicsParams);
   syncPhysicsUI();
   applyPhysicsParams();
 }
@@ -1376,6 +1401,37 @@ export function syncPhysicsUI() {
     if (slider) slider.value = v;
     if (numIn) numIn.value = fmt(v);
   }
+}
+
+/** The three things about a 2D name label a reader can change. Applied to what
+ *  is already on screen and written straight through to storage — every other
+ *  panel in the app does both, and this one used to do neither: labelStyle was
+ *  read by the renderer and had no control anywhere in the UI. */
+export function setLabelStyle(key, value) {
+  if (!(key in LABEL_STYLE_DEFAULTS)) return;
+  state.labelStyle[key] = key === 'fontWeight' ? value : Number(value);
+  saveSetting('labelStyle', state.labelStyle);
+  syncLabelStyleUI();
+  updateLabelColors();
+  updateLabels(true);   // forced: the fit cache is keyed on the size that just changed
+}
+
+export function resetLabelStyle() {
+  Object.assign(state.labelStyle, LABEL_STYLE_DEFAULTS);
+  saveSetting('labelStyle', state.labelStyle);
+  syncLabelStyleUI();
+  updateLabelColors();
+  updateLabels(true);
+}
+
+export function syncLabelStyleUI() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('label-font-size', labelFontSize());
+  set('label-font-size-num', labelFontSize());
+  set('label-opacity', state.labelStyle.textOpacity);
+  set('label-opacity-num', Number(state.labelStyle.textOpacity).toFixed(2));
+  const bold = document.getElementById('label-bold-toggle');
+  if (bold) bold.checked = state.labelStyle.fontWeight === 'bold';
 }
 
 export function resetView() {
