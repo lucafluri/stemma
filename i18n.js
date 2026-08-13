@@ -3,8 +3,8 @@
 const I18N = {
   de: {
     app: {
-      title: 'Stammbaum Visualisierung',
-      name: 'Stammbaum',
+      title: 'Stemma',
+      name: 'Stemma',
     },
     topbar: {
       menu: 'Menü öffnen',
@@ -788,8 +788,8 @@ const I18N = {
   },
   en: {
     app: {
-      title: 'Family Tree Visualization',
-      name: 'Family Tree',
+      title: 'Stemma',
+      name: 'Stemma',
     },
     topbar: {
       menu: 'Open menu',

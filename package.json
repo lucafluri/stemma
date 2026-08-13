@@ -1,7 +1,7 @@
 {
-  "name": "gedcom_vis",
+  "name": "stemma",
   "version": "1.0.0",
-  "description": "",
+  "description": "Browser-based family tree viewer and editor for GEDCOM files",
   "main": "js/main.js",
   "scripts": {
     "test": "node tests/run-all.cjs"

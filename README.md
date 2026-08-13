@@ -1,4 +1,6 @@
-# Stammbaum Visualisierung
+<img src="favicon.svg" alt="" width="48" height="48">
+
+# Stemma
 
 Browser-based family tree viewer and editor for GEDCOM files. Load a `.ged`, JSON or YAML file, explore it as a 2D chart, force graph or orbitable 3D graph, edit people and families, save back.
 
@@ -7,8 +9,8 @@ Everything runs locally. Nothing is uploaded except the two opt-in cases under [
 ## Run
 
 ```bash
-git clone https://github.com/lucafluri/gedcom_vis
-cd gedcom_vis
+git clone https://github.com/lucafluri/stemma
+cd stemma
 python -m http.server 8000
 ```
 

@@ -95,6 +95,8 @@ button { transition: background var(--t), color var(--t), border-color var(--t),
   box-shadow: var(--sh-1);
 }
 
+#topbar h1 img { vertical-align: -4px; }
+
 #topbar h1 {
   font-size: 15px;
   font-weight: 600;
