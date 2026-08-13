@@ -30,6 +30,12 @@ Narrow the chart to one person plus relatives out to a chosen generation and cou
 
 ![Focus view](screenshots/focus_view.png)
 
+### Map
+
+Every birth, death and marriage that names a place, sized by event count. Sweep the year range to watch the family move, filter by event type, click a place for its events. Place names are only sent to OpenStreetMap when you press **Look up places**.
+
+![Map](screenshots/map.png)
+
 ### Relationship finder
 
 Pick two people, get the relationship label and the connecting path, then highlight that path in the chart.
@@ -47,7 +53,6 @@ Counts, lifespans, family sizes, births per decade, most descendants and data co
 | | |
 |---|---|
 | Views | 2D chart, 2D force graph, 3D graph |
-| Map | births, deaths and marriages plotted on a slippy map with a year range to sweep |
 | Editing | click a person or family; add parents, spouses, children |
 | Changes | field-level log of every edit since load or last save, which is exactly what a save writes |
 | Import | GEDCOM/JSON/YAML into an empty tree or merged with review; plain text and scanned charts (OCR via Tesseract) |
