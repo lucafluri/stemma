@@ -1,11 +1,10 @@
 # Stammbaum Visualisierung
 
-A browser-based family tree viewer and editor for GEDCOM files.
-Load a `.ged` (or JSON/YAML) file, view it as a 2D chart or force graph, or as an orbitable 3D graph, then edit people, families and relationships and save back.
+Browser-based family tree viewer and editor for GEDCOM files. Load a `.ged`, JSON or YAML file, explore it as a 2D chart, force graph or orbitable 3D graph, edit people and families, save back.
 
-Your data stays in the browser — nothing is uploaded, with two opt-in exceptions listed under [Network use](#network-use).
+Everything runs locally. Nothing is uploaded except the two opt-in cases under [Network use](#network-use).
 
-## Running it
+## Run
 
 ```bash
 git clone https://github.com/lucafluri/gedcom_vis
@@ -13,19 +12,46 @@ cd gedcom_vis
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`. The app is a static page; `js/` is loaded as native ES modules, so opening `index.html` directly via `file://` will not work.
+Open `http://localhost:8000`. `js/` loads as native ES modules, so `file://` will not work.
+
+## Views
+
+### 3D graph
+
+Whole tree as a force graph, stacked by generation. Press `V` to switch between 2D and 3D.
+
+![3D view](screenshots/3D_view.png)
+
+### 2D chart with focus
+
+Narrow the chart to one person plus relatives out to a chosen generation and cousin distance. The detail panel edits the record and adds parents, spouses and children.
+
+![Focus view](screenshots/focus_view.png)
+
+### Relationship finder
+
+Pick two people, get the relationship label and the connecting path, then highlight that path in the chart.
+
+![Relationship finder](screenshots/relationship.png)
+
+### Statistics
+
+Counts, lifespans, family sizes, births per decade, most descendants and data coverage. Every figure drills down to the people behind it.
+
+![Statistics](screenshots/statistics.png)
 
 ## Features
 
-- **Two views** — press `V` to switch between 2D (classical chart or force graph) and 3D.
-- **Map** — every birth, death and marriage that names a place, plotted on a slippy map with a year range you can sweep to watch the family move. Click a place for its events, click an event for the person. Looked-up coordinates can be ticked and written into the records, where they export as standard `PLAC`/`MAP`/`LATI`/`LONG` (and as `map: [lat, lon]` in JSON/YAML).
-- **Focus mode** — narrow the chart to one person and relatives out to a chosen distance.
-- **Auto-deceased** — people born (or estimated) more than 110 years ago are marked deceased on save.
-- **Editing** — click a person or family to edit; add parents, spouses and children.
-- **Changes** — a field-level log of everything edited since the file was opened or last saved, which is exactly what a save will write. Follows the tree while it is open.
-- **Import** — load GEDCOM/JSON/YAML into an empty tree, or review changes before merging into an existing tree. Plain text and scanned-chart images (OCR via Tesseract) are also supported.
-- **Export** — save as GEDCOM, JSON or YAML; the 2D chart also exports as PNG or SVG.
-- **Working file** — in Chromium-based browsers you can reopen the last file and save back over it.
+| | |
+|---|---|
+| Views | 2D chart, 2D force graph, 3D graph |
+| Map | births, deaths and marriages plotted on a slippy map with a year range to sweep |
+| Editing | click a person or family; add parents, spouses, children |
+| Changes | field-level log of every edit since load or last save, which is exactly what a save writes |
+| Import | GEDCOM/JSON/YAML into an empty tree or merged with review; plain text and scanned charts (OCR via Tesseract) |
+| Export | GEDCOM, JSON, YAML; the 2D chart also as PNG or SVG |
+| Working file | Chromium only: reopen the last file and save back over it |
+| Auto-deceased | people born or estimated more than 110 years ago are marked deceased on save |
 
 ## Keyboard
 
@@ -43,16 +69,16 @@ Then open `http://localhost:8000`. The app is a static page; `js/` is loaded as 
 | `0` `+` `-` | reset zoom, zoom in, zoom out |
 | `Esc` | close the detail panel |
 
-## Project layout
+## Layout
 
-| File / folder | Purpose |
+| Path | Purpose |
 |---|---|
 | `index.html` | the UI |
 | `styles.css` | all styling |
 | `gedcom.js` | GEDCOM/JSON/YAML parser and serializer |
 | `i18n.js` | German and English strings |
-| `js/` | app modules (state, settings, rendering, import, map, etc.) |
-| `vendor/` | vendored runtime dependencies (d3, three.js, etc.) |
+| `js/` | app modules (state, settings, rendering, import, map, stats, relations) |
+| `vendor/` | vendored runtime dependencies (d3, three.js) |
 | `tests/` | plain Node test suites |
 
 ## Tests
@@ -64,23 +90,23 @@ npm test
 
 ## Browser support
 
-- **Chromium / Firefox / Safari** run the app.
-- **Working file (reopen + save in place)** requires the File System Access API — Chromium only. Elsewhere the buttons hide and saving falls back to a download.
-- **3D on mobile** reduces resolution and disables name labels by default.
+- Chromium, Firefox and Safari run the app.
+- Working file (reopen and save in place) needs the File System Access API, so Chromium only. Elsewhere the buttons hide and saving falls back to a download.
+- 3D on mobile reduces resolution and disables name labels by default.
 
 ## Network use
 
-The app runs offline apart from three things, none of which happen on load:
+Offline apart from three things, none of which happen on load:
 
 | What | When | What is sent |
 |---|---|---|
-| OpenStreetMap tiles | opening the map | the map viewport — nothing from your file |
-| Nominatim geocoding | pressing “Look up places” in the map, and confirming | one place name per request, at most one per second |
-| Tesseract.js | importing an image for OCR | nothing — the library is fetched, the image is read locally |
+| OpenStreetMap tiles | opening the map | the map viewport, nothing from your file |
+| Nominatim geocoding | pressing "Look up places" and confirming | one place name per request, at most one per second |
+| Tesseract.js | importing an image for OCR | nothing; the library is fetched, the image is read locally |
 
-Looked-up coordinates are cached in `localStorage` under `placeCoords`, so each spelling is asked for once. Without a connection the map still draws its circles, just over an empty background.
+Looked-up coordinates are cached in `localStorage` under `placeCoords`, so each spelling is asked once. Without a connection the map still draws its circles over an empty background.
 
-The cache is per-browser. To make coordinates part of the tree itself, tick the places in the map's list and press **Write coordinates** — that writes `map: [lat, lon]` onto each matching birth, death and marriage, which GEDCOM exports as the standard subtree:
+That cache is per browser. To put coordinates into the tree itself, tick places in the map list and press **Write coordinates**. This writes `map: [lat, lon]` onto each matching birth, death and marriage, exported as the standard GEDCOM subtree:
 
 ```
 2 PLAC Bern
@@ -89,33 +115,23 @@ The cache is per-browser. To make coordinates part of the tree itself, tick the 
 4 LONG E7.447447
 ```
 
-Nothing is written without that tick: a geocoder asked for "Freiburg" picks one of two countries and does not mention that it had a choice. When it picks wrong, open the place in the map's list — it shows where it currently sits, takes a better query ("Fribourg, Switzerland"), lists the candidates to choose from, and can remove the coordinates again.
+Nothing is written without that tick. A geocoder asked for "Freiburg" picks one of two countries and does not mention it had a choice. When it picks wrong, open the place in the map list: it shows where the place currently sits, takes a better query ("Fribourg, Switzerland"), lists candidates, and can remove the coordinates again.
 
-Coordinates already in a loaded file are used as they are, with no lookup. Changing a place name anywhere — the detail panel, an import, the place-name tool — drops that field's coordinates, since they were found for the old spelling.
+Coordinates already present in a loaded file are used as-is, with no lookup. Changing a place name anywhere (detail panel, import, place-name tool) drops that field's coordinates, since they were found for the old spelling.
 
 ## Settings
 
-Every setting the app has — the surname colours, node and link colours, label
-style, tree spacing, physics, 3D appearance and scene budgets, the view you were
-last in — is declared in one table in `js/settings.js` and stored in
-`localStorage` under its own key. Nothing else in the app reads or writes those
-keys directly.
+Every setting (surname colours, node and link colours, label style, tree spacing, physics, 3D appearance and scene budgets, last view) is declared in one table in `js/settings.js` and stored in `localStorage` under its own key. Nothing else reads or writes those keys.
 
-The **Settings** panel at the bottom of the sidebar is the whole surface of that:
+The **Settings** panel at the bottom of the sidebar is the whole surface:
 
-- **Save settings** writes the lot to a JSON file.
-- **Load settings** reads one back. Keys the registry does not own are ignored,
-  so a file from a newer version cannot wedge an older one.
-- **Reset everything** puts every setting back to its default. It clears only
-  the keys the registry owns — the autosaved tree (`gedcomAutosave`) and the
-  geocoded place cache (`placeCoords`) are data, not settings, and are kept.
-- **Render timings in the console** is the old `localStorage.perfLog = '1'`,
-  with a switch. It takes effect on the next load.
+- **Save settings** writes them all to a JSON file.
+- **Load settings** reads one back. Unknown keys are ignored, so a file from a newer version cannot wedge an older one.
+- **Reset everything** restores defaults. It clears only registry-owned keys; the autosaved tree (`gedcomAutosave`) and the geocoded place cache (`placeCoords`) are data, not settings, and are kept.
+- **Render timings in the console** replaces `localStorage.perfLog = '1'`. Takes effect on next load.
 
-A stored value that is missing, unparseable, or outside the range its setting
-declares falls back to the default rather than reaching the renderer — object
-settings key by key, so one bad number does not discard a tuned scene.
+A stored value that is missing, unparseable or out of range falls back to its default rather than reaching the renderer. Object settings fall back key by key, so one bad number does not discard a tuned scene.
 
 ## Deployment
 
-GitHub Pages deploys the repository as-is from `master` (see `.github/workflows/static.yml`).
+GitHub Pages serves the repository as-is from `master` (see `.github/workflows/static.yml`).
