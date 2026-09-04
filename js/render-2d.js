@@ -1039,7 +1039,12 @@ export function zoomToFit() {
 
   const dw = x1 - x0 || 1, dh = y1 - y0 || 1;
 
-  const scale = Math.min(W / (dw + 60), H / (dh + 60), 3) * 0.92;
+  // Both margins are in screen pixels, so on a phone they cost a fifth of the
+  // width between them and the graph comes out framed into the middle of the
+  // screen. Same fix as fit3D() and frameTreeChart(): scale them to what there
+  // actually is.
+  const pad = Math.min(60, W * 0.08, H * 0.08);
+  const scale = Math.min(W / (dw + pad), H / (dh + pad), 3) * (W < 560 ? 0.97 : 0.92);
   const tx = W / 2 - scale * ((x0 + x1) / 2);
   const ty = H / 2 - scale * ((y0 + y1) / 2);
 

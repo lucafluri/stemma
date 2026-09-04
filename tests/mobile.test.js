@@ -21,6 +21,7 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { setupDom } = require('./test-setup.js');
@@ -71,7 +72,9 @@ function stubGraph3D() {
 
   const { state }  = await import(url('state.js'));
   const render3d   = await import(url('render-3d.js'));
+  const gedcomIo   = await import(url('gedcom-io.js'));
   const { _isMobile } = await import(url('panels.js'));
+  const { placeTopbarMenu } = await import(url('constants.js'));
 
   console.log('\n_isMobile (the switch everything below hangs off)');
 
@@ -188,6 +191,58 @@ function stubGraph3D() {
     catch { reached = true; }
     assert.ok(reached, 'with no drag recorded the click must fall through to the panel');
     state.graph3d = null;
+  });
+
+  console.log('\nTop-bar menus');
+
+  await test('a bar menu is pinned under the bar on a phone and left alone elsewhere', async () => {
+    // The Tools menu is anchored to a wrapper partway along the bar and is
+    // wider than the room beside it, so on a phone the stylesheet pins it to
+    // the viewport and this supplies the one measurement CSS cannot take: how
+    // many rows the bar has wrapped to.
+    const dd = global.document.getElementById('tools-dropdown');
+    const bar = global.document.getElementById('topbar');
+    bar.getBoundingClientRect = () => ({ bottom: 96 });
+
+    setWidth(390);
+    placeTopbarMenu(dd);
+    assert.strictEqual(dd.style.top, '100px', 'should clear the bottom of the wrapped bar');
+
+    // On a desktop the menu hangs off its wrapper again, and a `top` left over
+    // from a narrow window would hold it at the wrong height.
+    setWidth(1280);
+    placeTopbarMenu(dd);
+    assert.strictEqual(dd.style.top, '', 'the inline override has to be given back');
+  });
+
+  console.log('\nIcon-only top bar');
+
+  await test('every button the icon-only rule strips still has a label to strip', async () => {
+    // The ≤480px rule hides these labels so nine buttons fit one row. It used
+    // to select `span[data-i18n]`, and three of these buttons have their
+    // contents rewritten at runtime by code that does not put that attribute
+    // back — so the rule quietly stopped applying to them the moment a file was
+    // loaded, which is exactly when they appear. The class is the contract
+    // between the stylesheet and those rewrites; this checks both ends of it.
+    const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    const ids = [...css.matchAll(/#([a-z-]+) \.btn-label/g)].map(m => m[1]);
+    assert.ok(ids.length >= 8, `expected the rule to name the top-bar buttons, found ${ids.length}`);
+
+    // The two rewrites, run as the app runs them.
+    setWidth(390);
+    state.currentView = '2d';
+    render3d.updateViewToggleUI();
+    global.window.showOpenFilePicker = () => {};   // makes fileAccessSupported() true
+    state._fileHandle = { name: 'tree.ged' };
+    await gedcomIo.updateFileButtons();
+
+    for (const id of ids) {
+      const btn = global.document.getElementById(id);
+      assert.ok(btn, `#${id} is named by the rule but is not in the markup`);
+      assert.ok(btn.querySelector('.btn-label'),
+        `#${id} has no .btn-label, so the icon-only rule leaves its text on screen`);
+    }
+    state._fileHandle = null;
   });
 
   console.log(`\n${'─'.repeat(50)}`);

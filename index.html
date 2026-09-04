@@ -15,13 +15,13 @@
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" data-i18n-label="topbar.menu" aria-label="Menü öffnen">&#9776;</button>
   <h1><img src="favicon.svg" alt="" width="18" height="18"> <span data-i18n="app.name">Stemma</span></h1>
-  <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; <span data-i18n="topbar.import">Import</span></button>
-  <button id="open-recent-btn" onclick="openRecentFile()" style="display:none" data-i18n-title="topbar.openFileTitle" title="Datei öffnen">&#x1F4C1; <span data-i18n="topbar.openFile">Datei öffnen</span></button>
+  <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; <span class="btn-label" data-i18n="topbar.import">Import</span></button>
+  <button id="open-recent-btn" onclick="openRecentFile()" style="display:none" data-i18n-title="topbar.openFileTitle" title="Datei öffnen">&#x1F4C1; <span class="btn-label" data-i18n="topbar.openFile">Datei öffnen</span></button>
   <button id="save-file-btn" onclick="saveToFile()" style="display:none" data-i18n-title="topbar.saveToTitle" title="In dieselbe Datei speichern">&#x1F4BE;</button>
-  <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen">&#xff0b; <span data-i18n="topbar.newPerson">Neue Person</span></button>
-  <button id="view-toggle-btn" onclick="toggleView()" data-i18n-title="topbar.viewTitle" title="Zwischen 2D und 3D wechseln (V)" disabled>&#x25E7; <span data-i18n="topbar.view2d">2D</span></button>
+  <button id="new-person-btn" onclick="addNewPerson()" data-i18n-title="topbar.newPersonTitle" title="Neue Person ohne Kontext anlegen">&#xff0b; <span class="btn-label" data-i18n="topbar.newPerson">Neue Person</span></button>
+  <button id="view-toggle-btn" onclick="toggleView()" data-i18n-title="topbar.viewTitle" title="Zwischen 2D und 3D wechseln (V)" disabled>&#x25E7; <span class="btn-label" data-i18n="topbar.view2d">2D</span></button>
   <div id="dl-wrap" style="display:none">
-    <button id="dl-btn" onclick="downloadGEDCOM()" data-i18n-title="topbar.saveTitle" title="Als GEDCOM speichern">&#x2B07; <span data-i18n="topbar.save">Speichern</span></button><button id="dl-format-btn" onclick="toggleExportMenu(event)" data-i18n-title="topbar.exportFormat" title="Exportformat wählen">&#x25BE;</button>
+    <button id="dl-btn" onclick="downloadGEDCOM()" data-i18n-title="topbar.saveTitle" title="Als GEDCOM speichern">&#x2B07; <span class="btn-label" data-i18n="topbar.save">Speichern</span></button><button id="dl-format-btn" onclick="toggleExportMenu(event)" data-i18n-title="topbar.exportFormat" title="Exportformat wählen">&#x25BE;</button>
     <div id="export-dropdown">
       <!-- What a save would write, above the list of ways to write it. -->
       <button class="dd-review" onclick="closeExportMenu();openChangesTool()" data-i18n-title="changes.titleLong" title="Was sich seit dem Öffnen geändert hat">&#x1F4DD; <span data-i18n="changes.review">Änderungen ansehen</span></button>
@@ -32,12 +32,12 @@
       <button onclick="downloadSelectionJSON();closeExportMenu()" data-i18n="export.selJson">Auswahl als JSON (.json)</button>
     </div>
   </div>
-  <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span data-i18n="topbar.center">Zentrieren</span></button>
-  <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span data-i18n="topbar.centerPerson">Person</span></button>
+  <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span class="btn-label" data-i18n="topbar.center">Zentrieren</span></button>
+  <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span class="btn-label" data-i18n="topbar.centerPerson">Person</span></button>
   <!-- Things you reach for occasionally, rather than while looking at the
        tree. One slot in the bar instead of one per tool. -->
   <div id="tools-wrap" style="display:none">
-    <button id="tools-btn" onclick="toggleToolsMenu(event)" data-i18n-title="topbar.toolsTitle" title="Werkzeuge" aria-haspopup="true" aria-expanded="false">&#x1F527; <span data-i18n="topbar.tools">Werkzeuge</span> <span class="tools-caret">&#x25BE;</span></button>
+    <button id="tools-btn" onclick="toggleToolsMenu(event)" data-i18n-title="topbar.toolsTitle" title="Werkzeuge" aria-haspopup="true" aria-expanded="false">&#x1F527; <span class="btn-label" data-i18n="topbar.tools">Werkzeuge</span> <span class="tools-caret">&#x25BE;</span></button>
     <div id="tools-dropdown">
       <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
       <button onclick="closeToolsMenu();openFindTool()" data-i18n-title="find.titleLong" title="Personen suchen und filtern">&#x1F50E; <span data-i18n="find.title">Personen suchen</span></button>
@@ -57,6 +57,9 @@
 
 <div id="main-layout">
   <div id="sidebar">
+    <!-- Only ever visible on a phone, where the drawer covers the screen and
+         the backdrop left to dismiss it is a strip too thin to aim at. -->
+    <button id="sidebar-close-btn" onclick="toggleSidebar()" data-i18n-title="import.close" data-i18n-label="import.close" title="Schliessen" aria-label="Schliessen">&#x2715;</button>
     <input type="text" id="search-input" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Name suchen...">
     <div id="search-results"></div>
     <div class="sidebar-label">
@@ -634,7 +637,7 @@
         <input class="rel-search" id="rel-search-a" data-i18n-placeholder="relationTool.searchPlaceholder" placeholder="Suchen…" autocomplete="off" oninput="relSearch('A',this.value)" onfocus="relSearch('A',this.value)">
         <div class="rel-dropdown" id="rel-drop-a"></div>
       </div>
-      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449;</button>
+      <button class="rel-pick-btn" id="rel-pick-a" onclick="relPickSlot('A')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449; <span class="rel-pick-label" data-i18n="relationTool.pickInGraph">Im Graph anklicken</span></button>
     </div>
     <div class="rel-divider">&#x2194;</div>
     <div class="rel-slot">
@@ -644,7 +647,7 @@
         <input class="rel-search" id="rel-search-b" data-i18n-placeholder="relationTool.searchPlaceholder" placeholder="Suchen…" autocomplete="off" oninput="relSearch('B',this.value)" onfocus="relSearch('B',this.value)">
         <div class="rel-dropdown" id="rel-drop-b"></div>
       </div>
-      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449;</button>
+      <button class="rel-pick-btn" id="rel-pick-b" onclick="relPickSlot('B')" data-i18n-title="relationTool.pickInGraph" title="Im Graph anklicken">&#x1F449; <span class="rel-pick-label" data-i18n="relationTool.pickInGraph">Im Graph anklicken</span></button>
     </div>
   </div>
   <div id="rel-result"></div>

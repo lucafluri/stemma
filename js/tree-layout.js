@@ -1141,7 +1141,13 @@ export function frameTreeChart() {
   }
   if (x0 === Infinity) return;
 
-  const fit = Math.min(W / ((x1 - x0) + 160), H / ((y1 - y0) + 160), 1.4);
+  // 160px of breathing room around the chart is a comfortable margin on a
+  // desktop and a third of the width of a phone held upright — the same trap
+  // fit3D() already sidesteps for the 3D scene. Scale it to the viewport, so a
+  // narrow screen spends its pixels on the chart rather than on the gap
+  // around it.
+  const pad = Math.min(160, W * 0.14, H * 0.14);
+  const fit = Math.min(W / ((x1 - x0) + pad), H / ((y1 - y0) + pad), 1.4);
   const legible = fit >= TREE_MIN_LEGIBLE_SCALE;
   const scale = legible ? fit : TREE_MIN_LEGIBLE_SCALE;
 

@@ -23,6 +23,7 @@ import { _push3DData, apply3DPhysics, build3DTimeline, cull3D, setCull3D, toggle
 import { exportSettings, importSettings, readSetting, resetSettings, saveSetting, writeSetting } from './settings.js';
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
+import { MOBILE_MAX_WIDTH, placeTopbarMenu } from './constants.js';
 
 // The topbar "Tools" menu. Same shape as the export split button's dropdown:
 // a one-shot outside-click listener closes it, so nothing has to be torn down
@@ -32,7 +33,10 @@ export function toggleToolsMenu(e) {
   const dd = document.getElementById('tools-dropdown');
   const open = dd.classList.toggle('open');
   document.getElementById('tools-btn')?.setAttribute('aria-expanded', String(open));
-  if (open) document.addEventListener('click', closeToolsMenu, { once: true });
+  if (open) {
+    placeTopbarMenu(dd);
+    document.addEventListener('click', closeToolsMenu, { once: true });
+  }
 }
 
 export function closeToolsMenu() {
@@ -43,6 +47,15 @@ export function closeToolsMenu() {
 export function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('sidebar-open');
   document.getElementById('sidebar-overlay').classList.toggle('visible');
+}
+
+// On a phone the sidebar is a drawer over the whole screen, so anything in it
+// whose result appears *behind* it has to shut it on the way out — otherwise
+// picking a name looks like it did nothing at all.
+function _closeMobileSidebar() {
+  if (window.innerWidth > MOBILE_MAX_WIDTH) return;
+  document.getElementById('sidebar')?.classList.remove('sidebar-open');
+  document.getElementById('sidebar-overlay')?.classList.remove('visible');
 }
 
 export function _initPanelSwipe() {
@@ -163,6 +176,7 @@ document.getElementById('search-input').addEventListener('input', function () {
     el.addEventListener('click', () => {
       document.getElementById('search-input').value = '';
       box.innerHTML = '';
+      _closeMobileSidebar();
       showIndiDetail(id);
       zoomToNode(id);
     });

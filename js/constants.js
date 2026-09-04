@@ -190,3 +190,23 @@ export const TREE_SPACING_DEFAULTS = {
   group: 1,   // extra clearance between one family's children and the next's
   side:  1,   // extra clearance where the father's and mother's ancestry meet
 };
+
+// The width below which the app lays itself out for a phone. One number rather
+// than a literal repeated across the modules and the stylesheet's media
+// queries — they have to agree, or a control styled as a phone control keeps
+// its desktop behaviour (or the reverse).
+export const MOBILE_MAX_WIDTH = 768;
+
+// Both top-bar menus hang off a wrapper that sits partway along the bar, so
+// they are anchored to that wrapper's edge. On a phone the menu is wider than
+// the room on the side it opens towards and it runs clean off the screen —
+// which is what the Tools menu did, taking half its labels with it. There the
+// stylesheet pins the menu to the viewport instead (`position: fixed`, an inset
+// on both sides); only the vertical placement needs a measurement, because the
+// bar wraps to a different number of rows depending on how much fits.
+export function placeTopbarMenu(dd) {
+  if (!dd) return;
+  if (window.innerWidth > MOBILE_MAX_WIDTH) { dd.style.top = ''; return; }
+  const bar = document.getElementById('topbar');
+  dd.style.top = (bar ? Math.round(bar.getBoundingClientRect().bottom) + 4 : 48) + 'px';
+}

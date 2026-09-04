@@ -6,6 +6,7 @@ import { flashNode } from './render-2d.js';
 import { _setOrbitTarget3D } from './render-3d.js';
 import { _acAttachFields } from './autocomplete.js';
 import { setPlace } from './places.js';
+import { MOBILE_MAX_WIDTH } from './constants.js';
 
 // Re-exported so the window bulk-assign in main.js still reaches them.
 export * from './autocomplete.js';
@@ -341,7 +342,7 @@ export function reopenDetailPanel() {
 }
 
 export function _isMobile() {
-  return window.innerWidth <= 768;
+  return window.innerWidth <= MOBILE_MAX_WIDTH;
 }
 
 export function _showReopenPill() {
