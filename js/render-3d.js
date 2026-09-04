@@ -306,8 +306,8 @@ export function updateViewToggleUI() {
   const btn = document.getElementById('view-toggle-btn');
   if (btn) {
     // Label names the view you'd switch *to*.
-    btn.innerHTML = in3d ? '◧ <span>' + t('topbar.view2d') + '</span>'
-                         : '◨ <span>' + t('topbar.view3d') + '</span>';
+    btn.innerHTML = in3d ? '◧ <span class="btn-label">' + t('topbar.view2d') + '</span>'
+                         : '◨ <span class="btn-label">' + t('topbar.view3d') + '</span>';
     btn.classList.toggle('active-3d', in3d);
     btn.title = t('topbar.viewTitle');
   }

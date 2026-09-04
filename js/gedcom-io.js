@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { lsGet, lsRemove, lsSet } from './settings.js';
-import { AUTO_FOCUS_THRESHOLD, perf } from './constants.js';
+import { AUTO_FOCUS_THRESHOLD, perf, placeTopbarMenu } from './constants.js';
 import { buildSurnameColorMap, buildSurnameList } from './colors.js';
 import { DECEASED_AGE_THRESHOLD, _defaultFocusRoot, buildGraphData, computeEstimatedYears, updateFocusUI } from './graph-data.js';
 import { applyHighlight } from './relations.js';
@@ -425,8 +425,8 @@ export async function updateFileButtons() {
   }
   openBtn.style.display = 'inline-block';
   openBtn.innerHTML = recent
-    ? '↻ <span>' + escHtml(recent) + '</span>'
-    : '\u{1F4C1} <span>' + escHtml(t('topbar.openFile')) + '</span>';
+    ? '↻ <span class="btn-label">' + escHtml(recent) + '</span>'
+    : '\u{1F4C1} <span class="btn-label">' + escHtml(t('topbar.openFile')) + '</span>';
   openBtn.title = recent ? t('topbar.openRecentTitle', { name: recent }) : t('topbar.openFileTitle');
 
   // The save button only appears once the data on screen came from a file we
@@ -434,7 +434,7 @@ export async function updateFileButtons() {
   const live = state._fileHandle?.name;
   saveBtn.style.display = live ? 'inline-block' : 'none';
   if (live) {
-    saveBtn.innerHTML = '\u{1F4BE} <span>' + escHtml(live) + '</span>';
+    saveBtn.innerHTML = '\u{1F4BE} <span class="btn-label">' + escHtml(live) + '</span>';
     saveBtn.title = t('topbar.saveToTitle', { name: live });
   }
 }
@@ -620,6 +620,7 @@ export function toggleExportMenu(e) {
   const dd = document.getElementById('export-dropdown');
   const open = dd.classList.toggle('open');
   if (open) {
+    placeTopbarMenu(dd);
     document.addEventListener('click', closeExportMenu, { once: true });
   }
 }
