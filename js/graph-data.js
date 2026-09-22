@@ -4,7 +4,8 @@ import { hasEnabledFamilyName, updateSurnameShownCount } from './colors.js';
 import { _autoMarkDeceasedByAge, _fullRebuildGraph } from './gedcom-io.js';
 import { row } from './panels.js';
 import { updateHLButtons } from './relations.js';
-import { applyFilter, tick } from './render-2d.js';
+import { applyFilter, tick, zoomToNode } from './render-2d.js';
+import { showIndiDetail } from './panels.js';
 
 export const DECEASED_AGE_THRESHOLD = 110;
 
@@ -21,6 +22,7 @@ export function buildGraphData() {
   state._genNumbers     = null;
   state._estimatedYears = null;
   state._spouseIds      = null;
+  state._dataVersion++;
   _autoMarkDeceasedByAge();
   state.allNodes = [];
   state.allLinks = [];
@@ -412,34 +414,20 @@ export function computeGenerationDepths() {
   // whom, and the first assignment to reach a person wins — which is the one
   // through their closest relation.
   const gen = new Map();
-
-  const parentsOf = id => {
-    const out = [];
-    for (const famId of (state.individuals.get(id)?.famc || [])) {
-      const fam = state.families.get(famId);
-      if (!fam) continue;
-      for (const p of [fam.husb, fam.wife]) if (p && state.individuals.has(p)) out.push(p);
-    }
-    return out;
-  };
-  const kidsAndSpouses = id => {
-    const kids = [], spouses = [];
-    for (const famId of (state.individuals.get(id)?.fams || [])) {
-      const fam = state.families.get(famId);
-      if (!fam) continue;
-      const sp = fam.husb === id ? fam.wife : fam.husb;
-      if (sp && state.individuals.has(sp)) spouses.push(sp);
-      for (const c of fam.chil) if (state.individuals.has(c)) kids.push(c);
-    }
-    return { kids, spouses };
-  };
+  const people = state.individuals, families = state.families;
 
   // Start each disconnected part at its best-connected person, so the walk
   // begins somewhere central rather than at whichever id came first in the file.
-  const seeds = [...state.individuals.keys()].sort((a, b) => {
-    const w = id => (state.individuals.get(id).fams?.length || 0) + (state.individuals.get(id).famc?.length || 0);
-    return w(b) - w(a);
-  });
+  // Bucketed by weight rather than sorted with a comparator that looked both
+  // weights up on every comparison: same order (buckets keep file order, as the
+  // stable sort did), a fraction of the time on a large file.
+  const buckets = [];
+  for (const [id, p] of people) {
+    const w = (p.fams?.length || 0) + (p.famc?.length || 0);
+    (buckets[w] || (buckets[w] = [])).push(id);
+  }
+  const seeds = [];
+  for (let w = buckets.length - 1; w >= 0; w--) if (buckets[w]) for (const id of buckets[w]) seeds.push(id);
 
   for (const seed of seeds) {
     if (gen.has(seed)) continue;
@@ -453,19 +441,32 @@ export function computeGenerationDepths() {
       // given that route's generation, splitting the couple. Appending while
       // iterating walks a chain of remarriages to its end.
       for (let i = 0; i < frontier.length; i++) {
-        const g = gen.get(frontier[i]);
-        for (const sp of kidsAndSpouses(frontier[i]).spouses) {
-          if (!gen.has(sp)) { gen.set(sp, g); frontier.push(sp); }
+        const id = frontier[i];
+        const g = gen.get(id);
+        for (const famId of (people.get(id)?.fams || [])) {
+          const fam = families.get(famId);
+          if (!fam) continue;
+          const sp = fam.husb === id ? fam.wife : fam.husb;
+          if (sp && people.has(sp) && !gen.has(sp)) { gen.set(sp, g); frontier.push(sp); }
         }
       }
       const next = [];
       for (const id of frontier) {
         const g = gen.get(id);
-        for (const p of parentsOf(id)) {
-          if (!gen.has(p)) { gen.set(p, g - 1); next.push(p); }
+        const indi = people.get(id);
+        for (const famId of (indi?.famc || [])) {
+          const fam = families.get(famId);
+          if (!fam) continue;
+          for (const p of [fam.husb, fam.wife]) {
+            if (p && people.has(p) && !gen.has(p)) { gen.set(p, g - 1); next.push(p); }
+          }
         }
-        for (const c of kidsAndSpouses(id).kids) {
-          if (!gen.has(c)) { gen.set(c, g + 1); next.push(c); }
+        for (const famId of (indi?.fams || [])) {
+          const fam = families.get(famId);
+          if (!fam) continue;
+          for (const c of fam.chil) {
+            if (people.has(c) && !gen.has(c)) { gen.set(c, g + 1); next.push(c); }
+          }
         }
       }
       frontier = next;
@@ -605,6 +606,10 @@ export function personAgeYears(id) {
 }
 
 export function computeEstimatedYears() {
+  // Cleared by buildGraphData(), which every change to the tree goes through;
+  // until then the answer cannot have changed, and a rebuild used to work it
+  // out twice (once to mark the very old deceased, once for the layout).
+  if (state._estimatedYears) return state._estimatedYears;
   const est = new Map();
   // Seed known
   for (const [id, indi] of state.individuals) {
@@ -757,6 +762,20 @@ export function focusOnPerson(id) {
   if (id !== state.focusRootId) state._revealed.clear();   // expansions belonged to the old chart
   state.focusRootId = id;
   _refocus();
+}
+
+/**
+ * Open a person from a list (search, find, statistics, map) and bring them into
+ * view. On a large file the chart draws one person's relatives at a time, and
+ * somebody outside that set used to be selected with nothing on screen moving —
+ * the chart now re-centres its focus on them first.
+ */
+export function goToPerson(id) {
+  if (!id || !state.individuals.has(id)) return;
+  const drawn = state.nodes.some(n => n.id === id);
+  if (!drawn && state.focusRootId) focusOnPerson(id);
+  showIndiDetail(id);
+  if (drawn && state.currentView === '2d') zoomToNode(id);
 }
 
 /** The "Fokus 2D" button: focus this person, or — pressed again on whoever is

@@ -110,12 +110,22 @@ export function buildSurnameColorMap() {
   }
 
   // 3. DSATUR ordering — process most-constrained surnames first so they
-  //    get the most freedom when choosing their hue.
+  //    get the most freedom when choosing their hue. DSATUR picks each next
+  //    surname by scanning all the rest, which is quadratic: fine for the few
+  //    hundred names of an ordinary tree, seconds for the tens of thousands of
+  //    a large one. Past LARGE the order is by degree then frequency instead
+  //    (Welsh–Powell), which is linear after the sort and colours nearly as well.
+  const LARGE = 3000;
   const surns = [...counts.keys()];
+  const large = surns.length > LARGE;
   const assignOrder = [];
   const nbSlots = new Map(); // surname -> Set<dummy slot> (just for ordering)
-  for (const s of surns) nbSlots.set(s, new Set());
-  const unordered = new Set(surns);
+  if (!large) for (const s of surns) nbSlots.set(s, new Set());
+  const unordered = new Set(large ? [] : surns);
+  if (large) {
+    assignOrder.push(...surns.sort((a, b) =>
+      (adj.get(b)?.size ?? 0) - (adj.get(a)?.size ?? 0) || (counts.get(b) || 0) - (counts.get(a) || 0)));
+  }
   while (unordered.size > 0) {
     let best = null, bestSat = -1, bestDeg = -1, bestFreq = -1;
     for (const s of unordered) {
@@ -148,6 +158,11 @@ export function buildSurnameColorMap() {
 
   const assignedHue = new Map(); // surname -> hue [0,360)
   const allHues = [];            // every hue assigned so far (for spreading isolates)
+  // On a large tree the isolates step round the wheel by the golden angle
+  // instead: re-sorting every hue so far for each of thousands of isolated
+  // names is the other quadratic step, and the golden angle spreads them as
+  // evenly as any gap search would.
+  let isolateHue = 30;
 
   for (const surn of assignOrder) {
     if (state.surnameCustomColors.has(surn)) { assignedHue.set(surn, -1); continue; }
@@ -156,14 +171,18 @@ export function buildSurnameColorMap() {
       const h = assignedHue.get(nb);
       if (h != null && h >= 0) nbHues.push(h);
     }
-    const hue = nbHues.length > 0
-      ? largestGapMid(nbHues)                             // max separation from neighbours
-      : (allHues.length > 0 ? largestGapMid(allHues) : 30); // fill global gaps for isolates
+    let hue;
+    if (nbHues.length > 0) hue = largestGapMid(nbHues);             // max separation from neighbours
+    else if (large) hue = (isolateHue = (isolateHue + 137.508) % 360);
+    else hue = allHues.length > 0 ? largestGapMid(allHues) : 30;     // fill global gaps for isolates
     assignedHue.set(surn, hue);
     allHues.push(hue);
   }
 
-  // 5. Apply colours (custom overrides respected)
+  // 5. Apply colours (custom overrides respected). Which names are ticked is
+  //    carried over: this runs on every edit, and used to switch every family
+  //    back on — editing one person undid the filter the reader had set.
+  const wasEnabled = new Map(state.surnameEnabled);
   state.surnameColors.clear();
   state.surnameEnabled.clear();
   state._surnameColorCache.clear();
@@ -177,11 +196,11 @@ export function buildSurnameColorMap() {
       state.surnameColors.set(surn, color);
       state._surnameColorCache.set(surn, color);
     }
-    state.surnameEnabled.set(surn, true);
+    state.surnameEnabled.set(surn, wasEnabled.get(surn) !== false);
   }
 
   if (noSurnCount > 0) {
-    state.surnameEnabled.set(null, true);
+    state.surnameEnabled.set(null, wasEnabled.get(null) !== false);
     sorted.push([null, noSurnCount]);
   }
   return sorted;
@@ -301,58 +320,96 @@ export function refreshNodeColors() {
   refresh3D();
 }
 
+// A large file has thousands of family names, and every row is a checkbox and a
+// colour picker. Rendering all of them up front was a third of a second of DOM
+// work on every rebuild and a list nobody scrolls to the end of. The commonest
+// come first, a filter box finds the rest, and "show all" is there for anyone
+// who does want to scroll.
+const SURNAME_PAGE = 150;
+let _surnameShowAll = false;
+
 export function buildSurnameList(sorted) {
+  state._surnameSorted = sorted || [];
+  renderSurnameList();
+}
+
+export function filterSurnameList() { renderSurnameList(); }
+
+export function showAllSurnames() { _surnameShowAll = true; renderSurnameList(); }
+
+export function renderSurnameList() {
   const container = document.getElementById('surname-list');
+  if (!container) return;
+  const sorted = state._surnameSorted || [];
+  const filterEl = document.getElementById('surname-filter');
+  if (filterEl) filterEl.style.display = sorted.length > 20 ? '' : 'none';
+  const q = (filterEl?.value || '').trim().toLowerCase();
+  const matches = q
+    ? sorted.filter(([surn]) => (surn === null ? t('detail.noSurname') : surn).toLowerCase().includes(q))
+    : sorted;
+  const shown = _surnameShowAll || q ? matches.slice(0, 2000) : matches.slice(0, SURNAME_PAGE);
+
   container.innerHTML = '';
-  for (const [surn, count] of sorted) {
-    const isNoSurn = surn === null;
-    // Use hash color as default, or custom color if set
-    const color = isNoSurn ? '#888' : surnameColor(surn);
-    const label = isNoSurn ? t('detail.noSurname') : surn;
-    const title = isNoSurn ? t('detail.personsWithoutSurname') : escAttr(surn);
+  const frag = document.createDocumentFragment();
+  for (const [surn, count] of shown) frag.appendChild(_surnameRow(surn, count));
+  container.appendChild(frag);
 
-    const div = document.createElement('div');
-    div.className = 'surname-item';
-
-    if (isNoSurn) {
-      // No color picker for "no surname" entry
-      div.innerHTML = `
-        <input type="checkbox" checked>
-        <span class="surname-dot" style="background:${color};border:1px solid #666"></span>
-        <span class="surname-label" title="${title}" style="font-style:italic;color:#999">${escHtml(label)}</span>
-        <span class="surname-count">${count}</span>`;
-    } else {
-      // Color picker for surname entries
-      const hasCustom = state.surnameCustomColors.has(surn);
-      div.innerHTML = `
-        <input type="checkbox" checked>
-        <input type="color" class="surname-color-picker" value="${color}" title="${t('detail.chooseColor')}">
-        <span class="surname-label" title="${title}">${escHtml(label)}</span>
-        <span class="surname-count">${count}</span>`;
-
-      const colorInput = div.querySelector('.surname-color-picker');
-
-      // Color change handler
-      colorInput.addEventListener('input', e => {
-        setSurnameColor(surn, e.target.value);
-        _rerenderNodes(); // Update colors without rebuilding simulation
-      });
-
-      // Right-click to reset to hash color
-      colorInput.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        setSurnameColor(surn, null); // Clear custom color
-        colorInput.value = surnameHashColor(surn); // Reset to hash color
-        _rerenderNodes();
-      });
-    }
-
-    div.querySelector('input[type="checkbox"]').addEventListener('change', e => {
-      state.surnameEnabled.set(isNoSurn ? null : surn, e.target.checked);
-      applyFilter();
-    });
-    container.appendChild(div);
+  if (shown.length < matches.length) {
+    const more = document.createElement('button');
+    more.className = 'surname-more';
+    more.textContent = t('sidebar.showAllSurnames', { n: matches.length.toLocaleString() });
+    more.onclick = showAllSurnames;
+    container.appendChild(more);
   }
+}
+
+function _surnameRow(surn, count) {
+  const isNoSurn = surn === null;
+  // Use hash color as default, or custom color if set
+  const color = isNoSurn ? '#888' : surnameColor(surn);
+  const label = isNoSurn ? t('detail.noSurname') : surn;
+  const title = isNoSurn ? t('detail.personsWithoutSurname') : escAttr(surn);
+  const checked = state.surnameEnabled.get(isNoSurn ? null : surn) !== false ? ' checked' : '';
+
+  const div = document.createElement('div');
+  div.className = 'surname-item';
+
+  if (isNoSurn) {
+    // No color picker for "no surname" entry
+    div.innerHTML = `
+      <input type="checkbox"${checked}>
+      <span class="surname-dot" style="background:${color};border:1px solid #666"></span>
+      <span class="surname-label" title="${title}" style="font-style:italic;color:#999">${escHtml(label)}</span>
+      <span class="surname-count">${count}</span>`;
+  } else {
+    div.innerHTML = `
+      <input type="checkbox"${checked}>
+      <input type="color" class="surname-color-picker" value="${color}" title="${t('detail.chooseColor')}">
+      <span class="surname-label" title="${title}">${escHtml(label)}</span>
+      <span class="surname-count">${count}</span>`;
+
+    const colorInput = div.querySelector('.surname-color-picker');
+
+    // Color change handler
+    colorInput.addEventListener('input', e => {
+      setSurnameColor(surn, e.target.value);
+      _rerenderNodes(); // Update colors without rebuilding simulation
+    });
+
+    // Right-click to reset to hash color
+    colorInput.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      setSurnameColor(surn, null); // Clear custom color
+      colorInput.value = surnameHashColor(surn); // Reset to hash color
+      _rerenderNodes();
+    });
+  }
+
+  div.querySelector('input[type="checkbox"]').addEventListener('change', e => {
+    state.surnameEnabled.set(isNoSurn ? null : surn, e.target.checked);
+    applyFilter();
+  });
+  return div;
 }
 
 export function toggleAllSurnames(enabled) {

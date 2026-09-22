@@ -29,9 +29,7 @@ export const _TI_MONTH_MAP = {
 };
 
 export function _tiNormName(name) {
-  let n = (name || '').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-  n = n.replace(/\bfluri\b/g, 'flury');
-  return n;
+  return (name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 export function _tiParseName(name) {
@@ -76,6 +74,13 @@ export function _tiNameScore(a, b) {
     if (bestSurn === 1) break;
   }
   return fmatch * (0.4 + 0.6 * bestSurn);
+}
+
+/** A word and every way of deleting one letter from it. */
+export function _tiDeletionKeys(w) {
+  const out = new Set([w]);
+  for (let i = 0; i < w.length; i++) out.add(w.slice(0, i) + w.slice(i + 1));
+  return out;
 }
 
 export function _tiLevenshtein(a, b) {
@@ -347,6 +352,22 @@ export function _tiGenerateActions(persons) {
     allIndis.push({ id, parsed: _tiParseName(indi.name || ''), yr });
   }
 
+  // Fuzzy candidates are found through their surnames. A match needs a surname
+  // at most one edit apart (see _tiNameScore — without one the score cannot
+  // reach the threshold), and two strings one edit apart always share a
+  // "delete one letter" variant. Indexing those turns a comparison with every
+  // person in the tree into a comparison with a handful — merging a few
+  // thousand people into a large tree went from minutes to a blink.
+  const bySurnameKey = new Map();
+  for (const cand of allIndis) {
+    for (const sn of cand.parsed.surnames) {
+      for (const k of _tiDeletionKeys(sn)) {
+        if (!bySurnameKey.has(k)) bySurnameKey.set(k, []);
+        bySurnameKey.get(k).push(cand);
+      }
+    }
+  }
+
   function _famKey(a, b) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
   // pairKey → family id, or null for a couple queued earlier in this same batch.
   // The id is what lets a second file's children be hung off the family the tree
@@ -379,7 +400,11 @@ export function _tiGenerateActions(persons) {
     // 3. Fuzzy: score all existing persons, pick best above threshold
     const parsed = _tiParseName(person.fullName);
     let bestId = null, bestScore = 0;
-    for (const cand of allIndis) {
+    const pool = new Set();
+    for (const sn of parsed.surnames) {
+      for (const k of _tiDeletionKeys(sn)) for (const c of bySurnameKey.get(k) || []) pool.add(c);
+    }
+    for (const cand of pool) {
       let score = _tiNameScore(parsed, cand.parsed);
       if (score < 0.6) continue;
       // Birth-year bonus/penalty
@@ -958,12 +983,7 @@ export function _tiParseGedcomForMerge(raw) {
   for (const [id, indi] of indiMap) {
     if (!indi.name) continue;
 
-    // Normalise Fluri→Flury for persons born before 1940
-    let displayName = indi.name;
-    if (/Fluri/.test(displayName)) {
-      const birthYr = parseInt((indi.birth.date || '').match(/\b(\d{4})\b/)?.[1] || '9999', 10);
-      if (birthYr < 1940) displayName = displayName.replace(/Fluri/g, 'Flury');
-    }
+    const displayName = indi.name;
 
     const p = {
       fullName:   displayName,

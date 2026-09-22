@@ -31,8 +31,10 @@ let _baseline = null;   // { json, at } | null
 /** Record the tree as it stands as the thing future edits are measured against. */
 export function captureBaseline() {
   try {
+    // Compact rather than pretty-printed: on a large tree the indentation alone
+    // is tens of megabytes held for as long as the session lasts.
     _baseline = {
-      json: GEDCOMModule.exportJSON(state.individuals, state.families),
+      json: GEDCOMModule.exportJSON(state.individuals, state.families, { media: state.media, pretty: false }),
       at: Date.now(),
     };
   } catch (e) {
@@ -83,6 +85,7 @@ const INDI_FIELDS = [
   ['deathCause',  i => _s(i.death?.caus)],
   ['occupation',  i => _s(i.occu)],
   ['note',        i => _s(i.note)],
+  ['media',       (i, t) => _mediaList(i, t)],
 ];
 
 // A person's FAMC/FAMS are the same facts as a family's HUSB/WIFE/CHIL, seen
@@ -97,7 +100,17 @@ const FAM_FIELDS = [
     .map(m => [m.date, m.plac].filter(Boolean).join(', ') || '—').join('; ')],
   ['divorced',     f => _yn(f.div)],
   ['divorceDate',  f => _s(f.divDate)],
+  ['media',        (f, t) => _mediaList(f, t)],
 ];
+
+// Media by caption (or file name), so renaming a picture or making a different
+// one the portrait shows up as the change it is.
+function _mediaList(rec, tree) {
+  return (rec.media || []).map(id => {
+    const m = tree?.media?.get(id);
+    return m ? (m.title || String(m.file || '').replace(/\\/g, '/').split('/').pop() || id) : id;
+  }).join(', ');
+}
 
 function _nameOf(tree, id) {
   if (!id) return '';
@@ -160,7 +173,7 @@ export function diffTrees(before, after) {
 
 /** The diff between the baseline and the tree as it stands right now. */
 export function currentChanges() {
-  return diffTrees(baselineTree(), { individuals: state.individuals, families: state.families });
+  return diffTrees(baselineTree(), { individuals: state.individuals, families: state.families, media: state.media });
 }
 
 // ── The dialog ────────────────────────────────────────────────────────────────

@@ -7,7 +7,11 @@ import { readSetting, resetSettings } from './settings.js';
 export const state = {
   individuals: new Map(),   // id -> indi object
   families: new Map(),   // id -> fam object
-  otherLines: [],          // raw lines from unrecognized level-0 GEDCOM records (SOUR, OBJE, …), re-emitted verbatim on save
+  media: new Map(),        // id -> OBJE record { id, file, form, type, title } (see js/media.js)
+  otherLines: [],          // raw lines from unrecognized level-0 GEDCOM records (SOUR, REPO, NOTE, …), re-emitted verbatim on save
+  mediaEnabled: readSetting('mediaEnabled'),
+  autoDeceased: readSetting('autoDeceased'),
+  _dataVersion: 0,         // bumped by buildGraphData(); anything cached off the tree's contents keys on it
   _fileHandle: null,       // FileSystemFileHandle the loaded data came from, when it came from one
   _importFileHandle: null, // ...and the one the import wizard is holding, until it loads or is closed
   allNodes: [],   // complete dataset (all INDI + FAM nodes)

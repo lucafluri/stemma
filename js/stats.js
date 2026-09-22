@@ -2,10 +2,9 @@ import { state } from './state.js';
 import { familyNamesOf } from './colors.js';
 import { escAttr, escHtml, escJs } from './gedcom-io.js';
 import { arrMax, arrMin, minMax } from './constants.js';
-import { computeGenerationDepths } from './graph-data.js';
-import { showIndiDetail } from './panels.js';
-import { collectAncestors, collectDescendants } from './relations.js';
-import { positionTooltip, zoomToNode } from './render-2d.js';
+import { computeGenerationDepths, goToPerson } from './graph-data.js';
+import { collectDescendants } from './relations.js';
+import { positionTooltip } from './render-2d.js';
 
 // Figures about the tree as a whole.
 //
@@ -33,8 +32,16 @@ const median = a => {
 const max = arrMax;
 const min = arrMin;
 
+// How far up the cousin-couple figure looks: seven generations of ancestors,
+// i.e. a common ancestor as distant as a sixth-great-grandparent.
+export const COUSIN_GENERATIONS = 7;
+
+// One collator for every name sort: String#localeCompare builds a fresh one on
+// each call, which on a sort of 50,000 names is most of the time spent.
+const _collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
 const topN = (counts, n) => [...counts.entries()]
-  .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  .sort((a, b) => b[1] - a[1] || _collator.compare(a[0], b[0]))
   .slice(0, n);
 
 export function computeStats() {
@@ -281,18 +288,48 @@ export function computeStats() {
   }
 
   // ── Consanguinity — couples who share a known common ancestor ──
-  // Reuses the same ancestor walk the highlight/relation tools use, so a
-  // "shared ancestor" here means exactly what it means everywhere else in
-  // the app. Bounded by how many families have both parents recorded, not by
-  // the size of the tree, so this stays cheap even on a large file.
+  // Within COUSIN_GENERATIONS generations, i.e. up to seventh cousins. The
+  // question stops meaning much further out — in a deep tree nearly every
+  // couple shares *some* ancestor twenty generations up — and answering it
+  // without a limit walked both spouses' entire ancestries for every family:
+  // fifteen seconds on a 20,000-person file. Bounded, each walk touches at most
+  // a few hundred people, marked in a typed array instead of collected in Sets.
   let cousinCouples = 0;
   const cousinCoupleIds = [];
-  for (const f of fams) {
-    if (!f.husb || !f.wife || !state.individuals.has(f.husb) || !state.individuals.has(f.wife)) continue;
-    const aH = collectAncestors(f.husb); aH.delete(f.husb);
-    const aW = collectAncestors(f.wife); aW.delete(f.wife);
-    for (const x of aH) {
-      if (state.individuals.has(x) && aW.has(x)) { cousinCouples++; cousinCoupleIds.push(f.husb, f.wife); break; }
+  {
+    const index = new Map();
+    let n = 0;
+    for (const p of people) index.set(p.id, n++);
+    const parents = new Array(n);
+    for (const p of people) {
+      const list = [];
+      for (const famId of p.famc || []) {
+        const f = state.families.get(famId);
+        if (!f) continue;
+        for (const x of [f.husb, f.wife]) { const j = x != null ? index.get(x) : undefined; if (j !== undefined) list.push(j); }
+      }
+      parents[index.get(p.id)] = list;
+    }
+    const mark = new Int32Array(n);
+    let stamp = 0;
+    const walk = (start, visit) => {
+      let frontier = parents[start];
+      for (let g = 0; g < COUSIN_GENERATIONS && frontier.length; g++) {
+        const next = [];
+        for (const a of frontier) {
+          if (visit(a)) return true;
+          for (const b of parents[a]) next.push(b);
+        }
+        frontier = next;
+      }
+      return false;
+    };
+    for (const f of fams) {
+      const h = index.get(f.husb), w = index.get(f.wife);
+      if (h === undefined || w === undefined) continue;
+      stamp++;
+      walk(h, a => { mark[a] = stamp; return false; });
+      if (walk(w, a => mark[a] === stamp)) { cousinCouples++; cousinCoupleIds.push(f.husb, f.wife); }
     }
   }
   const neverMarriedIds = people.map(p => p.id).filter(id => !marriedPeople.has(id));
@@ -660,10 +697,8 @@ function personRow(id) {
  * Find tool, so a reader who has used that already knows this list. */
 export function showStatSubset(kind, param, title) {
   const ids = [...new Set(personIdsForKind(kind, param))].filter(id => state.individuals.has(id));
-  ids.sort((a, b) => {
-    const A = state.individuals.get(a), B = state.individuals.get(b);
-    return (A.displayName || A.name || a).localeCompare(B.displayName || B.name || b);
-  });
+  const nameOf = id => { const p = state.individuals.get(id); return p.displayName || p.name || id; };
+  ids.sort((a, b) => _collator.compare(nameOf(a), nameOf(b)));
 
   const list  = document.getElementById('stats-detail-list');
   const titleEl = document.getElementById('stats-detail-title');
@@ -674,7 +709,12 @@ export function showStatSubset(kind, param, title) {
 
   titleEl.textContent = title;
   countEl.textContent = t('stats.detailCount', { n: ids.length });
-  list.innerHTML = ids.length ? ids.map(personRow).join('')
+  // Capped like the Find tool: "everybody" on a large file is tens of thousands
+  // of rows, and the count above already says how many there really are.
+  const LIMIT = 500;
+  list.innerHTML = ids.length
+    ? ids.slice(0, LIMIT).map(personRow).join('') +
+      (ids.length > LIMIT ? `<div class="pl-empty">${escHtml(t('find.capped', { n: LIMIT }))}</div>` : '')
     : `<div class="pl-empty">${escHtml(t('find.none'))}</div>`;
   body.style.display = 'none';
   panel.style.display = 'flex';
@@ -690,8 +730,7 @@ export function backToStatsOverview() {
 /** Open a person from the detail list, the same way the Find tool does. */
 export function statGoTo(id) {
   closeStatsTool();
-  showIndiDetail(id);
-  zoomToNode(id);
+  goToPerson(id);
 }
 
 // ── Timeline hover ────────────────────────────────────────────────────────

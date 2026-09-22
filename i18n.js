@@ -82,7 +82,7 @@ const I18N = {
       spouseGapHint: 'grösster: ${n} Jahre',
       spouseGapMaxTitle: 'Grösster Altersunterschied',
       cousinCouples: 'Paare mit gemeinsamem Vorfahren',
-      cousinCouplesHint: 'z. B. Cousin-Ehen — im Baum nachweisbar',
+      cousinCouplesHint: 'gemeinsamer Vorfahre bis 7 Generationen zurück, z. B. Cousin-Ehen',
       span: 'Zeitraum (Geburten)',
       spanHint: '${n} Jahre',
       generations: 'Generationen',
@@ -114,8 +114,12 @@ const I18N = {
       yaml: 'YAML (.yaml)',
       selGedcom: 'Auswahl als GEDCOM (.ged)',
       selJson: 'Auswahl als JSON (.json)',
+      withMedia: 'GEDCOM + Medien (.zip)',
+      withMediaTitle: 'Stammbaum und alle angehängten Dateien als ein ZIP — lässt sich in andere Genealogie-Programme importieren',
     },
     sidebar: {
+      surnameFilter: 'Familienname filtern…',
+      showAllSurnames: 'Alle ${n} anzeigen',
       searchPlaceholder: 'Name suchen...',
       familyNames: 'Familiennamen',
       colorToggle: 'Farbe der Personen-Kästchen: aktiviert = nach Familienname, deaktiviert = nach Geschlecht',
@@ -247,10 +251,19 @@ const I18N = {
       import: 'Einstellungen laden',
       reset: 'Alles zurücksetzen',
       resetConfirm: 'Alle Einstellungen auf die Standardwerte zurücksetzen? Der Stammbaum selbst und die gespeicherten Ortskoordinaten bleiben erhalten.',
-      importDone: '{n} Einstellungen übernommen. Zum Anwenden neu laden?',
+      importDone: '${n} Einstellungen übernommen. Zum Anwenden neu laden?',
       importBadFile: 'Diese Datei enthält keine Einstellungen.',
       perfLog: 'Render-Zeiten in der Konsole',
       perfLogTitle: 'Schreibt bei jedem Neuzeichnen Zeitmessungen in die Browser-Konsole. Nur zur Fehlersuche — kostet selbst Leistung. Wirkt nach dem Neuladen.',
+      media: 'Medien (Fotos, Videos, Dokumente)',
+      mediaTitle: 'Fotos, Videos und Dokumente an Personen und Familien anhängen. Ausgeschaltet bleiben vorhandene Medien in der Datei erhalten, werden aber nicht angezeigt.',
+      locateMedia: 'Mediendateien suchen…',
+      locateMediaTitle: 'Den Ordner wählen, in dem die Bilder dieses Stammbaums liegen — sie werden den Dateipfaden in der Datei zugeordnet.',
+      mediaStatus: 'Medien-Status',
+      pruneMedia: 'Ungenutzte Medien entfernen',
+      pruneMediaTitle: 'Im Browser gespeicherte Dateien löschen, die dieser Stammbaum nicht verwendet.',
+      autoDeceased: 'Sehr Alte als verstorben markieren',
+      autoDeceasedTitle: 'Wer vor über 110 Jahren geboren ist (oder anhand der Verwandten so geschätzt wird), gilt als verstorben und wird beim Speichern so markiert.',
     },
     treeSpacing: {
       title: 'Baumabstände',
@@ -449,6 +462,7 @@ const I18N = {
         deathCause: 'Todesursache',
         occupation: 'Beruf',
         note: 'Notiz',
+        media: 'Medien',
         husband: 'Ehemann',
         wife: 'Ehefrau',
         children: 'Kinder',
@@ -737,6 +751,36 @@ const I18N = {
       saveError: 'Fehler beim Speichern: ${msg}',
       readError: 'Datei konnte nicht gelesen werden.',
     },
+    media: {
+      title: 'Medien',
+      add: 'Hinzufügen',
+      addTitle: 'Fotos, Videos, Tonaufnahmen oder Dokumente anhängen — oder Dateien auf dieses Fenster ziehen',
+      addUrlTitle: 'Einen Link (Webadresse) anhängen',
+      empty: 'Noch keine Fotos oder Dokumente. Dateien hierher ziehen oder „Hinzufügen“.',
+      portrait: 'Porträt',
+      makePortrait: 'Als Porträt verwenden',
+      caption: 'Bildtitel',
+      missing: 'Die Datei „${file}“ ist in diesem Browser nicht vorhanden. Unter „Mediendateien suchen…“ in den Einstellungen den Ordner wählen, oder hier einzeln zuordnen.',
+      openFile: 'Datei öffnen',
+      sharedWith: 'Auch bei ${n} weiteren Personen/Familien verknüpft.',
+      download: 'Herunterladen',
+      replace: 'Datei ersetzen',
+      locate: 'Datei zuordnen…',
+      remove: 'Entfernen',
+      removeConfirm: 'Dieses Medium von hier entfernen?',
+      prev: 'Vorheriges',
+      next: 'Nächstes',
+      urlPrompt: 'Webadresse des Mediums (Foto, Video, Archivseite):',
+      noGedInZip: 'Das Archiv enthält keine GEDCOM-Datei (.ged).',
+      archiveLoaded: '${n} Mediendateien aus dem Archiv übernommen.',
+      packing: 'Medien werden verpackt… ${i}/${n}',
+      zipDone: 'ZIP mit ${n} Mediendateien gespeichert.',
+      zipMissing: '${n} Dateien fehlen in diesem Browser und sind nur als Pfad enthalten.',
+      linked: '${n} Mediendateien zugeordnet, ${missing} weiterhin nicht gefunden.',
+      pruneConfirm: 'Alle im Browser gespeicherten Mediendateien löschen, die dieser Stammbaum nicht verwendet? Dateien anderer Stammbäume in diesem Browser gehen dabei ebenfalls verloren.',
+      pruned: '${n} ungenutzte Dateien entfernt.',
+      status: '${total} Medien: ${present} von ${local} Dateien in diesem Browser vorhanden, ${external} Web-Links.',
+    },
     dateWidget: {
       exact: 'exakt',
       about: 'ca.',
@@ -749,6 +793,15 @@ const I18N = {
       monthPlaceholder: 'Mon.',
       year: 'Jahr',
       yearPlaceholder: 'JJJJ',
+      calculated: 'berechn.',
+      between: 'zwischen',
+      from: 'von',
+      to: 'bis',
+      and: 'und',
+      until: 'bis',
+      asText: 'Als Text eingeben (für Angaben wie „1700/01“ oder „INT 1900 (lt. Volkszählung)“)',
+      asFields: 'Zurück zu den Feldern',
+      textPlaceholder: 'z. B. BET 1850 AND 1860',
     },
     month: {
       JAN: 'Jan', FEB: 'Feb', MAR: 'Mär', APR: 'Apr', MAY: 'Mai', JUN: 'Jun',
@@ -867,7 +920,7 @@ const I18N = {
       spouseGapHint: 'largest: ${n} years',
       spouseGapMaxTitle: 'Largest age gap',
       cousinCouples: 'Couples sharing an ancestor',
-      cousinCouplesHint: 'e.g. cousin marriages — provable within the tree',
+      cousinCouplesHint: 'a common ancestor within 7 generations, e.g. cousin marriages',
       span: 'Span (births)',
       spanHint: '${n} years',
       generations: 'Generations',
@@ -899,8 +952,12 @@ const I18N = {
       yaml: 'YAML (.yaml)',
       selGedcom: 'Selection as GEDCOM (.ged)',
       selJson: 'Selection as JSON (.json)',
+      withMedia: 'GEDCOM + media (.zip)',
+      withMediaTitle: 'The tree and every attached file as one zip — imports into other genealogy programs',
     },
     sidebar: {
+      surnameFilter: 'Filter family names…',
+      showAllSurnames: 'Show all ${n}',
       searchPlaceholder: 'Search name...',
       familyNames: 'Family Names',
       colorToggle: 'Colour of the person boxes: on = by family name, off = by male/female',
@@ -1032,10 +1089,19 @@ const I18N = {
       import: 'Load settings',
       reset: 'Reset everything',
       resetConfirm: 'Reset every setting to its default? The family tree itself and the geocoded place coordinates are kept.',
-      importDone: '{n} settings loaded. Reload to apply?',
+      importDone: '${n} settings loaded. Reload to apply?',
       importBadFile: 'That file does not contain any settings.',
       perfLog: 'Render timings in the console',
       perfLogTitle: 'Writes a timing line to the browser console on every repaint. For diagnosing slowness only — it costs performance itself. Takes effect after a reload.',
+      media: 'Media (photos, videos, documents)',
+      mediaTitle: 'Attach photos, videos and documents to people and families. Switched off, media already in the file is kept but not shown.',
+      locateMedia: 'Locate media files…',
+      locateMediaTitle: 'Pick the folder this tree\'s pictures live in — they are matched to the file paths in the tree.',
+      mediaStatus: 'Media status',
+      pruneMedia: 'Remove unused media',
+      pruneMediaTitle: 'Delete files stored in this browser that this tree does not use.',
+      autoDeceased: 'Mark the very old as deceased',
+      autoDeceasedTitle: 'Anyone born (or estimated from their relatives to be born) more than 110 years ago counts as deceased and is saved as such.',
     },
     treeSpacing: {
       title: 'Tree spacing',
@@ -1234,6 +1300,7 @@ const I18N = {
         deathCause: 'Cause of death',
         occupation: 'Occupation',
         note: 'Note',
+        media: 'Media',
         husband: 'Husband',
         wife: 'Wife',
         children: 'Children',
@@ -1522,6 +1589,36 @@ const I18N = {
       saveError: 'Error saving: ${msg}',
       readError: 'File could not be read.',
     },
+    media: {
+      title: 'Media',
+      add: 'Add',
+      addTitle: 'Attach photos, videos, recordings or documents — or drag files onto this panel',
+      addUrlTitle: 'Attach a link (web address)',
+      empty: 'No photos or documents yet. Drop files here or press "Add".',
+      portrait: 'Portrait',
+      makePortrait: 'Use as portrait',
+      caption: 'Caption',
+      missing: 'The file "${file}" is not in this browser. Use "Locate media files…" in the settings to point at its folder, or locate it here.',
+      openFile: 'Open file',
+      sharedWith: 'Also linked to ${n} other people/families.',
+      download: 'Download',
+      replace: 'Replace file',
+      locate: 'Locate file…',
+      remove: 'Remove',
+      removeConfirm: 'Remove this item from here?',
+      prev: 'Previous',
+      next: 'Next',
+      urlPrompt: 'Web address of the item (photo, video, archive page):',
+      noGedInZip: 'The archive contains no GEDCOM file (.ged).',
+      archiveLoaded: '${n} media files taken from the archive.',
+      packing: 'Packing media… ${i}/${n}',
+      zipDone: 'Saved a zip with ${n} media files.',
+      zipMissing: '${n} files are not in this browser and are included as paths only.',
+      linked: '${n} media files located, ${missing} still missing.',
+      pruneConfirm: 'Delete every media file stored in this browser that this tree does not use? Files belonging to other trees in this browser are deleted too.',
+      pruned: 'Removed ${n} unused files.',
+      status: '${total} media: ${present} of ${local} files present in this browser, ${external} web links.',
+    },
     dateWidget: {
       exact: 'exact',
       about: 'about',
@@ -1534,6 +1631,15 @@ const I18N = {
       monthPlaceholder: 'Mon.',
       year: 'Year',
       yearPlaceholder: 'YYYY',
+      calculated: 'calc.',
+      between: 'between',
+      from: 'from',
+      to: 'until',
+      and: 'and',
+      until: 'to',
+      asText: 'Type as text (for dates like "1700/01" or "INT 1900 (per census)")',
+      asFields: 'Back to the fields',
+      textPlaceholder: 'e.g. BET 1850 AND 1860',
     },
     month: {
       JAN: 'Jan', FEB: 'Feb', MAR: 'Mar', APR: 'Apr', MAY: 'May', JUN: 'Jun',
@@ -1573,7 +1679,15 @@ const I18N = {
   },
 };
 
-let currentLang = localStorage.getItem('gedcomVisLang') || 'en';
+// Storage can be switched off entirely (Safari private mode, some policies), and
+// then even reading it throws — which, here at the top of a classic script,
+// took the whole page down with it.
+let currentLang = (() => {
+  let v = null;
+  try { v = localStorage.getItem('gedcomVisLang'); } catch { /* no storage */ }
+  if (!v && typeof navigator !== 'undefined' && /^de\b/i.test(navigator.language || '')) v = 'de';
+  return v && I18N[v] ? v : 'en';
+})();
 
 function _getDictPath(dict, path) {
   const parts = path.split('.');
@@ -1597,7 +1711,7 @@ function t(key, vars = {}) {
 function setLanguage(lang) {
   if (!I18N[lang]) return;
   currentLang = lang;
-  localStorage.setItem('gedcomVisLang', lang);
+  try { localStorage.setItem('gedcomVisLang', lang); } catch { /* no storage */ }
   document.documentElement.lang = lang;
   applyTranslations();
   if (window._onLanguageChanged) window._onLanguageChanged(lang);
