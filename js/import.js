@@ -9,6 +9,7 @@
  */
 import { state } from './state.js';
 import { _fullRebuildGraph, _loadDatasetFile, escHtml, escJs, fileAccessSupported } from './gedcom-io.js';
+import { readMediaArchive } from './media.js';
 import {
   _tiApplyActions, _tiCleanText, _tiConnectivity, _tiGenerateActions,
   _tiParseGedcomForMerge, _tiParseStructuredJson, _tiParseText,
@@ -150,10 +151,11 @@ export function _imLoadFile(file, handle = null) {
   const isGed   = /\.ged$/.test(name);
   const isJson  = /\.json$/.test(name);
   const isYaml  = /\.ya?ml$/.test(name);
+  const isArchive = /\.(zip|gdz)$/.test(name);
   const isImage = _IMAGE_MIME.test(file.type) || /\.(png|jpe?g|gif|webp)$/.test(name);
 
   // First import on empty dataset: load directly, skip the review wizard.
-  if ((isGed || isJson || isYaml) && state.individuals.size === 0) {
+  if ((isGed || isJson || isYaml || isArchive) && state.individuals.size === 0) {
     closeTextImport();
     _loadDatasetFile(file, handle);
     return;
@@ -173,23 +175,30 @@ export function _imLoadFile(file, handle = null) {
     return;
   }
 
-  if (isGed || isJson || isYaml) {
+  if (isGed || isJson || isYaml || isArchive) {
     document.getElementById('import-replace-btn').style.display = '';
   }
 
+  // A GEDCOM to merge, read with the same encoding detection as a full load —
+  // an ANSEL or windows-1252 file read as UTF-8 merges names full of U+FFFD.
+  const mergeGedcom = text => {
+    const persons = _tiParseGedcomForMerge(text || '');
+    if (persons?.length) {
+      state._importJsonPersons = persons;
+      document.getElementById('import-text-area').value =
+        t('import.gedcomLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
+    } else {
+      _imShowError(t('import.parseError'));
+    }
+  };
+
   const reader = new FileReader();
   if (isGed) {
-    reader.onload = ev => {
-      const persons = _tiParseGedcomForMerge(ev.target.result || '');
-      if (persons?.length) {
-        state._importJsonPersons = persons;
-        document.getElementById('import-text-area').value =
-          t('import.gedcomLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
-      } else {
-        _imShowError(t('import.parseError'));
-      }
-    };
-    reader.readAsText(file, 'utf-8');
+    file.arrayBuffer().then(buf => mergeGedcom(GEDCOMModule.decodeGedcom(buf)))
+      .catch(err => _imShowError(t('errors.loadError', { msg: err.message })));
+  } else if (isArchive) {
+    readMediaArchive(file).then(arc => mergeGedcom(arc.text))
+      .catch(err => _imShowError(t('errors.loadError', { msg: err.message })));
   } else if (isJson) {
     reader.onload = ev => {
       try {

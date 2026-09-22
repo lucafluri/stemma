@@ -5,6 +5,8 @@ import * as GraphDataMod from './graph-data.js';
 import * as FindMod from './find.js';
 import * as ImportMod from './import.js';
 import * as MapViewMod from './map-view.js';
+import * as MediaMod from './media.js';
+import * as SearchMod from './search.js';
 import * as PanelsMod from './panels.js';
 import * as PlacesMod from './places.js';
 import * as RelationsMod from './relations.js';
@@ -13,10 +15,10 @@ import * as Render3dMod from './render-3d.js';
 import * as StatsMod from './stats.js';
 import * as TreeLayoutMod from './tree-layout.js';
 import { resetLinkColors, toggleAllSurnames } from './colors.js';
-import { _downloadBlob, _fullRebuildGraph, _tryRestoreAutosave, showDataUI, updateFileButtons } from './gedcom-io.js';
-import { focusOnPerson, updateFocusUI } from './graph-data.js';
+import { _downloadBlob, _fullRebuildGraph, _tryRestoreAutosave, showDataUI, syncMediaUI, updateFileButtons } from './gedcom-io.js';
+import { focusOnPerson, goToPerson, updateFocusUI } from './graph-data.js';
 import { openNodeContextMenu } from './context-menu.js';
-import { closeDetailPanel, startEdit } from './panels.js';
+import { _initPanelMediaDrop, closeDetailPanel, showFamDetail, showIndiDetail, startEdit } from './panels.js';
 import { closeRelationTool, highlightMode, openRelationTool, relPickSlot, relSearch, resetHighlight, updateHLButtons } from './relations.js';
 import { SLIDER_MAP, _rerenderNodes, applyFilter, applyPhysicsParams, autoSettle, centerOnPerson, centerView, reheatSimulation, refreshTreeLineageColoring, renderPresetList, resetView, schedulePhysicsParams, syncLabelStyleUI, syncNodeDragBtn, syncPhysicsUI, toggleNodeDrag, zoomToFit } from './render-2d.js';
 import { _push3DData, apply3DPhysics, build3DTimeline, cull3D, setCull3D, toggleView, update3DNames, update3DSceneInfo, updateViewToggleUI } from './render-3d.js';
@@ -24,6 +26,8 @@ import { exportSettings, importSettings, readSetting, resetSettings, saveSetting
 import { state } from './state.js';
 import { applyTimelineYFix } from './tree-layout.js';
 import { MOBILE_MAX_WIDTH, placeTopbarMenu } from './constants.js';
+import { linkMediaFolder, mediaAvailability, pruneStoredMedia } from './media.js';
+import { personLabel, searchPeople } from './search.js';
 
 // The topbar "Tools" menu. Same shape as the export split button's dropdown:
 // a one-shot outside-click listener closes it, so nothing has to be torn down
@@ -152,44 +156,46 @@ export function _initTouchDragGuard() {
 
 export function wasTouchDrag() { return state._touchDragged; }
 
-document.getElementById('search-input').addEventListener('input', function () {
-  const q = this.value.trim().toLowerCase();
+// The sidebar search: ranked, accent-insensitive, and able to reach anybody in
+// the file — picking someone the chart is not drawing re-centres it on them.
+let _searchHits = [];
+function _runSidebarSearch() {
+  const input = document.getElementById('search-input');
   const box = document.getElementById('search-results');
+  const q = input.value.trim();
   box.innerHTML = '';
+  _searchHits = [];
   if (q.length < 2) return;
 
-  const hits = [];
-  for (const [id, indi] of state.individuals) {
-    if ((indi.name || '').toLowerCase().includes(q) ||
-        (indi.surn || '').toLowerCase().includes(q) ||
-        (indi.givn || '').toLowerCase().includes(q)) {
-      hits.push({ id, indi });
-      if (hits.length >= 25) break;
-    }
-  }
-
-  for (const { id, indi } of hits) {
+  _searchHits = searchPeople(q, 25).map(h => h.id);
+  for (const id of _searchHits) {
     const el = document.createElement('div');
     el.className = 'result-item';
-    const yr = indi.birthYear ? ` (${indi.birthYear})` : '';
-    el.textContent = (indi.name || id) + yr;
-    el.addEventListener('click', () => {
-      document.getElementById('search-input').value = '';
-      box.innerHTML = '';
-      _closeMobileSidebar();
-      showIndiDetail(id);
-      zoomToNode(id);
-    });
+    el.textContent = personLabel(id);
+    el.addEventListener('click', () => _pickSearchHit(id));
     box.appendChild(el);
   }
 
-  if (!hits.length) {
+  if (!_searchHits.length) {
     const el = document.createElement('div');
-    el.className = 'result-item';
-    el.style.color = '#666';
+    el.className = 'result-item result-item--empty';
     el.textContent = t('detail.noMatches');
     box.appendChild(el);
   }
+}
+
+function _pickSearchHit(id) {
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-results').innerHTML = '';
+  _searchHits = [];
+  _closeMobileSidebar();
+  goToPerson(id);
+}
+
+document.getElementById('search-input').addEventListener('input', _runSidebarSearch);
+document.getElementById('search-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && _searchHits.length) { e.preventDefault(); _pickSearchHit(_searchHits[0]); }
+  else if (e.key === 'Escape') { e.target.value = ''; _runSidebarSearch(); e.target.blur(); }
 });
 
 document.addEventListener('click', e => {
@@ -219,7 +225,16 @@ document.addEventListener('keydown', e => {
       break;
     case 'v': case 'V': toggleView();             break;
     case 'g': case 'G': if (state.selectedIndiId) focusOnPerson(state.selectedIndiId); break;
-    case 'Escape':      closeDetailPanel();       break;
+    case 'Escape':
+      // A dialog or menu that is open takes Escape first.
+      if (document.getElementById('media-viewer')?.style.display === 'flex') break;
+      closeDetailPanel();
+      break;
+    case '/':
+      // Jump to the search box, as in most apps with one.
+      e.preventDefault();
+      document.getElementById('search-input')?.focus();
+      break;
   }
 });
 
@@ -233,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Touch support
   _initPanelSwipe();
   _initTouchDragGuard();
+  _initPanelMediaDrop();
 
   // View + focus controls — slider bounds/labels are (re)computed in
   // updateFocusUI() below, since they depend on the loaded file.
@@ -495,6 +511,27 @@ document.addEventListener('DOMContentLoaded', () => {
     perfCb.addEventListener('change', function () { writeSetting('perfLog', this.checked); });
   }
 
+  // Media attachments: the whole feature can be switched off.
+  const mediaCb = document.getElementById('media-enabled-toggle');
+  if (mediaCb) {
+    mediaCb.checked = state.mediaEnabled;
+    mediaCb.addEventListener('change', function () {
+      state.mediaEnabled = this.checked;
+      writeSetting('mediaEnabled', this.checked);
+      syncMediaUI();
+      _refreshDetailPanel();
+    });
+  }
+  const deadCb = document.getElementById('auto-deceased-toggle');
+  if (deadCb) {
+    deadCb.checked = state.autoDeceased;
+    deadCb.addEventListener('change', function () {
+      state.autoDeceased = this.checked;
+      writeSetting('autoDeceased', this.checked);
+    });
+  }
+  syncMediaUI();
+
   update3DSceneInfo();
 });
 
@@ -560,7 +597,35 @@ function _apRebuildScene() {
 
 export function exportSettingsFile() {
   _downloadBlob(JSON.stringify(exportSettings(), null, 2),
-    'gedcom-vis-settings.json', 'application/json');
+    'stemma-settings.json', 'application/json');
+}
+
+function _refreshDetailPanel() {
+  if (state._editingId) return;
+  if (state.selectedIndiId) showIndiDetail(state.selectedIndiId);
+  else if (state._lastShownFamId) showFamDetail(state._lastShownFamId);
+}
+
+/** Settings → "Locate media files…": pick the folder a tree's pictures live in. */
+export async function locateMediaFiles() {
+  const status = document.getElementById('status');
+  const res = await linkMediaFolder();
+  if (!res) return;
+  status.textContent = t('media.linked', { n: res.matched, missing: res.missing });
+  _refreshDetailPanel();
+}
+
+/** Settings → "Clean up stored media": drop files no record of this tree uses. */
+export async function cleanStoredMedia() {
+  if (!confirm(t('media.pruneConfirm'))) return;
+  const n = await pruneStoredMedia();
+  document.getElementById('status').textContent = t('media.pruned', { n });
+}
+
+/** Settings → how many of the tree's media files this browser actually has. */
+export async function reportMediaStatus() {
+  const a = await mediaAvailability();
+  document.getElementById('status').textContent = t('media.status', a);
 }
 
 export function importSettingsFile(input) {
@@ -626,7 +691,7 @@ function _onLanguageChanged() {
 // runs this after the *whole* graph's synchronous evaluation has settled,
 // regardless of which module happened to be the entry point.
 queueMicrotask(() => Object.assign(window, ChangesMod, ColorsMod, FindMod, GedcomIoMod, GraphDataMod, ImportMod,
-  MapViewMod, PanelsMod, PlacesMod, RelationsMod, Render2dMod, Render3dMod, StatsMod, TreeLayoutMod, {
+  MapViewMod, MediaMod, PanelsMod, PlacesMod, RelationsMod, Render2dMod, Render3dMod, SearchMod, StatsMod, TreeLayoutMod, {
     state,
     toggleSidebar,
     toggleToolsMenu,
@@ -638,4 +703,7 @@ queueMicrotask(() => Object.assign(window, ChangesMod, ColorsMod, FindMod, Gedco
     exportSettingsFile,
     importSettingsFile,
     resetAllSettings,
+    locateMediaFiles,
+    cleanStoredMedia,
+    reportMediaStatus,
   }));

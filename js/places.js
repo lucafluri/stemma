@@ -216,19 +216,50 @@ export function groupPlaces(counts = collectPlaces(), { merges = [] } = {}) {
   }
   for (const vs of byKey.values()) for (let i = 1; i < vs.length; i++) union(vs[0], vs[i]);
 
-  // Then join keys that only look related. ponytail: O(k²) over distinct
-  // place names — a few hundred in a large tree, so a plain double loop. If a
-  // file ever turns up with thousands, block by locality before comparing.
+  // Then join keys that only look related. Comparing every pair of distinct
+  // spellings is O(k²) — a large tree has thousands of places, and that was
+  // seventeen seconds before the dialog appeared. Instead each rule of
+  // _related() gets an index that can only produce pairs it might accept, and
+  // _related() itself still has the last word on every pair, so the groups are
+  // exactly the ones the pairwise loop made.
   const keys = [...byKey.keys()];
   // Folding drops commas, so a key cannot say where its locality ended. Both
   // spellings behind one key are asked: "Bern, CH" and "Bern CH" fold alike
   // but only the first knows that "bern" is the town.
   const locs = new Map(keys.map(k => [k, new Set(byKey.get(k).map(placeLocality))]));
-  for (let i = 0; i < keys.length; i++) {
-    for (let j = i + 1; j < keys.length; j++) {
-      if (!_related(keys[i], locs.get(keys[i]), keys[j], locs.get(keys[j]))) continue;
-      union(byKey.get(keys[i])[0], byKey.get(keys[j])[0]);
-    }
+  const join = (a, b) => union(byKey.get(a)[0], byKey.get(b)[0]);
+  const tryJoin = (a, b) => { if (a !== b && _related(a, locs.get(a), b, locs.get(b))) join(a, b); };
+  const bucket = (m, k, v) => { let arr = m.get(k); if (!arr) m.set(k, arr = []); arr.push(v); };
+
+  // 1. The same locality: everything in one bucket belongs together.
+  const byLoc = new Map();
+  for (const k of keys) for (const l of locs.get(k)) if (l) bucket(byLoc, l, k);
+  for (const ks of byLoc.values()) for (let i = 1; i < ks.length; i++) join(ks[0], ks[i]);
+
+  // 2./3. One typo apart — in the locality or in the whole name. Two strings one
+  // edit apart always share a "delete one letter" variant.
+  const byDel = new Map();
+  const delKeys = w => { const out = new Set([w]); for (let i = 0; i < w.length; i++) out.add(w.slice(0, i) + w.slice(i + 1)); return out; };
+  for (const k of keys) {
+    const words = new Set([k, ...locs.get(k)]);
+    for (const w of words) if (w && w.length >= TYPO_MIN_LEN) for (const d of delKeys(w)) bucket(byDel, d, k);
+  }
+  for (const ks of byDel.values()) {
+    if (ks.length < 2) continue;
+    for (let i = 0; i < ks.length; i++) for (let j = i + 1; j < ks.length; j++) tryJoin(ks[i], ks[j]);
+  }
+
+  // 4. One name's words a proper subset of the other's: look only at names
+  //    that contain the smaller one's rarest word.
+  const byTok = new Map();
+  const toks = new Map(keys.map(k => [k, [...new Set(k.split(' '))]]));
+  for (const k of keys) for (const tk of toks.get(k)) bucket(byTok, tk, k);
+  for (const k of keys) {
+    const mine = toks.get(k);
+    let rarest = null;
+    for (const tk of mine) if (!rarest || byTok.get(tk).length < byTok.get(rarest).length) rarest = tk;
+    if (!rarest) continue;
+    for (const other of byTok.get(rarest)) if (toks.get(other).length > mine.length) tryJoin(k, other);
   }
 
   for (const group of merges) {

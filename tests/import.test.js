@@ -238,6 +238,7 @@ function mergeApi(individuals, families) {
     `${lift('_tiNormName')}
      ${lift('_tiParseName')}
      ${lift('_tiLevenshtein')}
+     ${lift('_tiDeletionKeys')}
      ${lift('_tiNameScore')}
      ${lift('_tiGenerateActions')}
      ${lift('_tiConnectivity')}

@@ -23,9 +23,8 @@
 
 import { MAP_DOT_COLOR_DEFAULT, minMax } from './constants.js';
 import { _setDirty, escHtml, escJs } from './gedcom-io.js';
-import { showIndiDetail } from './panels.js';
+import { goToPerson } from './graph-data.js';
 import { placeFields, placeKey } from './places.js';
-import { zoomToNode } from './render-2d.js';
 import { lsGet, saveSetting } from './settings.js';
 import { state } from './state.js';
 
@@ -861,8 +860,7 @@ export function selectMapPlace(plac) {
 export function mapGoToPerson(id) {
   if (!id || !state.individuals.has(id)) return;
   closeMapView();
-  showIndiDetail(id);
-  zoomToNode(id);
+  goToPerson(id);
 }
 
 // Placed events move when a record is edited, and the dialog holds its own copy

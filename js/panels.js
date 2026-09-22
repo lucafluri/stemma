@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { _fullRebuildGraph, _gedcomDateValue, _gedcomDateWidget, _resetGedcomDateWidget, _safeId, escAttr, escHtml, escJs, showDataUI } from './gedcom-io.js';
+import { _fullRebuildGraph, _gedcomDateValue, _gedcomDateWidget, _resetGedcomDateWidget, _safeId, _setDirty, escAttr, escHtml, escJs, showDataUI } from './gedcom-io.js';
 import { _updateCenterPersonBtn } from './graph-data.js';
 import { resetHighlight, updateHLButtons } from './relations.js';
 import { flashNode } from './render-2d.js';
@@ -7,6 +7,8 @@ import { _setOrbitTarget3D } from './render-3d.js';
 import { _acAttachFields } from './autocomplete.js';
 import { setPlace } from './places.js';
 import { MOBILE_MAX_WIDTH } from './constants.js';
+import { dropMediaOn, hydrateMedia, mediaEnabled, mediaSectionHtml, onMediaChanged, renderPortrait } from './media.js';
+import { personLabel, searchPeople } from './search.js';
 
 // Re-exported so the window bulk-assign in main.js still reaches them.
 export * from './autocomplete.js';
@@ -15,9 +17,11 @@ export function showIndiDetail(id) {
   const indi = state.individuals.get(id);
   if (!indi) return;
   state.selectedIndiId = id;
+  state._lastShownFamId = null;
   _updateCenterPersonBtn();
 
   document.getElementById('detail-name').textContent = indi.name || id;
+  renderPortrait(id);
 
   let html = '';
 
@@ -84,12 +88,13 @@ export function showIndiDetail(id) {
 
   // Note
   if (indi.note) {
-    html += row(t('detail.note'), `<span style="font-size:11px;color:#999">${escHtml(indi.note).replace(/\n/g, '<br>')}</span>`);
+    html += row(t('detail.note'), `<span class="detail-note">${escHtml(indi.note).replace(/\n/g, '<br>')}</span>`);
   }
+
+  html += mediaSectionHtml(id);
 
   // Quick-add relative — one click from the read-only view, no need to enter edit mode
   html += `<div class="detail-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
-    <datalist id="ef-place-dl">${_buildPlaceDatalist()}</datalist>
     <div class="ef-rel-add-row">
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; ${t('detail.addParent')}</button>
       <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; ${t('detail.addSpouse')}</button>
@@ -256,6 +261,8 @@ export function showFamDetail(id) {
   if (!fam) return;
   state._lastShownFamId = id;
   state.selectedIndiId = null;
+  _updateCenterPersonBtn();
+  renderPortrait(id);
 
   const names = [fam.husb, fam.wife].filter(Boolean)
     .map(pid => state.individuals.get(pid)?.name || pid).join(' & ');
@@ -292,6 +299,8 @@ export function showFamDetail(id) {
     html += `</div>`;
   }
 
+  html += mediaSectionHtml(id);
+
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'block';
@@ -307,6 +316,9 @@ export function openPanel() {
 }
 
 export function closeDetailPanel() {
+  // Closing mid-edit is cancelling: the stubs a half-filled form created (a new
+  // person, an inline partner or child) must not stay behind as nameless people.
+  if (state._editingId) { _discardEdit(); }
   document.getElementById('main-layout').classList.remove('panel-open');
   const panel = document.getElementById('detail-panel');
   panel.classList.remove('panel-visible');
@@ -315,10 +327,12 @@ export function closeDetailPanel() {
   document.getElementById('delete-confirm-bar').style.display = 'none';
   state._pendingDeleteId = null; state._pendingDeleteType = null;
   state.selectedIndiId = null;
+  state._lastShownFamId = null;
   _updateCenterPersonBtn();
   resetHighlight();
   if (state.currentView === '3d') _setOrbitTarget3D(null);
   _hideReopenPill();
+  renderPortrait(null);
   // Cancelling the very first person discards the stub, which leaves the tree
   // empty again — the empty state has to come back rather than leaving a blank
   // canvas with no way on from it.
@@ -391,7 +405,7 @@ export function _buildFamEditSections(personId) {
       </div>
       <div class="edit-section">
         <div class="edit-label">${t('detail.marriagePlace')}</div>
-        <input class="edit-input" id="ef-fam-${sid}-mplac" list="ef-place-dl" autocomplete="off" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
+        <input class="edit-input" id="ef-fam-${sid}-mplac" autocomplete="off" value="${escAttr(fam.marriages?.[0]?.plac || '')}">
       </div>
       <label class="edit-checkbox-row">
         <input type="checkbox" id="ef-fam-${sid}-div"${fam.div ? ' checked' : ''}>
@@ -401,48 +415,26 @@ export function _buildFamEditSections(personId) {
   }).join('');
 }
 
-export function _buildPersonDatalist(excludeId) {
-  let opts = '';
-  for (const [pid, p] of state.individuals) {
-    if (pid === excludeId) continue;
-    const yr = p.birthYear || (state._estimatedYears?.get(pid));
-    const maiden = p.maidenName ? ` (${t('tooltip.born', { name: p.maidenName })})` : '';
-    const display = `${p.name || pid}${maiden}${yr ? ` *${yr}` : ''}`;
-    opts += `<option value="${escAttr(display)}" data-id="${escAttr(pid)}">`;
-  }
-  return opts;
-}
-
-export function _buildPlaceDatalist() {
-  const places = new Set();
-  for (const i of state.individuals.values()) {
-    if (i.birth?.plac) places.add(i.birth.plac);
-    if (i.death?.plac) places.add(i.death.plac);
-  }
-  for (const f of state.families.values()) {
-    for (const m of f.marriages || []) if (m.plac) places.add(m.plac);
-  }
-  return [...places].sort().map(p => `<option value="${escAttr(p)}">`).join('');
-}
-
-export function _resolvePersonInput(val) {
+/**
+ * What a person field refers to: the person picked from its suggestion list,
+ * or failing that the best match for what was typed. The picked id wins
+ * because two people can share a name — the text alone cannot say which.
+ */
+export function _resolvePersonInput(val, input = null) {
+  const picked = input?.dataset?.personId;
+  if (picked && input.value === input.dataset.personLabel && state.individuals.has(picked)) return picked;
   if (!val) return null;
   val = val.trim();
   // Direct ID match
   if (state.individuals.has(val)) return val;
-  // Strip maiden name / year suffix added by _buildPersonDatalist (e.g. "Name (geb. X) *1900")
-  const baseName = val.replace(/\s*\([^)]*\)/, '').replace(/\s*\*\d{4}$/, '').trim();
-  // Exact match on full datalist label or base name
+  // The label a picker shows: "Name (née X) *1900"
+  for (const [pid] of state.individuals) if (personLabel(pid) === val) return pid;
+  const baseName = val.replace(/\s*\([^)]*\)/, '').replace(/\s*\*~?\d{3,4}$/, '').trim();
   for (const [pid, p] of state.individuals) {
     const name = p.name || pid;
     if (name === val || name === baseName) return pid;
   }
-  // Partial match on base name
-  const lower = baseName.toLowerCase();
-  for (const [pid, p] of state.individuals) {
-    if ((p.name || pid).toLowerCase().includes(lower)) return pid;
-  }
-  return null;
+  return searchPeople(baseName, 1)[0]?.id || null;
 }
 
 export function _renderPendingRelations() {
@@ -470,8 +462,8 @@ export function addRelation() {
   const typeEl = document.getElementById('ef-rel-type');
   if (!input || !typeEl) return;
   const type = typeEl.value;
-  const targetId = _resolvePersonInput(input.value);
-  if (!targetId) {
+  const targetId = _resolvePersonInput(input.value, input);
+  if (!targetId || targetId === state._editingId) {
     input.style.borderColor = '#787878';
     setTimeout(() => { input.style.borderColor = ''; }, 1200);
     return;
@@ -479,6 +471,7 @@ export function addRelation() {
   if (state._pendingRelations.some(r => r.targetId === targetId && r.type === type)) return;
   state._pendingRelations.push({ targetId, type });
   input.value = '';
+  delete input.dataset.personId;
   _renderPendingRelations();
 }
 
@@ -511,18 +504,7 @@ export function confirmNewPersonRelation() {
     return;
   }
 
-  const newId = getNextIndiId();
-  const displayName = fullName.length > 24
-    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : fullName.slice(0, 22) + '…')
-    : fullName;
-
-  state.individuals.set(newId, {
-    id: newId, name: fullName, givn, surn, maidenName: '', sex,
-    birth: { date: '', plac: '' },
-    death: { date: '', plac: '', caus: '' },
-    deceased: false, birthYear: null,
-    famc: [], fams: [], occu: '', note: '', displayName,
-  });
+  const newId = _makeNewIndi(givn, surn, sex);
 
   state._pendingRelations.push({ targetId: newId, type, isNew: true });
   _renderPendingRelations();
@@ -564,19 +546,25 @@ export function _renderExistingRelations(id) {
   const rels = _getExistingRelations(id).filter(
     r => !state._removedRelations.some(rem => rem.targetId === r.targetId && rem.type === r.type && rem.famId === r.famId)
   );
+  // Kept for removeExistingRelation(), which is handed an index — the record
+  // itself used to be JSON-quoted into the onclick attribute, which broke on
+  // any label with an apostrophe in it.
+  state._existingRels = rels;
   if (!rels.length) { el.innerHTML = ''; return; }
   el.innerHTML = rels.map((r, idx) => {
     const p = state.individuals.get(r.targetId);
     const name = p ? escHtml(p.displayName || p.name) : escHtml(r.targetId);
     return `<div class="ef-rel-item ef-existing-rel">
-      <span class="ef-rel-type">${r.label}</span>
+      <span class="ef-rel-type">${escHtml(r.label)}</span>
       <span class="ef-rel-name">${name}</span>
-      <button class="ef-rel-remove" onclick="removeExistingRelation(${JSON.stringify(r).split('"').join("'")})" title="${t('import.unlinkTitle')}">&#x2715;</button>
+      <button class="ef-rel-remove" onclick="removeExistingRelation(${idx})" title="${t('import.unlinkTitle')}">&#x2715;</button>
     </div>`;
   }).join('');
 }
 
-export function removeExistingRelation(r) {
+export function removeExistingRelation(idx) {
+  const r = typeof idx === 'number' ? state._existingRels?.[idx] : idx;
+  if (!r) return;
   if (!state._removedRelations.some(x => x.targetId === r.targetId && x.type === r.type && x.famId === r.famId)) {
     state._removedRelations.push(r);
   }
@@ -592,9 +580,6 @@ export function showIndiEditForm(id) {
 
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
-
-  const datalistHtml = _buildPersonDatalist(id);
-  const placeDatalistHtml = _buildPlaceDatalist();
 
   _setPanelContent(`
     <div class="edit-section">
@@ -623,7 +608,7 @@ export function showIndiEditForm(id) {
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.birthPlace')}</div>
-      <input class="edit-input" id="ef-bplac" list="ef-place-dl" autocomplete="off" value="${escAttr(i.birth.plac)}">
+      <input class="edit-input" id="ef-bplac" autocomplete="off" value="${escAttr(i.birth.plac)}">
     </div>
     <label class="edit-checkbox-row">
       <input type="checkbox" id="ef-dead"${i.deceased?' checked':''} onchange="_toggleDeathFields(this.checked)">
@@ -636,7 +621,7 @@ export function showIndiEditForm(id) {
       </div>
       <div class="edit-section">
         <div class="edit-label">${t('detail.deathPlace')}</div>
-        <input class="edit-input" id="ef-dplac" list="ef-place-dl" autocomplete="off" value="${escAttr(i.death.plac)}">
+        <input class="edit-input" id="ef-dplac" autocomplete="off" value="${escAttr(i.death.plac)}">
       </div>
       <div class="edit-section">
         <div class="edit-label">${t('detail.causeOfDeath')}</div>
@@ -662,9 +647,7 @@ export function showIndiEditForm(id) {
         <div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyNewRelations')}</div>
       </div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-rel-person" list="ef-rel-datalist" placeholder="${t('detail.searchPerson')}" autocomplete="off">
-        <datalist id="ef-rel-datalist">${datalistHtml}</datalist>
-        <datalist id="ef-place-dl">${placeDatalistHtml}</datalist>
+        <input class="edit-input" id="ef-rel-person" data-person-picker="${escAttr(id)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <select class="edit-select" id="ef-rel-type" style="width:auto;min-width:100px">
           <option value="child">${t('detail.relationChild')}</option>
           <option value="parent">${t('detail.relationParent')}</option>
@@ -723,24 +706,28 @@ export function commitIndiEdit() {
   // Rebuild name from parts
   i.name = (givn ? givn + ' ' : '') + (surn ? surn : '');
   if (!i.name.trim()) i.name = state._editingId.replace(/@/g, '');
-  // Rebuild displayName
-  i.displayName = i.name.length > 24
-    ? (givn ? givn + (surn ? ' ' + surn[0] + '.' : '') : i.name.slice(0, 22) + '…')
-    : i.name;
+  i.displayName = GEDCOMModule.displayNameOf(givn, surn, i.name);
 
   i.sex        = document.getElementById('ef-sex').value;
   i.birth.date = _gedcomDateValue('ef-bdate');
   setPlace(i.birth, document.getElementById('ef-bplac').value);
   i.deceased   = document.getElementById('ef-dead').checked;
-  i.death.date = _gedcomDateValue('ef-ddate');
-  setPlace(i.death, document.getElementById('ef-dplac').value);
-  i.death.caus = document.getElementById('ef-dcaus').value.trim();
+  if (i.deceased) {
+    i.death.date = _gedcomDateValue('ef-ddate');
+    setPlace(i.death, document.getElementById('ef-dplac').value);
+    i.death.caus = document.getElementById('ef-dcaus').value.trim();
+  } else {
+    // A death date is itself the statement that somebody died — left in place
+    // it wrote a DEAT record on save and the tick came back on the next load.
+    i.death.date = '';
+    setPlace(i.death, '');
+    i.death.caus = '';
+  }
   i.occu       = document.getElementById('ef-occu').value.trim();
   i.note       = document.getElementById('ef-note').value;
 
-  // Re-extract birth year
-  const ym = i.birth.date.match(/\b(\d{4})\b/);
-  i.birthYear = ym ? +ym[1] : null;
+  // Re-extract birth year (a baptism date stands in when there is no birth date)
+  i.birthYear = GEDCOMModule.birthYearOf(i);
 
   // ── Save inline family (marriage) edits ──
   for (const famId of i.fams) {
@@ -752,39 +739,11 @@ export function commitIndiEdit() {
       fam.marriages[0].date = _gedcomDateValue('ef-fam-' + sid + '-mdate');
       setPlace(fam.marriages[0], document.getElementById('ef-fam-' + sid + '-mplac')?.value || '');
       fam.div       = document.getElementById('ef-fam-' + sid + '-div')?.checked ?? fam.div;
+      if (!fam.div) fam.divDate = '';
     }
   }
 
-  // ── Process removed relationships ──
-  for (const r of state._removedRelations) {
-    const fam = state.families.get(r.famId);
-    if (!fam) continue;
-    if (r.type === 'parent') {
-      // Remove this person as a child from that family
-      fam.chil = fam.chil.filter(c => c !== state._editingId);
-      i.famc = i.famc.filter(f => f !== r.famId);
-      // Nullify the specific parent slot
-      if (fam.husb === r.targetId) fam.husb = null;
-      else if (fam.wife === r.targetId) fam.wife = null;
-    } else if (r.type === 'spouse') {
-      const spouse = state.individuals.get(r.targetId);
-      fam.husb === state._editingId ? (fam.husb = null) : (fam.wife = null);
-      i.fams = i.fams.filter(f => f !== r.famId);
-      if (spouse) spouse.fams = spouse.fams.filter(f => f !== r.famId);
-    } else if (r.type === 'child') {
-      const child = state.individuals.get(r.targetId);
-      fam.chil = fam.chil.filter(c => c !== r.targetId);
-      if (child) child.famc = child.famc.filter(f => f !== r.famId);
-    }
-    // Clean up empty families
-    if (!fam.husb && !fam.wife && !fam.chil.length) {
-      state.families.delete(r.famId);
-      for (const [, p] of state.individuals) {
-        p.famc = p.famc.filter(f => f !== r.famId);
-        p.fams = p.fams.filter(f => f !== r.famId);
-      }
-    }
-  }
+  _applyRemovedRelations(state._editingId, state._removedRelations);
   state._removedRelations = [];
 
   // ── Process pending relationships ──
@@ -803,10 +762,91 @@ export function commitIndiEdit() {
   showIndiDetail(id);
 }
 
+/** Delete a family, and every pointer to it, once it joins nobody. */
+function _dropFamily(famId) {
+  if (!state.families.delete(famId)) return;
+  for (const p of state.individuals.values()) {
+    if (p.famc.includes(famId)) p.famc = p.famc.filter(f => f !== famId);
+    if (p.fams.includes(famId)) p.fams = p.fams.filter(f => f !== famId);
+  }
+}
+
+function _dropIfEmpty(famId) {
+  const fam = state.families.get(famId);
+  if (fam && !fam.husb && !fam.wife && !fam.chil.length) _dropFamily(famId);
+}
+
+/** A family in which `pid` is the only parent — found, or made. */
+function _singleParentFamily(pid) {
+  const p = state.individuals.get(pid);
+  for (const fid of p?.fams || []) {
+    const f = state.families.get(fid);
+    if (f && (f.husb === pid) !== (f.wife === pid) && !(f.husb && f.wife)) return f;
+  }
+  const fam = { id: getNextFamId(), husb: null, wife: null, chil: [], marriages: [], div: false, divDate: '' };
+  if (p?.sex === 'F') fam.wife = pid; else fam.husb = pid;
+  state.families.set(fam.id, fam);
+  if (p && !p.fams.includes(fam.id)) p.fams.push(fam.id);
+  return fam;
+}
+
+/**
+ * Take relationships off a person.
+ *
+ * A child belongs to a family, not to each parent separately, so "not this
+ * man's child" used to be done by emptying the father slot of the whole family
+ * — which also took him away from the mother and from every sibling. Now the
+ * child leaves the family; if one parent is still theirs, they move to a family
+ * of that parent alone. Removing a partner takes the partner (and their back
+ * pointer) out of the family and leaves the children with the person being
+ * edited; a childless family left with one person in it goes altogether.
+ */
+export function _applyRemovedRelations(me, removed) {
+  const i = state.individuals.get(me);
+  if (!i) return;
+  const parentRemovals = new Map();   // famId → Set of parent ids no longer theirs
+  for (const r of removed) {
+    const fam = state.families.get(r.famId);
+    if (!fam) continue;
+    if (r.type === 'parent') {
+      if (!parentRemovals.has(r.famId)) parentRemovals.set(r.famId, new Set());
+      parentRemovals.get(r.famId).add(r.targetId);
+    } else if (r.type === 'spouse') {
+      const spouse = state.individuals.get(r.targetId);
+      if (fam.husb === r.targetId) fam.husb = null;
+      else if (fam.wife === r.targetId) fam.wife = null;
+      if (spouse) spouse.fams = spouse.fams.filter(f => f !== r.famId);
+      if (!fam.chil.length) _dropFamily(r.famId);
+    } else if (r.type === 'child') {
+      const child = state.individuals.get(r.targetId);
+      fam.chil = fam.chil.filter(c => c !== r.targetId);
+      if (child) child.famc = child.famc.filter(f => f !== r.famId);
+      _dropIfEmpty(r.famId);
+    }
+  }
+  for (const [famId, gone] of parentRemovals) {
+    const fam = state.families.get(famId);
+    if (!fam) continue;
+    const kept = [fam.husb, fam.wife].filter(p => p && !gone.has(p));
+    fam.chil = fam.chil.filter(c => c !== me);
+    i.famc = i.famc.filter(f => f !== famId);
+    if (kept.length === 1 && fam.husb && fam.wife) {
+      const single = _singleParentFamily(kept[0]);
+      if (!single.chil.includes(me)) single.chil.push(me);
+      if (!i.famc.includes(single.id)) i.famc.push(single.id);
+    } else if (kept.length === 1) {
+      // The family was already just this one parent — stay in it.
+      fam.chil.push(me);
+      i.famc.push(famId);
+    }
+    _dropIfEmpty(famId);
+  }
+}
+
 export function _applyRelation(editingPersonId, rel) {
   const i = state.individuals.get(editingPersonId);
   const target = state.individuals.get(rel.targetId);
-  if (!i || !target) return;
+  if (!i || !target || editingPersonId === rel.targetId) return;
 
   if (rel.type === 'child') {
     // New person is a CHILD OF target → target is parent
@@ -898,7 +938,7 @@ export function _makeNewIndi(givn, surn, sex, extra = {}) {
     birth: { date: birthDate, plac: extra.birthPlac || '' },
     death: { date: extra.deathDate || '', plac: extra.deathPlac || '', caus: '' },
     deceased: !!extra.deceased, birthYear: ym ? +ym[1] : null, famc: [], fams: [], occu: '', note: '',
-    displayName: fullName.length > 24 ? (givn || fullName.slice(0, 22) + '…') : fullName,
+    displayName: GEDCOMModule.displayNameOf(givn, surn, fullName),
   });
   return newId;
 }
@@ -918,7 +958,7 @@ export function _personNameSexHtml(prefix, defaultSurn = '') {
 export function _personVitalsHtml(prefix) {
   return `<div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.birthDate')}</div>
     ${_gedcomDateWidget(prefix + '-bdate', '')}
-    <input class="edit-input" id="${prefix}-bplac" list="ef-place-dl" autocomplete="off" placeholder="${t('detail.birthPlace')}" style="margin-top:4px">
+    <input class="edit-input" id="${prefix}-bplac" autocomplete="off" placeholder="${t('detail.birthPlace')}" style="margin-top:4px">
     <label class="edit-checkbox-row" style="margin-top:6px">
       <input type="checkbox" id="${prefix}-dead" onchange="document.getElementById('${prefix}-death-fields').style.display=this.checked?'block':'none'">
       ${t('detail.deceased')}
@@ -926,7 +966,7 @@ export function _personVitalsHtml(prefix) {
     <div id="${prefix}-death-fields" style="display:none;margin-top:4px">
       <div class="edit-label" style="font-size:11px">${t('detail.deathDate')}</div>
       ${_gedcomDateWidget(prefix + '-ddate', '')}
-      <input class="edit-input" id="${prefix}-dplac" list="ef-place-dl" autocomplete="off" placeholder="${t('detail.deathPlace')}" style="margin-top:4px">
+      <input class="edit-input" id="${prefix}-dplac" autocomplete="off" placeholder="${t('detail.deathPlace')}" style="margin-top:4px">
     </div>`;
 }
 
@@ -1018,21 +1058,18 @@ export function showFamEditForm(id) {
   document.getElementById('detail-edit-bar').style.display = 'none';
   document.getElementById('detail-buttons').style.display = 'none';
 
-  const dl = _buildPersonDatalist(null);
-  const placeDl = _buildPlaceDatalist();
   const husbName = f.husb ? (state.individuals.get(f.husb)?.name || f.husb) : '';
   const wifeName = f.wife ? (state.individuals.get(f.wife)?.name || f.wife) : '';
 
   state._famEditMarriages = (f.marriages && f.marriages.length)
-    ? f.marriages.map(m => ({ date: m.date || '', plac: m.plac || '', types: [...(m.types || [])] }))
+    ? f.marriages.map(m => ({ ...m, date: m.date || '', plac: m.plac || '', types: [...(m.types || [])] }))
     : [{ date: '', plac: '', types: [] }];
 
   _setPanelContent(`
     <div class="edit-section">
       <div class="edit-label">${t('detail.partner1')}</div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-husb" list="ef-husb-dl" value="${escAttr(husbName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
-        <datalist id="ef-husb-dl">${dl}</datalist>
+        <input class="edit-input" id="ef-husb" data-person-picker="" value="${escAttr(husbName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <button class="ef-rel-remove" onclick="document.getElementById('ef-husb').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
       ${_famEditNewPartnerFormHtml('husb')}
@@ -1040,15 +1077,13 @@ export function showFamEditForm(id) {
     <div class="edit-section">
       <div class="edit-label">${t('detail.partner2')}</div>
       <div class="ef-rel-add-row">
-        <input class="edit-input" id="ef-wife" list="ef-wife-dl" value="${escAttr(wifeName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
-        <datalist id="ef-wife-dl">${dl}</datalist>
+        <input class="edit-input" id="ef-wife" data-person-picker="" value="${escAttr(wifeName)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
         <button class="ef-rel-remove" onclick="document.getElementById('ef-wife').value=''" title="${t('import.unlinkTitle')}">&#x2715;</button>
       </div>
       ${_famEditNewPartnerFormHtml('wife')}
     </div>
     <div class="edit-section">
       <div class="edit-label">${t('detail.ceremonies')}</div>
-      <datalist id="ef-place-dl">${placeDl}</datalist>
       <div id="ef-fam-marr-list"></div>
       <button class="ef-toggle-new-btn" onclick="_famEditAddMarr()" style="margin-top:4px">&#x2795; ${t('detail.addCeremony')}</button>
     </div>
@@ -1066,8 +1101,7 @@ export function showFamEditForm(id) {
       <div class="edit-label">${t('detail.children')}</div>
       <div id="ef-fam-chil-list"></div>
       <div class="ef-rel-add-row" style="margin-top:4px">
-        <input class="edit-input" id="ef-fam-chil-search" list="ef-fam-chil-dl" placeholder="${t('detail.searchChild')}" autocomplete="off">
-        <datalist id="ef-fam-chil-dl">${dl}</datalist>
+        <input class="edit-input" id="ef-fam-chil-search" data-person-picker="" placeholder="${t('detail.searchChild')}" autocomplete="off">
         <button class="ef-rel-add-btn" onclick="_famEditAddChild()" title="${t('detail.addChildTitle')}">+</button>
       </div>
       <button class="ef-toggle-new-btn" onclick="_famEditToggleNewChild()" style="margin-top:4px">&#x2795; ${t('detail.newChild')}</button>
@@ -1166,7 +1200,7 @@ export function _famEditRenderMarriages() {
       <div class="edit-label" style="font-size:11px">${t('detail.date')}</div>
       ${_gedcomDateWidget('ef-marr-' + i + '-date', m.date)}
       <div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.place')}</div>
-      <input class="edit-input" id="ef-marr-${i}-plac" list="ef-place-dl" autocomplete="off" value="${escAttr(m.plac)}" placeholder="${t('detail.place')}">
+      <input class="edit-input" id="ef-marr-${i}-plac" autocomplete="off" value="${escAttr(m.plac)}" placeholder="${t('detail.place')}">
     </div>`;
   }).join('');
 }
@@ -1239,16 +1273,17 @@ export function _famEditAddChild() {
   if (!inp) return;
   const val = inp.value.trim();
   if (!val) return;
-  const id = _resolvePersonInput(val);
-  if (!id) { inp.style.borderColor = '#787878'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
+  const id = _resolvePersonInput(val, inp);
   const f = state.families.get(state._editingId);
   if (!f) return;
+  if (!id || id === f.husb || id === f.wife) { inp.style.borderColor = '#787878'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
   if (f.chil.includes(id) && !state._famEditRemovedChil.has(id)) return;
   if (state._famEditPendingChil.some(c => c.id === id)) return;
   const p = state.individuals.get(id);
   state._famEditPendingChil.push({ id, name: p?.name || id, isNew: false });
   state._famEditRemovedChil.delete(id);
   inp.value = '';
+  delete inp.dataset.personId;
   _famEditRenderChildren(f);
 }
 
@@ -1286,12 +1321,15 @@ export function commitFamEdit() {
 
   // Marriages
   _famEditSyncMarriagesFromDom();
-  f.marriages = state._famEditMarriages.filter(m => m.date || m.plac || m.types.length);
-  if (!f.marriages.length) f.marriages = [{ date: '', plac: '', types: [] }];
+  // A ceremony with nothing but its sources (or a bare "MARR Y") is still a
+  // recorded marriage; only the form's empty placeholders are dropped.
+  f.marriages = state._famEditMarriages.filter(m => m.date || m.plac || m.types.length || m._sub || m._y);
   state._famEditMarriages = [];
 
   // Divorce
   f.div     = document.getElementById('ef-div').checked;
+  // A child cannot be their own parent.
+  if (f.husb && f.husb === f.wife) f.wife = null;
   f.divDate = f.div ? _gedcomDateValue('ef-divdate') : '';
 
   // Parents
@@ -1307,7 +1345,7 @@ export function commitFamEdit() {
     const stubId = state._famEditNewPartner[slot];
     if (stubId && state.individuals.get(stubId)?.name === val) return stubId;
     if (oldId && state.individuals.get(oldId)?.name === val) return oldId;
-    return _resolvePersonInput(val);
+    return _resolvePersonInput(val, document.getElementById(slot === 'husb' ? 'ef-husb' : 'ef-wife'));
   };
   f.husb = husbVal ? (resolveSlot('husb', husbVal, oldHusb) || f.husb) : null;
   f.wife = wifeVal ? (resolveSlot('wife', wifeVal, oldWife) || f.wife) : null;
@@ -1351,7 +1389,9 @@ export function commitFamEdit() {
   showFamDetail(id);
 }
 
-export function cancelEdit() {
+/** Throw away everything an open form created but never committed. Returns
+ *  the id that was being edited and whether it was itself a new stub. */
+function _discardEdit() {
   const id = state._editingId;
   state._editingId = null; state._editingType = null;
   for (const rel of state._pendingRelations) {
@@ -1369,19 +1409,18 @@ export function cancelEdit() {
     if (state._famEditNewPartner[slot]) state.individuals.delete(state._famEditNewPartner[slot]);
   }
   state._famEditNewPartner = { husb: null, wife: null };
-  if (state._isNewRecord) {
-    state._isNewRecord = false;
-    // Discard the stub record that was created for this cancelled new entry
-    state.individuals.delete(id);
-    closeDetailPanel();
-    return;
-  }
-  if (id) {
-    if (state.individuals.has(id)) showIndiDetail(id);
-    else showFamDetail(id);
-  } else {
-    closeDetailPanel();
-  }
+  const wasNew = state._isNewRecord;
+  state._isNewRecord = false;
+  // Discard the stub record that was created for this cancelled new entry
+  if (wasNew && id) state.individuals.delete(id);
+  return { id, wasNew };
+}
+
+export function cancelEdit() {
+  const { id, wasNew } = _discardEdit();
+  if (wasNew || !id) { closeDetailPanel(); return; }
+  if (state.individuals.has(id)) showIndiDetail(id);
+  else showFamDetail(id);
 }
 
 export function deleteCurrentRecord() {
@@ -1444,8 +1483,17 @@ export function confirmDeleteRecord() {
     state.families.delete(id);
   }
 
+  // Media only this record linked goes with it (the stored file stays in the
+  // browser until the settings panel is asked to clean up).
+  _pruneUnlinkedMedia();
   closeDetailPanel();
   _fullRebuildGraph({ warm: true });
+}
+
+function _pruneUnlinkedMedia() {
+  const linked = new Set();
+  for (const o of [...state.individuals.values(), ...state.families.values()]) for (const id of o.media || []) linked.add(id);
+  for (const id of [...state.media.keys()]) if (!linked.has(id)) state.media.delete(id);
 }
 
 export function startEdit() {
@@ -1460,27 +1508,29 @@ export function startEdit() {
   }
 }
 
-export function getNextIndiId() {
-  let i = 1;
-  while (state.individuals.has(`@I${i}@`)) i++;
-  return `@I${i}@`;
+// Where the search for a free id starts. Scanning up from 1 every time was a
+// walk over the whole tree per new person — quadratic when an import adds a
+// few thousand of them. Reset whenever a different tree is loaded.
+const _idHint = { I: 1, F: 1 };
+
+function _nextId(prefix, map) {
+  // A hint far past the tree's size belongs to a bigger tree loaded earlier;
+  // start low again so ids stay compact.
+  if (_idHint[prefix] > map.size * 2 + 1000) _idHint[prefix] = 1;
+  let n = _idHint[prefix];
+  while (map.has(`@${prefix}${n}@`)) n++;
+  _idHint[prefix] = n + 1;
+  return `@${prefix}${n}@`;
 }
 
-export function getNextFamId() {
-  let i = 1;
-  while (state.families.has(`@F${i}@`)) i++;
-  return `@F${i}@`;
-}
+export function getNextIndiId() { return _nextId('I', state.individuals); }
+
+export function getNextFamId() { return _nextId('F', state.families); }
 
 export function addNewPerson() {
   const id = getNextIndiId();
-  state.individuals.set(id, {
-    id, name: '', givn: '', surn: '', maidenName: '', sex: 'U',
-    birth: { date: '', plac: '' },
-    death: { date: '', plac: '', caus: '' },
-    deceased: false, birthYear: null,
-    famc: [], fams: [], occu: '', note: '', displayName: ''
-  });
+  if (state._editingId) _discardEdit();
+  state.individuals.set(id, GEDCOMModule._makeIndi(id));
   state._isNewRecord  = true;
   state._editingId    = id;
   state._editingType  = 'INDI';
@@ -1503,4 +1553,39 @@ export function _setPanelContent(html) {
   if (!el) return;
   el.innerHTML = html;
   _acAttachFields(el);
+  hydrateMedia(el);
+}
+
+// ── Media ─────────────────────────────────────────────────────────────────
+
+// Whatever the gallery or viewer changed: the file is dirty (and autosaved),
+// and the panel showing that record is redrawn to match.
+onMediaChanged(ownerId => {
+  _setDirty(true);
+  if (state._editingId) return;   // never throw away a half-filled form
+  if (ownerId && ownerId === state.selectedIndiId) showIndiDetail(ownerId);
+  else if (ownerId && ownerId === state._lastShownFamId && !state.selectedIndiId) showFamDetail(ownerId);
+});
+
+/** Drag a photo from the desktop onto the panel to attach it to whoever the
+ *  panel is showing. */
+export function _initPanelMediaDrop() {
+  const panel = document.getElementById('detail-panel');
+  if (!panel) return;
+  const target = () => state._editingId ? null : (state.selectedIndiId || state._lastShownFamId);
+  panel.addEventListener('dragover', e => {
+    if (!mediaEnabled() || !target() || ![...(e.dataTransfer?.types || [])].includes('Files')) return;
+    e.preventDefault();
+    panel.classList.add('media-drop');
+  });
+  panel.addEventListener('dragleave', e => {
+    if (!panel.contains(e.relatedTarget)) panel.classList.remove('media-drop');
+  });
+  panel.addEventListener('drop', async e => {
+    panel.classList.remove('media-drop');
+    const id = target();
+    if (!id || !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    await dropMediaOn(id, e.dataTransfer.files);
+  });
 }

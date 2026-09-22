@@ -30,6 +30,9 @@
       <button onclick="downloadYAML();closeExportMenu()" data-i18n="export.yaml">YAML (.yaml)</button>
       <button onclick="downloadSelectionGEDCOM();closeExportMenu()" data-i18n="export.selGedcom">Auswahl als GEDCOM (.ged)</button>
       <button onclick="downloadSelectionJSON();closeExportMenu()" data-i18n="export.selJson">Auswahl als JSON (.json)</button>
+      <!-- The tree and its pictures in one archive: the .ged at the root, each
+           file under the path its OBJE record names. What other programs import. -->
+      <button class="media-only" onclick="downloadWithMedia();closeExportMenu()" data-i18n-title="export.withMediaTitle" title="GEDCOM und alle Medien als ZIP"><span data-i18n="export.withMedia">GEDCOM + Medien (.zip)</span></button>
     </div>
   </div>
   <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span class="btn-label" data-i18n="topbar.center">Zentrieren</span></button>
@@ -141,6 +144,8 @@
       <div class="focus-hint" data-i18n="focus.hint">Person auswählen → &bdquo;Fokus&ldquo; im Detailfenster</div>
     </div>
 
+    <input type="search" id="surname-filter" class="surname-filter" oninput="filterSurnameList()"
+           data-i18n-placeholder="sidebar.surnameFilter" placeholder="Familienname filtern…" style="display:none">
     <div id="surname-list"></div>
     <div id="surname-shown-count" style="display:none"></div>
     <div id="sidebar-buttons">
@@ -542,6 +547,28 @@
       <input type="file" id="settings-import-input" accept="application/json,.json" style="display:none"
              onchange="importSettingsFile(this)">
       <label class="sidebar-toggle" style="border-top:none;padding-top:6px"
+             data-i18n-title="settings.mediaTitle"
+             title="Fotos, Videos und Dokumente an Personen und Familien anhängen.">
+        <input type="checkbox" id="media-enabled-toggle" checked>
+        <span data-i18n="settings.media">Medien (Fotos, Videos, Dokumente)</span>
+      </label>
+      <div class="media-only settings-media-btns">
+        <button class="sidebar-btn" onclick="locateMediaFiles()" data-i18n-title="settings.locateMediaTitle"
+                title="Den Ordner wählen, in dem die Bilder dieses Stammbaums liegen.">&#x1F4C2;
+          <span data-i18n="settings.locateMedia">Mediendateien suchen…</span></button>
+        <button class="sidebar-btn" onclick="reportMediaStatus()">&#x2139;
+          <span data-i18n="settings.mediaStatus">Medien-Status</span></button>
+        <button class="sidebar-btn" onclick="cleanStoredMedia()" data-i18n-title="settings.pruneMediaTitle"
+                title="Im Browser gespeicherte Dateien löschen, die dieser Stammbaum nicht verwendet.">&#x1F9F9;
+          <span data-i18n="settings.pruneMedia">Ungenutzte Medien entfernen</span></button>
+      </div>
+      <label class="sidebar-toggle" style="border-top:none;padding-top:6px"
+             data-i18n-title="settings.autoDeceasedTitle"
+             title="Wer vor über 110 Jahren geboren ist (oder geschätzt wurde), wird beim Speichern als verstorben markiert.">
+        <input type="checkbox" id="auto-deceased-toggle" checked>
+        <span data-i18n="settings.autoDeceased">Sehr Alte als verstorben markieren</span>
+      </label>
+      <label class="sidebar-toggle" style="border-top:none;padding-top:6px"
              data-i18n-title="settings.perfLogTitle"
              title="Schreibt bei jedem Neuzeichnen Zeitmessungen in die Browser-Konsole.">
         <input type="checkbox" id="perf-log-toggle">
@@ -602,7 +629,10 @@
   <div id="detail-panel">
     <div class="panel-drag-handle"></div>
     <button id="close-panel-btn" onclick="closeDetailPanel()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
-    <h2 id="detail-name" data-i18n="detail.empty">—</h2>
+    <div id="detail-head">
+      <div id="detail-portrait" style="display:none"></div>
+      <h2 id="detail-name" data-i18n="detail.empty">—</h2>
+    </div>
     <div id="detail-edit-bar">
       <button class="edit-bar-btn" onclick="startEdit()">&#x270E; <span data-i18n="detail.edit">Bearbeiten</span></button>
       <button class="edit-bar-btn edit-bar-btn--danger" id="delete-record-btn" onclick="deleteCurrentRecord()">&#x1F5D1; <span data-i18n="detail.delete">Löschen</span></button>
@@ -657,18 +687,28 @@
 <div id="tooltip"></div>
 <div id="node-context-menu" style="display:none" role="menu"></div>
 
+<!-- ── Media viewer ────────────────────────────────────────────────────── -->
+<div id="media-viewer" style="display:none" role="dialog" aria-modal="true" data-i18n-label="media.title" aria-label="Medien">
+  <div id="media-viewer-backdrop" onclick="closeMediaViewer()"></div>
+  <div id="media-viewer-panel">
+    <button class="modal-close-btn media-viewer-close" onclick="closeMediaViewer()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    <div id="media-viewer-stage"></div>
+    <div id="media-viewer-side"></div>
+  </div>
+</div>
+
 <!-- ── Find people ─────────────────────────────────────────────────────── -->
 <div id="find-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="find.title" aria-label="Personen suchen">
   <div id="find-backdrop" onclick="closeFindTool()"></div>
   <div id="find-panel">
-    <div id="places-header">
+    <div class="modal-header">
       <h2>&#x1F50E; <span data-i18n="find.title">Personen suchen</span></h2>
       <button id="find-close-btn" onclick="closeFindTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
 
     <!-- Every field narrows the result together with the others; an empty form
          lists the whole tree, which is a useful thing to ask for. -->
-    <div id="find-form" oninput="runFind()" onchange="runFind()">
+    <div id="find-form" oninput="scheduleFind()" onchange="scheduleFind()">
       <label class="find-field find-field--wide">
         <span data-i18n="find.name">Name</span>
         <input type="text" id="find-name" autocomplete="off" data-i18n-placeholder="find.namePlaceholder" placeholder="Vor-, Nach- oder Ledigname">
@@ -749,7 +789,7 @@
 <div id="places-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="places.title" aria-label="Ortsnamen">
   <div id="places-backdrop" onclick="closePlacesTool()"></div>
   <div id="places-panel">
-    <div id="places-header">
+    <div class="modal-header">
       <h2>&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></h2>
       <button id="places-close-btn" onclick="closePlacesTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
@@ -796,7 +836,7 @@
 <div id="map-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="map.title" aria-label="Karte">
   <div id="map-backdrop" onclick="closeMapView()"></div>
   <div id="map-panel">
-    <div id="places-header">
+    <div class="modal-header">
       <h2>&#x1F5FA; <span data-i18n="map.title">Karte</span></h2>
       <button id="map-close-btn" class="modal-close-btn" onclick="closeMapView()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
@@ -846,7 +886,7 @@
 <div id="stats-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="stats.title" aria-label="Statistik">
   <div id="stats-backdrop" onclick="closeStatsTool()"></div>
   <div id="stats-panel">
-    <div id="places-header">
+    <div class="modal-header">
       <h2>&#x1F4CA; <span data-i18n="stats.title">Statistik</span></h2>
       <button id="stats-close-btn" class="modal-close-btn" onclick="closeStatsTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
@@ -866,7 +906,7 @@
 <div id="changes-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="changes.title" aria-label="Änderungen">
   <div id="changes-backdrop" onclick="closeChangesTool()"></div>
   <div id="changes-panel">
-    <div id="places-header">
+    <div class="modal-header">
       <h2>&#x1F4DD; <span data-i18n="changes.title">Änderungen</span></h2>
       <button id="changes-close-btn" class="modal-close-btn" onclick="closeChangesTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
     </div>
@@ -894,7 +934,7 @@
         <div id="import-drop-filename" style="display:none"></div>
         <img id="import-image-preview" style="display:none" data-i18n-label="import.previewAlt" alt="Vorschau">
       </div>
-      <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged,.yaml,.yml,image/jpeg,image/png,image/gif,image/webp" onchange="handleImportFileSelect(event)" style="display:none">
+      <input type="file" id="import-file-input" accept=".txt,.text,.json,.ged,.yaml,.yml,.zip,.gdz,image/jpeg,image/png,image/gif,image/webp" onchange="handleImportFileSelect(event)" style="display:none">
       <span id="import-file-name" style="display:none"></span>
 
       <textarea id="import-text-area" data-i18n-placeholder="import.textPlaceholder" placeholder="…oder Text hier einfügen"></textarea>

@@ -85,6 +85,15 @@ export const SETTINGS = {
   timeSpread3D:        { def: null },   // null = follow the tree size; a number = the reader's own
   font3D:              { def: 18, min: 1, max: 200 },
 
+  // ── Data ──
+  // Photos, video and documents on people and families. Off hides every media
+  // control; the records themselves are still read and written back untouched.
+  mediaEnabled:        { def: true },
+  // Mark people born (or estimated born) over 110 years ago as deceased. On by
+  // default — it is how the app has always behaved — but it writes `1 DEAT Y`
+  // from a guess, and some researchers want no guess in their file at all.
+  autoDeceased:        { def: true },
+
   // ── Diagnostics ──
   // Render timings, off by default: on, every repaint writes a dozen lines into
   // the console of anyone actually using the app.

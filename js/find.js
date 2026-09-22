@@ -12,10 +12,9 @@
  */
 
 import { escAttr, escHtml } from './gedcom-io.js';
-import { showIndiDetail } from './panels.js';
 import { foldText } from './places.js';
 import { applyHighlight, updateHLButtons } from './relations.js';
-import { zoomToNode } from './render-2d.js';
+import { goToPerson } from './graph-data.js';
 import { state } from './state.js';
 
 // Dates in a GEDCOM are free text — "ABT 1850", "12 MAR 1901", "BEF 1900".
@@ -115,6 +114,10 @@ export function matchPerson(indi, c = {}) {
   return true;
 }
 
+// String#localeCompare builds a collator per call; one shared one sorts a
+// 50,000-name result in a fraction of the time.
+const _collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
 /** Everyone matching, by name. */
 export function findPeople(criteria = {}) {
   const hits = [];
@@ -122,7 +125,7 @@ export function findPeople(criteria = {}) {
     if (matchPerson(indi, criteria)) hits.push({ id, indi });
   }
   hits.sort((a, b) =>
-    (a.indi.displayName || a.indi.name || a.id).localeCompare(b.indi.displayName || b.indi.name || b.id));
+    _collator.compare(a.indi.displayName || a.indi.name || a.id, b.indi.displayName || b.indi.name || b.id));
   return hits;
 }
 
@@ -165,6 +168,15 @@ export function closeFindTool() {
 export function resetFindTool() {
   for (const el of document.querySelectorAll('#find-form input, #find-form select')) el.value = '';
   runFind();
+}
+
+// The form runs the search on every keystroke. A small tree answers at once;
+// a large one waits for the typing to pause, so a name typed letter by letter
+// is one search rather than eight.
+let _findTimer = 0;
+export function scheduleFind() {
+  clearTimeout(_findTimer);
+  _findTimer = setTimeout(runFind, state.individuals.size > 5000 ? 180 : 0);
 }
 
 export function runFind() {
@@ -224,6 +236,5 @@ export function highlightFindMatches() {
 /** Open a result in the detail panel and bring it into view. */
 export function findGoTo(id) {
   closeFindTool();
-  showIndiDetail(id);
-  zoomToNode(id);
+  goToPerson(id);
 }
