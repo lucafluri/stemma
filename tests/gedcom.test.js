@@ -915,6 +915,177 @@ test('the repair survives a JSON round trip', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Nothing the model does not edit is lost
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\nsubstructures the model does not edit');
+
+const G = require('../gedcom.js');
+const roundTrip = ged => {
+  const r = parseGEDCOM(ged);
+  return serializeGEDCOM(r.individuals, r.families, r.otherLines, r.media).replace(/\r\n/g, '\n');
+};
+
+test('sources, notes and TIME under an event survive, under the same event', () => {
+  const out = roundTrip(['0 @I1@ INDI', '1 NAME A /B/', '1 BIRT', '2 DATE 1 JAN 1900', '3 TIME 12:00',
+    '2 PLAC Bern', '3 FORM City', '2 SOUR @S1@', '3 PAGE p. 4', '1 DEAT', '2 DATE 1970', '2 NOTE quiet', '0 TRLR'].join('\n'));
+  const birt = out.slice(out.indexOf('1 BIRT'), out.indexOf('1 DEAT'));
+  assert.ok(birt.includes('2 DATE 1 JAN 1900\n3 TIME 12:00'), 'TIME stays under its DATE');
+  assert.ok(birt.includes('2 PLAC Bern\n3 FORM City'), 'FORM stays under its PLAC');
+  assert.ok(birt.includes('2 SOUR @S1@\n3 PAGE p. 4'), 'the citation stays on the birth');
+  assert.ok(out.includes('1 DEAT\n2 DATE 1970\n2 NOTE quiet'), 'the death keeps its note');
+});
+
+test('adoption and relationship qualifiers on FAMC and CHIL survive', () => {
+  const out = roundTrip(['0 @I1@ INDI', '1 NAME C /D/', '1 FAMC @F1@', '2 PEDI adopted',
+    '0 @F1@ FAM', '1 CHIL @I1@', '2 _FREL Adopted', '2 _MREL Natural', '0 TRLR'].join('\n'));
+  assert.ok(out.includes('1 FAMC @F1@\n2 PEDI adopted'));
+  assert.ok(out.includes('1 CHIL @I1@\n2 _FREL Adopted\n2 _MREL Natural'));
+});
+
+test('a name suffix and nickname survive, and the NAME line is kept as written', () => {
+  const out = roundTrip(['0 @I1@ INDI', '1 NAME John /Smith/ Jr.', '2 GIVN John', '2 SURN Smith',
+    '2 NSFX Jr.', '2 NICK Jack', '0 TRLR'].join('\n'));
+  assert.ok(out.includes('1 NAME John /Smith/ Jr.'), 'suffix kept on the NAME line');
+  assert.ok(out.includes('2 NSFX Jr.') && out.includes('2 NICK Jack'));
+});
+
+test('an edited name is written from its parts again', () => {
+  const r = parseGEDCOM('0 @I1@ INDI\n1 NAME John /Smith/ Jr.\n0 TRLR');
+  r.individuals.get('@I1@').surn = 'Smyth';
+  const out = serializeGEDCOM(r.individuals, r.families);
+  assert.ok(out.includes('1 NAME John /Smyth/'), out);
+});
+
+test('an alternate name is kept and is not mistaken for a maiden name', () => {
+  const r = parseGEDCOM(['0 @I1@ INDI', '1 NAME John /Smith/', '1 NAME Johnny /Smyth/', '2 TYPE aka', '0 TRLR'].join('\n'));
+  const i = r.individuals.get('@I1@');
+  assert.strictEqual(i.maidenName, '', 'an AKA is not a birth name');
+  const out = serializeGEDCOM(r.individuals, r.families);
+  assert.ok(out.includes('1 NAME Johnny /Smyth/\n2 TYPE aka'.replace(/\n/g, '\r\n')));
+});
+
+test('a second note and a pointer note are kept rather than overwritten', () => {
+  const r = parseGEDCOM(['0 @I1@ INDI', '1 NAME A /B/', '1 NOTE first', '1 NOTE second', '1 NOTE @N1@',
+    '0 @N1@ NOTE shared', '0 TRLR'].join('\n'));
+  assert.strictEqual(r.individuals.get('@I1@').note, 'first');
+  const out = serializeGEDCOM(r.individuals, r.families, r.otherLines, r.media);
+  assert.ok(out.includes('1 NOTE second') && out.includes('1 NOTE @N1@') && out.includes('0 @N1@ NOTE shared'));
+});
+
+test('a baptism stands in for a missing birth year', () => {
+  const r = parseGEDCOM('0 @I1@ INDI\n1 NAME A /B/\n1 CHR\n2 DATE 3 MAR 1712\n0 TRLR');
+  assert.strictEqual(r.individuals.get('@I1@').birthYear, 1712);
+  assert.ok(serializeGEDCOM(r.individuals, r.families).includes('1 CHR'), 'the baptism itself is still written');
+});
+
+test('long notes are split with CONC, never at a space, and read back whole', () => {
+  const long = 'word '.repeat(120).trim() + ' ' + 'x'.repeat(300);
+  const r = parseGEDCOM('0 @I1@ INDI\n1 NAME A /B/\n0 TRLR');
+  r.individuals.get('@I1@').note = long + '\nsecond line';
+  const out = serializeGEDCOM(r.individuals, r.families);
+  for (const line of out.split('\r\n')) assert.ok(line.length <= 255, `line too long: ${line.length}`);
+  for (const line of out.split('\r\n').filter(l => / CONC /.test(l))) {
+    assert.ok(!/ CONC  /.test(line), 'a CONC chunk never starts with a space');
+  }
+  assert.strictEqual(parseGEDCOM(out).individuals.get('@I1@').note, long + '\nsecond line');
+});
+
+test('old Mac line endings (CR only) and tab delimiters are read', () => {
+  const r = parseGEDCOM('0 @I1@ INDI\r1 NAME\tAnna /B/\r1 SEX F\r0 TRLR');
+  assert.strictEqual(r.individuals.get('@I1@').givn, 'Anna');
+  assert.strictEqual(r.individuals.get('@I1@').sex, 'F');
+});
+
+test('a marriage known only from its sources is still written', () => {
+  const out = roundTrip('0 @F1@ FAM\n1 MARR\n2 SOUR @S1@\n1 MARR Y\n0 TRLR');
+  assert.ok(out.includes('1 MARR\n2 SOUR @S1@'), out);
+  assert.ok(out.includes('1 MARR Y'), 'a bare MARR Y is not dropped');
+});
+
+console.log('\nmedia records');
+
+test('linked OBJE records are read into media and written back', () => {
+  const r = parseGEDCOM(['0 @I1@ INDI', '1 NAME A /B/', '1 OBJE @O1@', '2 _PRIM Y',
+    '0 @O1@ OBJE', '1 FILE photos/a.jpg', '2 FORM jpg', '3 TYPE photo', '2 TITL Portrait', '1 NOTE scanned', '0 TRLR'].join('\n'));
+  deepEqual(r.individuals.get('@I1@').media, ['@O1@']);
+  assert.strictEqual(r.individuals.get('@I1@')._primMedia, '@O1@');
+  const m = r.media.get('@O1@');
+  assert.strictEqual(m.file, 'photos/a.jpg');
+  assert.strictEqual(m.title, 'Portrait');
+  const out = serializeGEDCOM(r.individuals, r.families, r.otherLines, r.media);
+  assert.ok(out.includes('1 OBJE @O1@\r\n2 _PRIM Y'));
+  assert.ok(out.includes('0 @O1@ OBJE\r\n1 FILE photos/a.jpg\r\n2 FORM jpg\r\n3 TYPE photo\r\n2 TITL Portrait\r\n1 NOTE scanned'));
+});
+
+test('inline OBJE (5.5 style) becomes a record, and one file shared by two people is one record', () => {
+  const r = parseGEDCOM(['0 @I1@ INDI', '1 OBJE', '2 FORM jpg', '2 FILE group.jpg', '2 TITL Group',
+    '0 @I2@ INDI', '1 OBJE', '2 FORM jpg', '2 FILE group.jpg', '2 TITL Group', '0 TRLR'].join('\n'));
+  assert.strictEqual(r.media.size, 1);
+  const [id] = r.media.keys();
+  deepEqual(r.individuals.get('@I1@').media, [id]);
+  deepEqual(r.individuals.get('@I2@').media, [id]);
+  assert.strictEqual(r.media.get(id).form, 'jpg');
+});
+
+test('media travel through JSON and YAML too', () => {
+  const r = parseGEDCOM('0 @I1@ INDI\n1 OBJE @O1@\n0 @O1@ OBJE\n1 FILE a b.jpg\n2 TITL "Quote": yes\n0 @S1@ SOUR\n1 TITL Book\n0 TRLR');
+  const ged = serializeGEDCOM(r.individuals, r.families, r.otherLines, r.media);
+  const j = importJSON(exportJSON(r.individuals, r.families, { media: r.media, otherLines: r.otherLines }));
+  assert.strictEqual(serializeGEDCOM(j.individuals, j.families, j.otherLines, j.media), ged, 'JSON');
+  const y = importYAML(exportYAML(r.individuals, r.families, { media: r.media, otherLines: r.otherLines }));
+  assert.strictEqual(serializeGEDCOM(y.individuals, y.families, y.otherLines, y.media), ged, 'YAML');
+});
+
+test('mediaKindOf reads FORM or the file extension', () => {
+  assert.strictEqual(G.mediaKindOf({ file: 'x/y.JPG' }), 'image');
+  assert.strictEqual(G.mediaKindOf({ file: 'clip', form: 'mp4' }), 'video');
+  assert.strictEqual(G.mediaKindOf({ file: 'a.pdf' }), 'document');
+  assert.strictEqual(G.mediaKindOf({ file: 'a.xyz' }), 'other');
+});
+
+console.log('\ncharacter sets');
+
+test('ANSEL diacritics come before their letter and are recombined', () => {
+  const bytes = Buffer.concat([Buffer.from('0 HEAD\n1 CHAR ANSEL\n0 @I1@ INDI\n1 NAME M'), Buffer.from([0xE8]), Buffer.from('uller /Jos'), Buffer.from([0xE2]), Buffer.from('e/\n0 TRLR')]);
+  const r = parseGEDCOM(G.decodeGedcom(bytes));
+  assert.strictEqual(r.individuals.get('@I1@').givn, 'Müller');
+  assert.strictEqual(r.individuals.get('@I1@').surn, 'José');
+});
+
+test('an ANSI (windows-1252) file is not read as broken UTF-8', () => {
+  const bytes = Buffer.from('0 HEAD\n1 CHAR ANSI\n0 @I1@ INDI\n1 NAME J\xfcrg /K\xe4ser/\n0 TRLR', 'latin1');
+  assert.strictEqual(parseGEDCOM(G.decodeGedcom(bytes)).individuals.get('@I1@').name, 'Jürg Käser');
+});
+
+test('a file labelled UTF-8 that is not falls back instead of producing U+FFFD', () => {
+  const bytes = Buffer.from('0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Z\xfcrich /A/\n0 TRLR', 'latin1');
+  assert.strictEqual(parseGEDCOM(G.decodeGedcom(bytes)).individuals.get('@I1@').givn, 'Zürich');
+});
+
+test('UTF-16 with and without a BOM', () => {
+  const text = '0 HEAD\n0 @I1@ INDI\n1 NAME Ölf /Ärm/\n0 TRLR';
+  const le = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(text, 'utf16le')]);
+  assert.strictEqual(parseGEDCOM(G.decodeGedcom(le)).individuals.get('@I1@').givn, 'Ölf');
+  assert.strictEqual(parseGEDCOM(G.decodeGedcom(Buffer.from(text, 'utf16le'))).individuals.get('@I1@').surn, 'Ärm');
+});
+
+console.log('\nYAML edge cases');
+
+test('strings that look like numbers, nulls or escapes come back as the same strings', () => {
+  const r = parseGEDCOM('0 @I1@ INDI\n1 NAME A /B/\n0 TRLR');
+  const i = r.individuals.get('@I1@');
+  i.note = 'C:\\new folder\\n';
+  i.occu = '1e5';
+  i.death.caus = '~';
+  i.birth.plac = 'Tab\there, "quoted": yes';
+  const back = importYAML(exportYAML(r.individuals, r.families)).individuals.get('@I1@');
+  assert.strictEqual(back.note, 'C:\\new folder\\n');
+  assert.strictEqual(back.occu, '1e5');
+  assert.strictEqual(back.death.caus, '~');
+  assert.strictEqual(back.birth.plac, 'Tab\there, "quoted": yes');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);

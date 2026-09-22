@@ -767,8 +767,13 @@ function _renderPlaceList() {
       ${btn}</div>`;
   };
 
+  // The list is re-rendered on every step of the timeline, so it is capped: a
+  // large file names thousands of places, and past a few hundred rows the list
+  // is not read, only scrolled. The commonest come first; the count says the rest.
+  const LIMIT = 400;
   box.innerHTML = `<div class="map-list-title">${escHtml(t('map.places'))}</div>`
-    + (groups.map(row).join('') || `<div class="pl-empty">${escHtml(t('map.noEvents'))}</div>`);
+    + (groups.slice(0, LIMIT).map(row).join('') || `<div class="pl-empty">${escHtml(t('map.noEvents'))}</div>`)
+    + (groups.length > LIMIT ? `<div class="pl-empty">${escHtml(t('find.capped', { n: LIMIT }))}</div>` : '');
 
   // The button counts only what is both ticked and on screen, because that is
   // exactly what pressing it will write.

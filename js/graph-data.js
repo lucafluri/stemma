@@ -824,11 +824,14 @@ export function updateCousinDegreeUI() {
   slider.value = state.cousinDegree;
   if (out) out.textContent = cousinLevelLabel(state.cousinDegree, max);
   if (tick && tick.childElementCount !== max + 1) {
+    // Past a dozen or so steps every label no longer fits under the slider and
+    // they run together into one long number — thin them, keep both ends.
+    const step = Math.ceil((max + 1) / 10);
     tick.innerHTML = '';
     for (let d = 0; d <= max; d++) {
       const o = document.createElement('option');
       o.value = d;
-      o.label = String(d);
+      o.label = (d % step === 0 || d === max) ? String(d) : '';
       tick.appendChild(o);
     }
   }

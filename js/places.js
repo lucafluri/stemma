@@ -483,7 +483,11 @@ export function renderPlacesTool() {
   const shownGroups = q ? groups.filter(g => g.variants.some(v => hit(v.value))) : groups;
   const shownAll = all.filter(([v]) => hit(v));
 
-  const groupHtml = shownGroups.map(g => {
+  // Both lists are capped: a large file has thousands of places, and the
+  // filter box is the way to the rest. Groups beyond the cap are still applied
+  // with their default ticks (exact spellings on, loose matches off).
+  const GROUP_LIMIT = 300, PLACE_LIMIT = 1000;
+  const groupHtml = shownGroups.slice(0, GROUP_LIMIT).map(g => {
     const gi = groups.indexOf(g);
     return `
     <div class="pl-group">
@@ -500,7 +504,8 @@ export function renderPlacesTool() {
   }).join('');
 
   body.innerHTML = groups.length
-    ? (groupHtml || `<div class="pl-empty">${escHtml(t('places.noMatch'))}</div>`)
+    ? (groupHtml || `<div class="pl-empty">${escHtml(t('places.noMatch'))}</div>`) +
+      (shownGroups.length > GROUP_LIMIT ? `<div class="pl-empty">${escHtml(t('places.moreGroups', { n: shownGroups.length - GROUP_LIMIT }))}</div>` : '')
     : `<div class="pl-empty">${escHtml(t('places.noneFound'))}</div>`;
 
   // Every place in the file, so any two can be put together by hand. Each row
@@ -509,7 +514,7 @@ export function renderPlacesTool() {
   const list = document.getElementById('places-all');
   if (!list) return;
   document.getElementById('places-all-count').textContent = String(all.length);
-  list.innerHTML = shownAll.map(([v, n]) => {
+  list.innerHTML = shownAll.slice(0, PLACE_LIMIT).map(([v, n]) => {
     const gi = groupOf.get(v);
     const badge = gi == null ? ''
       : `<span class="pl-in-group" title="${escAttr(t('places.inGroup'))}">${escHtml(groups[gi].typed ?? groups[gi].canonical)}</span>`;
@@ -519,7 +524,8 @@ export function renderPlacesTool() {
       ${badge}
       <span class="pl-count">${n}</span>
     </label>`;
-  }).join('') || `<div class="pl-empty">${escHtml(t('places.noMatch'))}</div>`;
+  }).join('') + (shownAll.length > PLACE_LIMIT ? `<div class="pl-empty">${escHtml(t('find.capped', { n: PLACE_LIMIT }))}</div>` : '')
+    || `<div class="pl-empty">${escHtml(t('places.noMatch'))}</div>`;
 
   const target = document.getElementById('places-merge-target');
   const keep = target.value;
