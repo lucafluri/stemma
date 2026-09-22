@@ -4,6 +4,7 @@ import { refreshNodeColors } from './colors.js';
 import { escHtml, escJs } from './gedcom-io.js';
 import { linkBaseOpacity } from './render-2d.js';
 import { refresh3D } from './render-3d.js';
+import { personLabel, searchPeople } from './search.js';
 
 export function collectAncestors(id, visited = new Set()) {
   if (visited.has(id)) return visited;
@@ -240,13 +241,8 @@ export function relSearch(slot, query) {
   const q = query.trim().toLowerCase();
   if (!q) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
 
-  const matches = [];
-  for (const [id, p] of state.individuals) {
-    const yr = p.birthYear || (state._estimatedYears?.get(id));
-    const label = (p.name || id) + (yr ? ` *${yr}` : '');
-    if ((p.name || id).toLowerCase().includes(q)) matches.push({ id, label, yr });
-    if (matches.length >= 8) break;
-  }
+  // Best matches first, accent-insensitive — not the first eight in file order.
+  const matches = searchPeople(query, 8).map(h => ({ id: h.id, label: personLabel(h.id) }));
 
   if (!matches.length) { drop.innerHTML = ''; drop.style.display = 'none'; return; }
 
@@ -360,8 +356,10 @@ export function _bloodRelationLabel(idA, idB) {
   function ancestors(startId) {
     const map = new Map([[startId, 0]]);
     const queue = [[startId, 0]];
-    while (queue.length) {
-      const [id, gen] = queue.shift();
+    // An index, not queue.shift(): shifting a long array moves every element,
+    // which turns a walk over a big ancestry into a quadratic one.
+    for (let qi = 0; qi < queue.length; qi++) {
+      const [id, gen] = queue[qi];
       const indi = state.individuals.get(id);
       if (!indi) continue;
       for (const famId of indi.famc) {
@@ -603,8 +601,8 @@ function _bfsRelation(idA, idB) {
 
   const visited = new Map([[idA, null]]);
   const queue = [idA];
-  while (queue.length) {
-    const cur = queue.shift();
+  for (let qi = 0; qi < queue.length; qi++) {
+    const cur = queue[qi];
     if (cur === idB) {
       const path = [];
       const edges = [];

@@ -1302,6 +1302,27 @@ export function _exportScale(w, h) {
 }
 
 export function _svgForExport() {
+  // A large chart only keeps the boxes inside the window in the DOM (or none at
+  // all, zoomed out to the overview), so the export used to be whatever
+  // happened to be on screen. Put the whole chart in for the copy, fitted at
+  // reading size, and hand the window back afterwards.
+  if (!_cullActive()) return _svgForExportNow();
+  const zoom = state.currentZoom;
+  try {
+    state.currentZoom = 1;
+    _joinLinks(state.links);
+    _joinNodes(state.nodes);
+    tick();
+    updateLabels(true);
+    return _svgForExportNow();
+  } finally {
+    state.currentZoom = zoom;
+    state._cullSig = null;
+    renderViewport(true);
+  }
+}
+
+function _svgForExportNow() {
   const src = document.getElementById('graph-svg');
   const main = state.gMain?.node();
   if (!src || !main) return null;

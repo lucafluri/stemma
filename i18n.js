@@ -514,6 +514,7 @@ const I18N = {
       },
     },
     places: {
+      moreGroups: '${n} weitere Gruppen — über den Filter auffindbar. Sie werden mit ihren Standard-Häkchen übernommen.',
       title: 'Ortsnamen vereinheitlichen',
       hint: 'Gruppen von Schreibweisen, die denselben Ort meinen. Oben steht die Schreibweise, die übernommen wird — sie lässt sich frei ändern. Nur angehakte Varianten werden umbenannt.',
       summary: '${places} Schreibweisen, ${groups} Gruppen mit Varianten',
@@ -1352,6 +1353,7 @@ const I18N = {
       },
     },
     places: {
+      moreGroups: '${n} more groups — type in the filter to find them. They are applied with their default ticks.',
       title: 'Unify place names',
       hint: 'Groups of spellings that mean the same place. The box on top is the spelling that will be kept — edit it freely. Only ticked variants get renamed.',
       summary: '${places} spellings, ${groups} groups with variants',
