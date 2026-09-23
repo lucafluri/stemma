@@ -13,6 +13,7 @@ const ORDER = [
   'gedcom.test.js',
   'media.test.js',
   'editing.test.js',
+  'check.test.js',
   'import.test.js',
   'merge.test.js',
   'focus.test.js',

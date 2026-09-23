@@ -27,6 +27,7 @@ import { goToPerson } from './graph-data.js';
 import { placeFields, placeKey } from './places.js';
 import { lsGet, saveSetting } from './settings.js';
 import { state } from './state.js';
+import { recordUndo } from './history.js';
 
 const TILE_URL = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
@@ -836,6 +837,7 @@ export function saveMapCoords() {
   const approved = new Set((M.groups || [])
     .map(g => g.plac)
     .filter(p => !M.unticked.has(p)));
+  recordUndo(t('history.coords'));
   const changed = applyMapCoords(approved);
   // The events carry no coordinates themselves, but the pending set just shrank
   // and the list has to stop offering what it has already written.

@@ -15,6 +15,7 @@
 import { _setDirty, escAttr, escHtml } from './gedcom-io.js';
 import { showFamDetail, showIndiDetail } from './panels.js';
 import { state } from './state.js';
+import { recordUndo } from './history.js';
 
 // ── Where places live ─────────────────────────────────────────────────────
 //
@@ -550,6 +551,7 @@ export function applyPlacesTool() {
   }
 
   const tidy = !!document.getElementById('places-tidy')?.checked;
+  if (renames.size || tidy) recordUndo(t('history.places'));
   const changed = applyPlaceRenames(renames, { tidy });
 
   if (changed) {

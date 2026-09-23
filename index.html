@@ -35,6 +35,9 @@
       <button class="media-only" onclick="downloadWithMedia();closeExportMenu()" data-i18n-title="export.withMediaTitle" title="GEDCOM und alle Medien als ZIP"><span data-i18n="export.withMedia">GEDCOM + Medien (.zip)</span></button>
     </div>
   </div>
+  <div id="history-wrap" style="display:none">
+    <button id="undo-btn" onclick="undo()" disabled data-i18n-label="history.undo" aria-label="Rückgängig">&#x21B6;</button><button id="redo-btn" onclick="redo()" disabled data-i18n-label="history.redo" aria-label="Wiederholen">&#x21B7;</button>
+  </div>
   <button id="center-view-btn" onclick="centerView()" data-i18n-title="topbar.centerTitle" title="Alles zentrieren" disabled>&#x2316; <span class="btn-label" data-i18n="topbar.center">Zentrieren</span></button>
   <button id="center-person-btn" onclick="centerOnPerson()" data-i18n-title="topbar.centerPersonTitle" title="Auf ausgewählte Person zentrieren" disabled>&#x1F464; <span class="btn-label" data-i18n="topbar.centerPerson">Person</span></button>
   <!-- Things you reach for occasionally, rather than while looking at the
@@ -44,6 +47,7 @@
     <div id="tools-dropdown">
       <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
       <button onclick="closeToolsMenu();openFindTool()" data-i18n-title="find.titleLong" title="Personen suchen und filtern">&#x1F50E; <span data-i18n="find.title">Personen suchen</span></button>
+      <button onclick="closeToolsMenu();openCheckTool()" data-i18n-title="check.titleLong" title="Unmögliche Daten, fehlerhafte Verknüpfungen und mögliche Doppel finden">&#x2705; <span data-i18n="check.title">Daten prüfen</span></button>
       <button onclick="closeToolsMenu();openPlacesTool()" data-i18n-title="topbar.placesTitle" title="Ortsnamen vereinheitlichen">&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></button>
       <button onclick="closeToolsMenu();openMapView()" data-i18n-title="map.titleLong" title="Orte auf der Karte, über die Zeit">&#x1F5FA; <span data-i18n="map.title">Karte</span></button>
       <button onclick="closeToolsMenu();openStatsTool()" data-i18n-title="stats.titleLong" title="Kennzahlen über den ganzen Stammbaum">&#x1F4CA; <span data-i18n="stats.title">Statistik</span></button>
@@ -781,6 +785,27 @@
         <span data-i18n="find.highlight">Treffer hervorheben</span></button>
       <button class="import-action-btn" onclick="resetFindTool()" data-i18n="find.reset">Zurücksetzen</button>
       <button class="import-action-btn" onclick="closeFindTool()" data-i18n="import.close">Schliessen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Data check ──────────────────────────────────────────────────────── -->
+<div id="check-modal" style="display:none" role="dialog" aria-modal="true" data-i18n-label="check.title" aria-label="Daten prüfen">
+  <div id="check-backdrop" onclick="closeCheckTool()"></div>
+  <div id="check-panel">
+    <div class="modal-header">
+      <h2>&#x2705; <span data-i18n="check.title">Daten prüfen</span></h2>
+      <button class="modal-close-btn" onclick="closeCheckTool()" data-i18n-title="import.close" title="Schliessen">&#x2715;</button>
+    </div>
+    <p class="pl-hint" data-i18n="check.hint">Was im Stammbaum wahrscheinlich nicht stimmt. Verglichen werden nur Jahre — Daten, die sich nicht lesen lassen, werden übergangen.</p>
+    <div id="check-summary"></div>
+    <div id="check-filters"></div>
+    <div id="check-results"></div>
+    <div class="import-step-footer">
+      <button class="import-action-btn import-action-btn--primary" id="check-highlight-btn" onclick="highlightCheckIssues()">&#x2728;
+        <span data-i18n="find.highlight">Treffer hervorheben</span></button>
+      <button class="import-action-btn" onclick="runCheck()" data-i18n="check.rerun">Erneut prüfen</button>
+      <button class="import-action-btn" onclick="closeCheckTool()" data-i18n="import.close">Schliessen</button>
     </div>
   </div>
 </div>

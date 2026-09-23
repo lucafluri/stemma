@@ -1,4 +1,5 @@
 import * as ChangesMod from './changes.js';
+import * as CheckMod from './check.js';
 import * as ColorsMod from './colors.js';
 import * as GedcomIoMod from './gedcom-io.js';
 import * as GraphDataMod from './graph-data.js';
@@ -28,6 +29,8 @@ import { applyTimelineYFix } from './tree-layout.js';
 import { MOBILE_MAX_WIDTH, placeTopbarMenu } from './constants.js';
 import { linkMediaFolder, mediaAvailability, pruneStoredMedia } from './media.js';
 import { personLabel, searchPeople } from './search.js';
+import * as HistoryMod from './history.js';
+import { redo, undo } from './history.js';
 
 // The topbar "Tools" menu. Same shape as the export split button's dropdown:
 // a one-shot outside-click listener closes it, so nothing has to be torn down
@@ -202,6 +205,16 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#search-input') && !e.target.closest('#search-results')) {
     document.getElementById('search-results').innerHTML = '';
   }
+});
+
+// Undo / redo. Outside text fields only — there the browser's own undo of the
+// typing is what Ctrl+Z means.
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
 });
 
 document.addEventListener('keydown', e => {
@@ -690,8 +703,8 @@ function _onLanguageChanged() {
 // observe some of these namespaces mid-initialization. Queuing a microtask
 // runs this after the *whole* graph's synchronous evaluation has settled,
 // regardless of which module happened to be the entry point.
-queueMicrotask(() => Object.assign(window, ChangesMod, ColorsMod, FindMod, GedcomIoMod, GraphDataMod, ImportMod,
-  MapViewMod, MediaMod, PanelsMod, PlacesMod, RelationsMod, Render2dMod, Render3dMod, SearchMod, StatsMod, TreeLayoutMod, {
+queueMicrotask(() => Object.assign(window, ChangesMod, CheckMod, ColorsMod, FindMod, GedcomIoMod, GraphDataMod, ImportMod,
+  HistoryMod, MapViewMod, MediaMod, PanelsMod, PlacesMod, RelationsMod, Render2dMod, Render3dMod, SearchMod, StatsMod, TreeLayoutMod, {
     state,
     toggleSidebar,
     toggleToolsMenu,

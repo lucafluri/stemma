@@ -10,6 +10,7 @@
 import { state } from './state.js';
 import { _fullRebuildGraph, _loadDatasetFile, escHtml, escJs, fileAccessSupported } from './gedcom-io.js';
 import { readMediaArchive } from './media.js';
+import { recordUndo } from './history.js';
 import {
   _tiApplyActions, _tiCleanText, _tiConnectivity, _tiGenerateActions,
   _tiParseGedcomForMerge, _tiParseStructuredJson, _tiParseText,
@@ -186,7 +187,7 @@ export function _imLoadFile(file, handle = null) {
     if (persons?.length) {
       state._importJsonPersons = persons;
       document.getElementById('import-text-area').value =
-        t('import.gedcomLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
+        t('import.gedcomLoaded', { n: persons.length });
     } else {
       _imShowError(t('import.parseError'));
     }
@@ -207,7 +208,7 @@ export function _imLoadFile(file, handle = null) {
         if (persons && persons.length) {
           state._importJsonPersons = persons;
           document.getElementById('import-text-area').value =
-            t('import.jsonLoaded', { n: persons.length, plural: persons.length !== 1 ? 'en' : '' });
+            t('import.jsonLoaded', { n: persons.length });
         } else {
           document.getElementById('import-text-area').value =
             t('import.jsonFallback');
@@ -1072,6 +1073,8 @@ export function applyImport() {
     _renderImportReview();
     return;
   }
+
+  recordUndo(t('history.import', { n: approved.length }));
 
   // Show progress overlay, hide review step
   document.getElementById('import-step-review').style.display = 'none';
