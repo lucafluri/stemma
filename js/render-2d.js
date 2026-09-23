@@ -594,24 +594,46 @@ export function renderGraph() {
 
 export const LABEL_MIN_FONT = 7;
 
+// Text is measured on a canvas, not with getComputedTextLength(). Asking an SVG
+// element for its length right after changing its text forces the browser to
+// lay out the whole drawing again, once per label: fine for the hundred boxes
+// on screen, and two minutes for the 27,000 an export of a large chart fits in
+// one go. measureText never touches the page's layout. Where there is no canvas
+// (the test environment) it falls back to the element itself.
+let _measureCtx;
+function _measure(el, text, size) {
+  if (_measureCtx === undefined) {
+    try { _measureCtx = document.createElement('canvas').getContext('2d') || null; } catch { _measureCtx = null; }
+    if (_measureCtx && typeof _measureCtx.measureText !== 'function') _measureCtx = null;
+  }
+  if (!_measureCtx) {
+    el.setAttribute('font-size', size + 'px');
+    el.textContent = text;
+    return el.getComputedTextLength();
+  }
+  const family = _labelFamily || (_labelFamily = getComputedStyle(document.getElementById('graph-svg') || document.body).fontFamily || 'sans-serif');
+  _measureCtx.font = `${el.getAttribute('font-weight') || 'normal'} ${size}px ${family}`;
+  return _measureCtx.measureText(text).width;
+}
+let _labelFamily = '';
+
 export function _fitLabel(el, full, avail, size) {
-  el.setAttribute('font-size', size + 'px');
-  el.textContent = full;
-  const w = el.getComputedTextLength();
-  if (w <= avail || !w) return;
+  let w = _measure(el, full, size);
+  if (w <= avail || !w) { el.setAttribute('font-size', size + 'px'); el.textContent = full; return; }
 
   // Width scales with the font size, so the size that fits follows from the one
   // measurement — no search, and measuring is what costs.
   const shrunk = Math.max(LABEL_MIN_FONT, size * avail / w);
+  w = _measure(el, full, shrunk);
   el.setAttribute('font-size', shrunk + 'px');
-  if (el.getComputedTextLength() <= avail) return;
+  if (w <= avail) { el.textContent = full; return; }
 
   let lo = 1, hi = full.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    el.textContent = full.slice(0, mid) + '…';
-    if (el.getComputedTextLength() <= avail) lo = mid; else hi = mid - 1;
+    if (_measure(el, full.slice(0, mid) + '…', shrunk) <= avail) lo = mid; else hi = mid - 1;
   }
+  el.setAttribute('font-size', shrunk + 'px');
   el.textContent = full.slice(0, lo) + '…';
 }
 

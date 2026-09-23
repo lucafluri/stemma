@@ -291,6 +291,13 @@ function _applyDataset(result, fileName, opts = {}) {
   // happens to have the same id in this one.
   state.selectedIndiId = null;
   state._lastShownFamId = null;
+  // A form left open on the previous tree: its stubs belong to that tree.
+  state._editingId = state._editingType = null;
+  state._isNewRecord = false;
+  state._pendingRelations = [];
+  state._removedRelations = [];
+  state._famEditPendingChil = [];
+  state._famEditNewPartner = { husb: null, wife: null };
   state.hlMode = null;
   state.hlSet = new Set();
   state._relPersonA = state._relPersonB = null;

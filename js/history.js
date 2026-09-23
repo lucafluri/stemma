@@ -27,8 +27,11 @@ const _redo = [];
 let _pending = null;
 
 let _restoreHook = () => {};
-/** gedcom-io.js supplies the rebuild; this module stays free of that cycle. */
+let _beforeHook = () => {};
+/** panels.js supplies the rebuild; this module stays free of that cycle. */
 export function onHistoryRestore(fn) { _restoreHook = fn; }
+/** ...and closes an open form first, before the tree it was editing is swapped. */
+export function onHistoryBeforeRestore(fn) { _beforeHook = fn; }
 
 function _snapshot() {
   return GEDCOMModule.exportJSON(state.individuals, state.families, { media: state.media, pretty: false });
@@ -76,8 +79,9 @@ export function clearUndo() {
 }
 
 function _step(from, to, verb) {
+  if (!from.length) return false;
+  _beforeHook();
   const entry = from.pop();
-  if (!entry) return false;
   to.push({ label: entry.label, snap: _snapshot() });
   const r = GEDCOMModule.importJSON(entry.snap);
   state.individuals.clear();
