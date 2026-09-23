@@ -9,7 +9,7 @@ import { setPlace } from './places.js';
 import { MOBILE_MAX_WIDTH } from './constants.js';
 import { dropMediaOn, hydrateMedia, mediaEnabled, mediaSectionHtml, onMediaChanged, renderPortrait } from './media.js';
 import { personLabel, searchPeople } from './search.js';
-import { beginUndo, cancelUndo, commitUndo, onHistoryRestore, recordUndo } from './history.js';
+import { beginUndo, cancelUndo, commitUndo, onHistoryBeforeRestore, onHistoryRestore, recordUndo } from './history.js';
 import { onBeforeMediaChange } from './media.js';
 
 // Re-exported so the window bulk-assign in main.js still reaches them.
@@ -1608,8 +1608,8 @@ onBeforeMediaChange(() => recordUndo(t('history.media')));
 
 // After an undo or redo the tree is a different object graph: redraw it, and
 // show whoever was on the panel if they still exist.
+onHistoryBeforeRestore(() => { if (state._editingId) _discardEdit(); });
 onHistoryRestore(() => {
-  if (state._editingId) _discardEdit();
   _fullRebuildGraph({ warm: true });
   if (state.selectedIndiId && state.individuals.has(state.selectedIndiId)) showIndiDetail(state.selectedIndiId);
   else if (state._lastShownFamId && state.families.has(state._lastShownFamId)) showFamDetail(state._lastShownFamId);
