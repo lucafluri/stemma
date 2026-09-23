@@ -12,6 +12,7 @@ import { _push3DData, _setOrbitTarget3D, apply3DPhysics, build3DTimeline, initGr
 import { idbAvailable, idbDel, idbGet, idbSet } from './store.js';
 import { attachCandidates, buildMediaArchive, mediaEnabled, readMediaArchive, resetMediaSession } from './media.js';
 import { isZip } from './zip.js';
+import { clearUndo, syncUndoUI } from './history.js';
 
 export function _setDirty(v) {
   state._gedcomDirty = v;
@@ -202,7 +203,7 @@ export function _fullRebuildGraph(opts = {}) {
 function _statusCounts() {
   const n = state.individuals.size;
   document.getElementById('status').textContent =
-    t('topbar.status', { persons: n.toLocaleString(), personsPlural: n !== 1 ? 'en' : '', families: state.families.size.toLocaleString() });
+    t('topbar.status', { n, persons: n.toLocaleString(), families: state.families.size.toLocaleString() });
 }
 
 // Nobody born more than DECEASED_AGE_THRESHOLD years ago is still alive, so a
@@ -297,6 +298,7 @@ function _applyDataset(result, fileName, opts = {}) {
   document.getElementById('detail-panel')?.classList.remove('panel-visible');
   if (!opts.keepMedia) resetMediaSession();
   state.surnameEnabled.clear();   // a new file starts with every family shown
+  clearUndo();                    // ...and with no history of somebody else's edits
 
   _adoptTree(result);
 
@@ -367,6 +369,9 @@ export function showDataUI() {
   // Both tools behind it act on the whole tree, so the menu is all-or-nothing.
   document.getElementById('tools-wrap').style.display = has ? 'flex' : 'none';
   document.getElementById('view-toggle-btn').disabled = !has;
+  const hist = document.getElementById('history-wrap');
+  if (hist) hist.style.display = has ? 'flex' : 'none';
+  syncUndoUI();
   syncMediaUI();
 }
 

@@ -536,16 +536,21 @@ function _ownersOf(mediaId) {
 
 let _changed = () => {};
 export function onMediaChanged(fn) { _changed = fn; }
+let _before = () => {};
+/** Called just before the tree's media records or links are changed (undo). */
+export function onBeforeMediaChange(fn) { _before = fn; }
 
 export function setMediaTitle(value) {
   const m = _view && state.media.get(_view.mediaId);
   if (!m) return;
+  _before();
   m.title = String(value || '').trim();
   _changed(_view.ownerId);
 }
 
 export function setMediaPortrait() {
   if (!_view) return;
+  _before();
   setPrimaryMedia(_view.ownerId, _view.mediaId);
   _changed(_view.ownerId);
   renderMediaViewer();
@@ -555,6 +560,7 @@ export function removeMediaFromOwner() {
   if (!_view) return;
   const { ownerId, mediaId } = _view;
   if (!confirm(t('media.removeConfirm'))) return;
+  _before();
   unlinkMedia(ownerId, mediaId);
   closeMediaViewer();
   _changed(ownerId);
@@ -587,13 +593,16 @@ export async function replaceMediaFile() {
 export async function pickMediaFor(ownerId) {
   const files = await _pick({ accept: 'image/*,video/*,audio/*,application/pdf,.pdf,.txt,.doc,.docx,.odt' });
   if (!files.length) return;
+  _before();
   await addMediaFiles(ownerId, files);
   _changed(ownerId);
 }
 
 export function addMediaLinkFor(ownerId) {
   const url = prompt(t('media.urlPrompt'), 'https://');
-  if (!url || !addMediaUrl(ownerId, url)) return;
+  if (!url || !/^https?:\/\/./i.test(url.trim())) return;
+  _before();
+  if (!addMediaUrl(ownerId, url)) return;
   _changed(ownerId);
 }
 
@@ -601,6 +610,7 @@ export function addMediaLinkFor(ownerId) {
 export async function dropMediaOn(ownerId, files) {
   const list = [...files].filter(f => f.size);
   if (!list.length || !mediaEnabled()) return false;
+  _before();
   await addMediaFiles(ownerId, list);
   _changed(ownerId);
   return true;

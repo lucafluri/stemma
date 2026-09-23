@@ -9,6 +9,8 @@ import { setPlace } from './places.js';
 import { MOBILE_MAX_WIDTH } from './constants.js';
 import { dropMediaOn, hydrateMedia, mediaEnabled, mediaSectionHtml, onMediaChanged, renderPortrait } from './media.js';
 import { personLabel, searchPeople } from './search.js';
+import { beginUndo, cancelUndo, commitUndo, onHistoryRestore, recordUndo } from './history.js';
+import { onBeforeMediaChange } from './media.js';
 
 // Re-exported so the window bulk-assign in main.js still reaches them.
 export * from './autocomplete.js';
@@ -190,6 +192,7 @@ export function confirmQuickAddParents(personId) {
     return;
   }
 
+  recordUndo(t('history.addRelative', { what: state.individuals.get(personId)?.name || personId }));
   const fam = _findOrCreateFamAsChild(personId);
   let lastNewId = null;
   if (father && !fam.husb) {
@@ -232,6 +235,7 @@ export function confirmQuickAddRelative(personId, type) {
     return;
   }
 
+  recordUndo(t('history.addRelative', { what: state.individuals.get(personId)?.name || personId }));
   const extra = type === 'child' ? _readPersonVitals('qa-child') : {};
   const newId = _makeNewIndi(givn, surn, sex, extra);
 
@@ -752,6 +756,7 @@ export function commitIndiEdit() {
 
   const id = state._editingId;
   state._editingId = null; state._editingType = null;
+  commitUndo(state._isNewRecord ? t('history.newPerson') : t('history.edit', { what: i.name }));
 
   state._isNewRecord = false;
   // Unconditional, not gated on needsRebuild: saving a first person who has no
@@ -1385,6 +1390,7 @@ export function commitFamEdit() {
 
   const id = state._editingId;
   state._editingId = null; state._editingType = null;
+  commitUndo(t('history.editFamily'));
   _fullRebuildGraph({ warm: true });
   showFamDetail(id);
 }
@@ -1392,6 +1398,7 @@ export function commitFamEdit() {
 /** Throw away everything an open form created but never committed. Returns
  *  the id that was being edited and whether it was itself a new stub. */
 function _discardEdit() {
+  cancelUndo();
   const id = state._editingId;
   state._editingId = null; state._editingType = null;
   for (const rel of state._pendingRelations) {
@@ -1448,6 +1455,8 @@ export function confirmDeleteRecord() {
   const type = state._pendingDeleteType;
   state._pendingDeleteId = null; state._pendingDeleteType = null;
   document.getElementById('delete-confirm-bar').style.display = 'none';
+  if (!id) return;
+  recordUndo(t('history.delete', { what: type === 'INDI' ? (state.individuals.get(id)?.name || id) : t('detail.family') }));
 
   if (type === 'INDI') {
     // Remove person from all families
@@ -1500,9 +1509,11 @@ export function startEdit() {
   const famId = state._lastShownFamId;
   const indiId = state.selectedIndiId;
   if (indiId && state.individuals.has(indiId)) {
+    beginUndo(t('history.edit', { what: state.individuals.get(indiId).name }));
     state._editingId = indiId; state._editingType = 'INDI';
     showIndiEditForm(indiId);
   } else if (famId && state.families.has(famId)) {
+    beginUndo(t('history.editFamily'));
     state._editingId = famId; state._editingType = 'FAM';
     showFamEditForm(famId);
   }
@@ -1530,6 +1541,7 @@ export function getNextFamId() { return _nextId('F', state.families); }
 export function addNewPerson() {
   const id = getNextIndiId();
   if (state._editingId) _discardEdit();
+  beginUndo(t('history.newPerson'));
   state.individuals.set(id, GEDCOMModule._makeIndi(id));
   state._isNewRecord  = true;
   state._editingId    = id;
@@ -1589,3 +1601,17 @@ export function _initPanelMediaDrop() {
     await dropMediaOn(id, e.dataTransfer.files);
   });
 }
+
+// ── Undo ──────────────────────────────────────────────────────────────────
+
+onBeforeMediaChange(() => recordUndo(t('history.media')));
+
+// After an undo or redo the tree is a different object graph: redraw it, and
+// show whoever was on the panel if they still exist.
+onHistoryRestore(() => {
+  if (state._editingId) _discardEdit();
+  _fullRebuildGraph({ warm: true });
+  if (state.selectedIndiId && state.individuals.has(state.selectedIndiId)) showIndiDetail(state.selectedIndiId);
+  else if (state._lastShownFamId && state.families.has(state._lastShownFamId)) showFamDetail(state._lastShownFamId);
+  else if (document.getElementById('detail-panel')?.classList.contains('panel-visible')) closeDetailPanel();
+});
