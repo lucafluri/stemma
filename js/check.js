@@ -254,3 +254,18 @@ export function highlightCheckIssues() {
   closeCheckTool();
   document.getElementById('status').textContent = t('find.highlighted', { n: ids.size });
 }
+
+// The detail panel asks about one person every time the selection moves, and
+// checkTree() walks the whole file. Cheap enough on an ordinary tree and a
+// stutter on a huge one, so it is skipped past a size and remembered briefly.
+const ISSUES_FOR_MAX_PEOPLE = 4000;
+let _memo = { at: 0, size: -1, fams: -1, list: [] };
+
+export function issuesFor(id) {
+  if (state.individuals.size > ISSUES_FOR_MAX_PEOPLE) return [];
+  const now = Date.now();
+  if (now - _memo.at > 1500 || _memo.size !== state.individuals.size || _memo.fams !== state.families.size) {
+    _memo = { at: now, size: state.individuals.size, fams: state.families.size, list: checkTree() };
+  }
+  return _memo.list.filter(i => i.ids.includes(id)).map(i => ({ ...i, text: _text(i) }));
+}

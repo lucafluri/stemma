@@ -69,6 +69,7 @@ Counts, lifespans, family sizes, births per decade, most descendants and data co
 
 | Key | Action |
 |---|---|
+| `Ctrl+K` | command palette: people and commands |
 | `V` | switch 2D / 3D |
 | `F` | fit everything on screen |
 | `C` | centre the view |

@@ -78,9 +78,15 @@ export function applyHighlight() {
   state.nodeSel.each(function(d) {
     const inHL = !hasHL || state.hlSet.has(d.id);
     const baseOp = nodeOpacity(d);
-    d3.select(this).selectAll('rect.indi-box, polygon')
-      .attr('opacity', inHL ? baseOp : 0.07)
-      .attr('filter', inHL && d.id === state.selectedIndiId ? 'url(#glow)' : null);
+    const sel = inHL && d.id === state.selectedIndiId;
+    // The card stays solid and only its colour bar carries the "faded" look of a
+    // deceased person — a dimmed dark card would vanish into the canvas.
+    d3.select(this).select('rect.indi-box')
+      .attr('opacity', inHL ? 1 : 0.07)
+      .attr('filter', sel ? 'url(#glow)' : null)
+      .classed('is-selected', sel);
+    d3.select(this).select('rect.indi-bar').attr('opacity', inHL ? baseOp : 0.07);
+    d3.select(this).select('polygon').attr('opacity', inHL ? baseOp : 0.07);
   });
 
   state.linkSel?.attr('opacity', d => {

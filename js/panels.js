@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { _fullRebuildGraph, _gedcomDateValue, _gedcomDateWidget, _resetGedcomDateWidget, _safeId, _setDirty, escAttr, escHtml, escJs, showDataUI } from './gedcom-io.js';
 import { _updateCenterPersonBtn } from './graph-data.js';
-import { resetHighlight, updateHLButtons } from './relations.js';
+import { openRelationTool, relSelectPerson, resetHighlight, updateHLButtons } from './relations.js';
 import { flashNode } from './render-2d.js';
 import { _setOrbitTarget3D } from './render-3d.js';
 import { _acAttachFields } from './autocomplete.js';
@@ -9,6 +9,7 @@ import { setPlace } from './places.js';
 import { MOBILE_MAX_WIDTH } from './constants.js';
 import { dropMediaOn, hydrateMedia, mediaEnabled, mediaSectionHtml, onMediaChanged, renderPortrait } from './media.js';
 import { personLabel, searchPeople } from './search.js';
+import { issueBannerHtml, lifeTimelineHtml, setDetailHeader, subline } from './life.js';
 import { beginUndo, cancelUndo, commitUndo, onHistoryBeforeRestore, onHistoryRestore, recordUndo } from './history.js';
 import { onBeforeMediaChange } from './media.js';
 
@@ -23,33 +24,23 @@ export function showIndiDetail(id) {
   _updateCenterPersonBtn();
 
   document.getElementById('detail-name').textContent = indi.name || id;
+  setDetailHeader(indi.displayName || indi.name || id, subline(indi));
   renderPortrait(id);
 
-  let html = '';
+  let html = issueBannerHtml(id);
 
-  // Sex + ID
+  // What the timeline does not already say. Birth and death are in it.
   const sexLabel = indi.sex === 'M' ? t('detail.male') : indi.sex === 'F' ? t('detail.female') : t('detail.unknown');
+  html += `<div class="detail-facts">`;
   html += row(t('detail.sex'), sexLabel);
-
-  // Birth
-  if (indi.birth.date || indi.birth.plac) {
-    html += row(t('detail.born'), fmtPlace(indi.birth.date, indi.birth.plac));
-  } else if (state._estimatedYears && state._estimatedYears.has(id)) {
-    html += row(t('detail.born'), `<span style="color:#888">~${state._estimatedYears.get(id)} (${t('detail.estimated')})</span>`);
+  if (!indi.birth.date && !indi.birth.plac && state._estimatedYears && state._estimatedYears.has(id)) {
+    html += row(t('detail.born'), `<span class="detail-muted">~${state._estimatedYears.get(id)} (${t('detail.estimated')})</span>`);
   }
-
-  // Death
-  if (indi.deceased) {
-    const ds = fmtPlace(indi.death.date || t('tooltip.unknownDate'), indi.death.plac);
-    const caus = indi.death.caus ? `<br><span style="color:#888;font-size:11px">${escHtml(indi.death.caus)}</span>` : '';
-    html += row(t('detail.died'), ds + caus);
-  }
-
-  // Occupation
   if (indi.occu) html += row(t('detail.occupation'), escHtml(indi.occu));
-
-  // Maiden name
   if (indi.maidenName) html += row(t('detail.maidenName'), escHtml(indi.maidenName));
+  html += `</div>`;
+
+  html += lifeTimelineHtml(id);
 
   // Parents
   if (indi.famc.length) {
@@ -63,7 +54,7 @@ export function showIndiDetail(id) {
           ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(pid)}')">${escHtml(p.name)}</span>`
           : escHtml(pid);
       }).join(' &amp; ');
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}">${ps || `<em>${t('detail.unknownName')}</em>`}</div>`;
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}"><span>${ps || `<em>${t('detail.unknownName')}</em>`}</span><span class="detail-role">${t('life.parents')}</span></div>`;
     }
     html += `</div>`;
   }
@@ -79,11 +70,9 @@ export function showIndiDetail(id) {
       const spName = sp
         ? `<span class="clickable-name" onclick="event.stopPropagation();showIndiDetail('${escJs(spId)}')">${escHtml(sp.name)}</span>`
         : (spId ? escHtml(spId) : `<em>${t('detail.unknownName')}</em>`);
-      const m0 = fam.marriages?.[0];
-      const mInfo = m0?.date ? ` &mdash; ⚭ ${escHtml(m0.date)}${m0.plac ? ', ' + escHtml(m0.plac) : ''}` : '';
-      const dInfo = fam.div ? ` <span style="color:#787878">[${t('tooltip.divorced', { date: fam.divDate ? ' ' + escHtml(fam.divDate) : '' })}]</span>` : '';
-      const kids = fam.chil.length ? `<br><span style="color:#888;font-size:11px">${fam.chil.length} ${fam.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</span>` : '';
-      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}">${spName}${mInfo}${dInfo}${kids}</div>`;
+      const dInfo = fam.div ? ` <span class="detail-muted">[${t('tooltip.divorced', { date: fam.divDate ? ' ' + escHtml(fam.divDate) : '' })}]</span>` : '';
+      const kids = fam.chil.length ? `${fam.chil.length} ${fam.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}` : '';
+      html += `<div class="detail-marriage detail-fam-card" onclick="showFamDetail('${escJs(famId)}')" title="${t('detail.openFamily')}"><span>${spName}${dInfo}</span><span class="detail-role">${[t('life.spouse'), kids].filter(Boolean).join(' · ')}</span></div>`;
     }
     html += `</div>`;
   }
@@ -109,8 +98,10 @@ export function showIndiDetail(id) {
 
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
-  document.getElementById('detail-edit-bar').style.display = 'block';
+  document.getElementById('detail-edit-bar').style.display = 'flex';
   document.getElementById('detail-buttons').style.display = '';
+  setDetailTab('overview');
+  document.getElementById('how-related-btn').style.display = '';
   openPanel();
   updateHLButtons();
   flashNode(id);
@@ -271,6 +262,7 @@ export function showFamDetail(id) {
   const names = [fam.husb, fam.wife].filter(Boolean)
     .map(pid => state.individuals.get(pid)?.name || pid).join(' & ');
   document.getElementById('detail-name').textContent = t('detail.family') + (names ? ': ' + names : '');
+  setDetailHeader(names || t('detail.family'), '');
 
   let html = '';
   (fam.marriages || []).forEach((m, i) => {
@@ -307,10 +299,42 @@ export function showFamDetail(id) {
 
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
-  document.getElementById('detail-edit-bar').style.display = 'block';
+  document.getElementById('detail-edit-bar').style.display = 'flex';
   document.getElementById('detail-buttons').style.display = '';
+  setDetailTab('overview');
+  document.getElementById('how-related-btn').style.display = 'none';
   openPanel();
   updateHLButtons();
+}
+
+/** Which of the three tabs is lit. The tabs do not own any state: Overview and
+ *  Edit are the two modes the panel already had, Media scrolls to the gallery. */
+export function setDetailTab(name) {
+  for (const n of ['overview', 'edit', 'media']) {
+    const b = document.getElementById('tab-' + n);
+    if (b) b.setAttribute('aria-selected', String(n === name));
+  }
+}
+
+export function detailTab(name) {
+  const editing = !!state._editingId;
+  if (name === 'edit') { if (!editing) startEdit(); return; }
+  if (editing) cancelEdit();
+  if (name === 'media') {
+    setDetailTab('media');
+    const m = document.querySelector('#detail-content .media-section');
+    if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.add('flash'); setTimeout(() => m.classList.remove('flash'), 900); }
+  } else {
+    document.getElementById('detail-content')?.scrollTo?.({ top: 0 });
+  }
+}
+
+/** Panel footer: open the relationship finder with this person as A. */
+export function howRelatedFromPanel() {
+  const id = state.selectedIndiId;
+  if (!id) return;
+  openRelationTool();
+  relSelectPerson('A', id);
 }
 
 export function openPanel() {
@@ -576,6 +600,7 @@ export function removeExistingRelation(idx) {
 }
 
 export function showIndiEditForm(id) {
+  setDetailTab('edit');
   const i = state.individuals.get(id);
   if (!i) return;
 
@@ -1053,6 +1078,7 @@ export const _FAM_MARR_TYPES = [
 ];
 
 export function showFamEditForm(id) {
+  setDetailTab('edit');
   const f = state.families.get(id);
   if (!f) return;
 
@@ -1447,7 +1473,7 @@ export function deleteCurrentRecord() {
 export function cancelDeleteRecord() {
   state._pendingDeleteId = null; state._pendingDeleteType = null;
   document.getElementById('delete-confirm-bar').style.display = 'none';
-  document.getElementById('detail-edit-bar').style.display   = 'block';
+  document.getElementById('detail-edit-bar').style.display   = 'flex';
 }
 
 export function confirmDeleteRecord() {
@@ -1552,6 +1578,7 @@ export function addNewPerson() {
   const empty = document.getElementById('empty-state');
   if (empty) empty.style.display = 'none';
   document.getElementById('detail-name').textContent = t('detail.newPerson');
+  setDetailHeader('', '');
   document.getElementById('detail-edit-bar').style.display  = 'none';
   document.getElementById('detail-buttons').style.display   = 'none';
   openPanel();

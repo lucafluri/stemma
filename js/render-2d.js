@@ -1,6 +1,6 @@
 import { lsGet, lsSet, saveSetting } from './settings.js';
 import { state } from './state.js';
-import { nodeBaseColor, nodeOpacity, nodeTextColor, refreshNodeColors } from './colors.js';
+import { nodeBaseColor, nodeOpacity, refreshNodeColors } from './colors.js';
 import { LABEL_FONT_MAX, LABEL_STYLE_DEFAULTS, PHYSICS_DEFAULTS, arrMax, minMax, perf, physicsScale } from './constants.js';
 import { _baseFilename, _downloadBlob, escAttr, escHtml, escJs } from './gedcom-io.js';
 import { buildGraphData, computeActiveData, computeEstimatedYears, computeGenerationDepths, famAvgYear, generationNumbers, isIndiVisible, personAgeYears, updateFocusUI } from './graph-data.js';
@@ -15,7 +15,15 @@ export const NODE_BOX_W  = 92;
 
 export const NODE_BOX_H  = 30;   // two lines: name, then the years under it
 
-export const NODE_BOX_RX = 5;
+export const NODE_BOX_RX = 6;
+
+// Design D cards: a dark card, with the surname (or sex) colour as a bar down
+// its left edge. The text sits on the card, so it never has to be recoloured.
+export const CARD_FILL = '#161a21';
+export const CARD_STROKE = '#2c3340';
+export const CARD_TEXT = '#e6e9ef';
+export const CARD_TEXT_DIM = '#9aa3b2';
+const BAR_W = 3, BAR_PAD = 5;
 
 export const NODE_BOX_FONT = 10; // px, in graph units — scales with the box, not the screen
 
@@ -148,11 +156,21 @@ function _joinNodes(nodes) {
     .attr('width', NODE_BOX_W)
     .attr('height', NODE_BOX_H)
     .attr('rx', NODE_BOX_RX)
-    .attr('fill', d => nodeBaseColor(d))
+    .attr('fill', CARD_FILL)
     .attr('stroke', d => _lineageStroke(d))
-    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8)
-    .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null)
-    .attr('opacity', d => nodeOpacity(d));
+    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 1)
+    .attr('stroke-dasharray', d => d.data.deceased ? '3 2' : null);
+
+  indiE.append('rect')
+    .attr('class', 'indi-bar')
+    .attr('x', -NODE_BOX_W / 2 + BAR_PAD)
+    .attr('y', -NODE_BOX_H / 2 + BAR_PAD)
+    .attr('width', BAR_W)
+    .attr('height', NODE_BOX_H - BAR_PAD * 2)
+    .attr('rx', BAR_W / 2)
+    .attr('fill', d => nodeBaseColor(d))
+    .attr('opacity', d => nodeOpacity(d))
+    .attr('pointer-events', 'none');
 
   // Ring the focus person — otherwise they're just another box in the middle
   // of the tree that was built around them.
@@ -185,7 +203,8 @@ function _joinNodes(nodes) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('dy', '-4px')
-    .attr('fill', d => nodeTextColor(d))
+    .attr('dx', (BAR_W + BAR_PAD) / 2 + 'px')
+    .attr('fill', CARD_TEXT)
     .attr('fill-opacity', state.labelStyle.textOpacity)
     .attr('font-size', labelFontSize() + 'px')
     .attr('font-weight', state.labelStyle.fontWeight || 'normal')
@@ -201,8 +220,9 @@ function _joinNodes(nodes) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('dy', '7px')
-    .attr('fill', d => nodeTextColor(d))
-    .attr('fill-opacity', state.labelStyle.textOpacity * 0.75)
+    .attr('dx', (BAR_W + BAR_PAD) / 2 + 'px')
+    .attr('fill', CARD_TEXT_DIM)
+    .attr('fill-opacity', state.labelStyle.textOpacity)
     .attr('font-size', NODE_YEAR_FONT + 'px')
     .attr('pointer-events', 'none')
     .text(d => nodeYears(d.data));
@@ -360,7 +380,7 @@ function _lineageStroke(d) {
   const side = _lineageSideOf(d);
   if (side === 'father') return state.linkColors.father;
   if (side === 'mother') return state.linkColors.mother;
-  return '#00000033';
+  return CARD_STROKE;
 }
 
 /** Re-applies the outline above to nodes already on screen — the side map
@@ -370,7 +390,7 @@ export function refreshTreeLineageColoring() {
   if (!state.nodeSel) return;
   state.nodeSel.select('rect.indi-box')
     .attr('stroke', d => _lineageStroke(d))
-    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 0.8);
+    .attr('stroke-width', d => _lineageSideOf(d) ? 2.5 : 1);
 }
 
 // What goes on the name line of a person's box: the married name with the
@@ -641,13 +661,13 @@ export function updateLabelColors() {
   if (!state.labelSel || state.labelSel.empty()) return;
   const weight = state.labelStyle.fontWeight || 'normal';
   state.labelSel.each(function(d) {
-    this.setAttribute('fill',         nodeTextColor(d));
+    this.setAttribute('fill',         CARD_TEXT);
     this.setAttribute('fill-opacity', state.labelStyle.textOpacity);
     this.setAttribute('font-weight',  weight);
   });
   state.yearSel?.each(function(d) {
-    this.setAttribute('fill',         nodeTextColor(d));
-    this.setAttribute('fill-opacity', state.labelStyle.textOpacity * 0.75);
+    this.setAttribute('fill',         CARD_TEXT_DIM);
+    this.setAttribute('fill-opacity', state.labelStyle.textOpacity);
   });
 }
 
@@ -683,7 +703,7 @@ export function updateLabels(force = false) {
     const full = nodeLabelText(d.data);
     const key = full + '\\0' + weight + '\\0' + labelFontSize();
     if (this.__fitKey !== key) {
-      _fitLabel(this, full, NODE_BOX_W - 10, labelFontSize());
+      _fitLabel(this, full, NODE_BOX_W - 18, labelFontSize());
       this.__fitKey = key;
     }
   });
@@ -1312,6 +1332,7 @@ export const EXPORT_MAX_EDGE = 16384;   // ...and refuse any single dimension pa
 export const EXPORT_SVG_CSS = `
   .node-label { text-anchor: middle; dominant-baseline: auto; }
   .focus-ring { stroke: #7aa2f7; }
+  .indi-box.is-selected { stroke: #7aa2f7; stroke-width: 1.6; }
 `;
 
 export function _exportScale(w, h) {

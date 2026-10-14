@@ -306,7 +306,7 @@ export function refreshNodeColors() {
   if (!state.nodeSel) return;
   state.nodeSel.each(function(d) {
     if (d.type === 'INDI') {
-      d3.select(this).select('rect.indi-box').attr('fill', nodeBaseColor(d));
+      d3.select(this).select('rect.indi-bar').attr('fill', nodeBaseColor(d));
     } else {
       const col = d.data.div ? state.nodeColors.famDiv : state.nodeColors.fam;
       d3.select(this).select('.fam-polygon')
