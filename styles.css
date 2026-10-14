@@ -1,22 +1,26 @@
+/* Geist, vendored (SIL OFL, vendor/fonts/OFL.txt): the app has to start offline. */
+@font-face { font-family: 'Geist'; src: url('vendor/fonts/Geist-Variable.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('vendor/fonts/GeistMono-Variable.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+
 /* ── Design tokens ──────────────────────────────────────────────
    Every grey in this file used to be its own hex literal — ~150 of
    them, most within a shade or two of each other. They are now a
    14-step cool-neutral ramp: --c-0 is the deepest background,
    --c-13 pure white. Change the ramp here, the whole app follows. */
 :root {
-  --c-0:  #07090c;
-  --c-1:  #0d1015;
-  --c-2:  #12161c;
-  --c-3:  #181d25;
-  --c-4:  #20262f;
-  --c-5:  #2a313c;
-  --c-6:  #353d4a;
-  --c-7:  #434d5c;
-  --c-8:  #5b6675;
-  --c-9:  #7d8794;
-  --c-10: #9ba4b0;
-  --c-11: #b9c1cb;
-  --c-12: #e3e7ec;
+  --c-0:  #0a0c10;
+  --c-1:  #0f1115;
+  --c-2:  #13161c;
+  --c-3:  #161a21;
+  --c-4:  #1d222b;
+  --c-5:  #262c36;
+  --c-6:  #2c3340;
+  --c-7:  #3a4352;
+  --c-8:  #5a6577;
+  --c-9:  #9aa3b2;
+  --c-10: #aab2bf;
+  --c-11: #c3cad6;
+  --c-12: #e6e9ef;
   --c-13: #ffffff;
 
   /* Interactive accent: focus rings, active states, slider thumbs. */
@@ -50,7 +54,7 @@
 body {
   background: var(--c-1);
   color: var(--c-12);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: Geist, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
   height: 100vh;
@@ -729,7 +733,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - 24px);
+  width: max-content; max-width: calc(100% - 24px);
   padding: 10px 14px;
   background: var(--c-3);
   border: 1px solid var(--c-6);
@@ -4647,3 +4651,110 @@ body.relation-picking * { cursor: crosshair !important; }
 .check-who a { color: var(--accent-text); text-decoration: none; }
 .check-who a:hover { text-decoration: underline; }
 .check-text { color: var(--c-9); min-width: 0; }
+
+
+/* ── Design D ───────────────────────────────────────────────────
+   Studio workspace: slim top bar, people rail, one canvas with a view
+   switcher and a floating focus bar, detail panel on the right, status bar
+   underneath. Only presentation and the two bars from js/design-d.js. */
+:root { --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+#topbar { padding: 6px 16px; min-height: 52px; gap: 10px; box-shadow: none; }
+#topbar h1 { font-size: 15px; }
+#topbar > button:not(#sidebar-toggle-btn):not(#cmdk-btn),
+#topbar > #dl-wrap > button,
+#topbar > #tools-wrap > button { height: 36px; border-radius: 6px; }
+#topbar > #dl-wrap > #dl-btn { background: var(--accent); color: var(--c-1); border-color: var(--accent); font-weight: 600; }
+#topbar > #dl-wrap > #dl-btn:hover { background: var(--accent-hover); }
+#view-toggle-btn, #center-view-btn, #center-person-btn { display: none !important; }
+
+#cmdk-btn {
+  display: flex; align-items: center; gap: 8px;
+  flex: 0 1 380px; min-width: 200px; height: 38px; margin: 0 auto;
+  padding: 0 12px; border: 1px solid var(--c-6); background: var(--c-1);
+  border-radius: 8px; color: var(--c-9); text-align: left; cursor: pointer; font-size: 13px;
+  order: 5;
+}
+#cmdk-btn:hover { border-color: var(--c-7); color: var(--c-11); }
+#cmdk-btn kbd {
+  margin-left: auto; font: 11px var(--mono); border: 1px solid var(--c-6);
+  border-radius: 4px; padding: 1px 6px;
+}
+#lang-switcher { margin-left: 0; order: 6; }
+
+#main-layout { grid-template-columns: 250px 1fr 0px; }
+#main-layout.panel-open { grid-template-columns: 250px 1fr 340px; }
+#main-layout.no-data { grid-template-columns: 0px 1fr 0px; }
+#main-layout.no-data.panel-open { grid-template-columns: 0px 1fr 340px; }
+#sidebar { padding: 12px; gap: 10px; }
+.surname-item { border-radius: 6px; padding: 7px 8px; }
+.surname-count { font-family: var(--mono); }
+
+#graph-container, #graph-3d-container { background: var(--c-1);
+  background-image: linear-gradient(#171b22 1px, transparent 1px), linear-gradient(90deg, #171b22 1px, transparent 1px);
+  background-size: 40px 40px; }
+#graph-3d-container { background-image: none; background: var(--c-0); }
+
+/* Chart nodes: flat dark card; the surname colour is the left bar. */
+#graph-svg .indi-box { stroke: var(--c-6); stroke-width: 1; }
+
+#view-switch {
+  position: absolute; top: 12px; left: 12px; z-index: 5;
+  display: flex; flex-wrap: wrap; padding: 3px; gap: 0;
+  background: var(--c-3); border: 1px solid var(--c-5); border-radius: 8px;
+}
+#view-switch button {
+  height: 30px; padding: 0 12px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--c-9); cursor: pointer; font-size: 13px;
+}
+#view-switch button:hover { color: var(--c-12); }
+#view-switch button.active { background: var(--c-5); color: var(--c-13); }
+#reset-view-btn { top: 12px; }
+
+#focus-bar {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 5;
+  width: max-content; max-width: calc(100% - 24px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px;
+  background: var(--c-4); border: 1px solid var(--c-6); border-radius: 12px;
+  box-shadow: var(--sh-3); color: var(--c-12);
+}
+#focus-bar .fb-label { padding: 0 8px 0 10px; font-size: 12px; color: var(--c-9); }
+#focus-bar .fb-name { padding: 0 8px; font-weight: 600; }
+#focus-bar button {
+  height: 36px; padding: 0 12px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--c-11); cursor: pointer; font-size: 13px;
+}
+#focus-bar button:hover { background: var(--c-6); color: var(--c-13); }
+#focus-bar button.active { background: var(--c-6); color: var(--c-13); }
+#fb-clear { width: 36px; padding: 0 !important; color: var(--c-9) !important; }
+
+#detail-panel { padding: 0; background: var(--c-2); border-left: 1px solid var(--c-5); box-shadow: none; }
+#detail-head { display: flex; gap: 14px; align-items: center; padding: 18px 40px 10px 16px; }
+#detail-panel h2 { font-size: 18px; font-weight: 600; margin: 0; padding: 0; }
+#detail-edit-bar { padding: 0 16px 8px; border-bottom: 1px solid var(--c-5); }
+#detail-content { padding: 14px 16px; }
+#detail-buttons { margin: 0; padding: 12px 16px; border-top: 1px solid var(--c-5); }
+.detail-label { font-size: 11px; letter-spacing: .08em; font-weight: 600; color: var(--c-9); }
+.detail-marriage { background: var(--c-3); border: 1px solid var(--c-5); border-radius: 8px; padding: 10px 12px; }
+.detail-fam-card:hover { background: var(--c-4); border-color: var(--c-6); }
+.clickable-name { color: var(--accent-text); }
+.highlight-btn { border-radius: 6px; padding: 9px 6px; }
+.highlight-btn.active { background: var(--accent); }
+#close-panel-btn { top: 16px; right: 12px; }
+
+#statusbar {
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: center; flex-shrink: 0;
+  padding: 6px 16px; border-top: 1px solid var(--c-5); background: var(--c-2);
+  color: var(--c-9); font: 12px var(--mono);
+}
+#statusbar #status { flex: 1 1 auto; order: 0; padding: 0; font: inherit; color: inherit; min-width: 0; }
+#sb-counts { margin-left: auto; }
+
+@media (max-width: 700px) {
+  #cmdk-btn { min-width: 0; flex: 1 1 140px; }
+  #cmdk-btn kbd { display: none; }
+  #focus-bar { bottom: 12px; }
+  #view-switch { right: 56px; }
+}
+#topbar > #new-person-btn { background: var(--c-3); border-color: var(--c-5); color: var(--c-12); }
+#topbar > #new-person-btn:hover { background: var(--c-4); }

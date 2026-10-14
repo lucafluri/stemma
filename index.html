@@ -15,6 +15,10 @@
 <div id="topbar">
   <button id="sidebar-toggle-btn" onclick="toggleSidebar()" data-i18n-label="topbar.menu" aria-label="Menü öffnen">&#9776;</button>
   <h1><img src="favicon.svg" alt="" width="18" height="18"> <span data-i18n="app.name">Stemma</span></h1>
+  <button id="cmdk-btn" onclick="focusFindBox()" data-i18n-title="design.findTitle" title="Ctrl K">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+    <span data-i18n="design.find">Person suchen</span><kbd>Ctrl K</kbd>
+  </button>
   <button id="import-btn" onclick="openImport()" data-i18n-title="topbar.importTitle" title="GEDCOM / JSON / Text / Bild importieren">&#x1F4E5; <span class="btn-label" data-i18n="topbar.import">Import</span></button>
   <button id="open-recent-btn" onclick="openRecentFile()" style="display:none" data-i18n-title="topbar.openFileTitle" title="Datei öffnen">&#x1F4C1; <span class="btn-label" data-i18n="topbar.openFile">Datei öffnen</span></button>
   <button id="save-file-btn" onclick="saveToFile()" style="display:none" data-i18n-title="topbar.saveToTitle" title="In dieselbe Datei speichern">&#x1F4BE;</button>
@@ -57,7 +61,6 @@
     <option value="de" data-i18n="language.de">Deutsch</option>
     <option value="en" data-i18n="language.en">English</option>
   </select>
-  <div id="status" data-i18n="topbar.noFile">Keine Datei geladen &mdash; Datei importieren oder oben &bdquo;+ Neue Person&ldquo; klicken, um direkt loszulegen</div>
 </div>
 
 <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
@@ -605,6 +608,28 @@
     </div>
     <div id="graph-3d-container" style="display:none"></div>
 
+    <!-- Design D: one segmented control for every way of looking at the tree,
+         and a floating bar for whoever the chart is focused on. Both are
+         driven by js/design-d.js; the controls they stand in for stay in the
+         sidebar. -->
+    <div id="view-switch" role="group" data-i18n-label="design.views" aria-label="Ansicht">
+      <button data-view="chart" onclick="selectDesignView('chart')" data-i18n="design.chart">Diagramm</button>
+      <button data-view="force" onclick="selectDesignView('force')" data-i18n="design.force">Kraft</button>
+      <button data-view="3d" onclick="selectDesignView('3d')">3D</button>
+      <button data-view="map" onclick="selectDesignView('map')" data-i18n="design.map">Karte</button>
+      <button data-view="stats" onclick="selectDesignView('stats')" data-i18n="design.stats">Statistik</button>
+      <button data-view="relations" onclick="selectDesignView('relations')" data-i18n="design.relations">Verwandtschaft</button>
+    </div>
+    <div id="focus-bar" style="display:none" role="group" data-i18n-label="focus.title" aria-label="Fokus">
+      <span class="fb-label" data-i18n="focus.title">Fokus</span>
+      <span id="fb-name" class="fb-name"></span>
+      <button id="fb-anc" onclick="highlightMode('ancestors')">&#x2191; <span data-i18n="detail.ancestors">Vorfahren</span></button>
+      <button id="fb-desc" onclick="highlightMode('descendants')">&#x2193; <span data-i18n="detail.descendants">Nachfahren</span></button>
+      <button id="fb-cousins" onclick="cycleCousinDegree()"></button>
+      <button id="fb-spouse" onclick="toggleSpouseFamily()" data-i18n="design.partnerFamilies">+ Familie der Partner</button>
+      <button id="fb-clear" onclick="clearFocus()" data-i18n-label="focus.clear" aria-label="Fokus aufheben">&#x2715;</button>
+    </div>
+
     <!-- Sits over whichever view is up, so it does not depend on which one that
          is; hidden by showDataUI() as soon as the tree has anybody in it. -->
     <div id="empty-state">
@@ -657,6 +682,11 @@
     </div>
   </div>
 </div>
+
+<footer id="statusbar">
+  <div id="status" data-i18n="topbar.noFile">Keine Datei geladen &mdash; Datei importieren oder oben &bdquo;+ Neue Person&ldquo; klicken, um direkt loszulegen</div>
+  <span id="sb-counts"></span>
+</footer>
 
 <div id="reopen-panel-pill" onclick="reopenDetailPanel()" style="display:none"></div>
 

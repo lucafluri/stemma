@@ -161,7 +161,7 @@ export const DECEASED_OPACITY = 0.55;
 // What the chart is drawn on: --c-0 in styles.css. Needed as a number here
 // because a faded box is part box colour and part whatever is behind it, and
 // that mixture is what the label has to stay legible against.
-export const GRAPH_BG = '#07090c';
+export const GRAPH_BG = '#0f1115';
 
 export const LABEL_STYLE_DEFAULTS = {
   // In graph units, so it scales with the box rather than with the screen.
