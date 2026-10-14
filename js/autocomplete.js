@@ -177,7 +177,10 @@ export function _acAttach(input, getFn, opts = {}) {
 
   input.addEventListener('input',  refresh);
   input.addEventListener('focus',  refresh);
-  input.addEventListener('blur',   () => setTimeout(_acHide, 160));
+  // Late enough for a click on a suggestion to land first — and only if the list
+  // still belongs to this field: tabbing straight into another one would
+  // otherwise have this timer close the list the next field had just opened.
+  input.addEventListener('blur',   () => setTimeout(() => { if (state._acInput === input) _acHide(); }, 160));
   input.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown')  { e.preventDefault(); _acNav(+1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); _acNav(-1); }

@@ -866,6 +866,7 @@ const I18N = {
       asFields: 'Zurück zu den Feldern',
       textPlaceholder: 'z. B. BET 1850 AND 1860',
       smartPlaceholder: '31.7.1980 · 1980 · um 1900 · 1850–1860',
+      deathBeforeBirth: 'Tod liegt vor der Geburt',
       keptAsTyped: 'Nicht erkannt — wird so gespeichert, wie eingegeben',
     },
     month: {
@@ -1817,6 +1818,7 @@ const I18N = {
       asFields: 'Back to the fields',
       textPlaceholder: 'e.g. BET 1850 AND 1860',
       smartPlaceholder: '31.7.1980 · 1980 · ca. 1900 · 1850–1860',
+      deathBeforeBirth: 'Death is before birth',
       keptAsTyped: 'Not recognised — saved exactly as typed',
     },
     month: {

@@ -378,8 +378,8 @@ function _surnameRow(surn, count) {
     // No color picker for "no surname" entry
     div.innerHTML = `
       <input type="checkbox"${checked}>
-      <span class="surname-dot" style="background:${color};border:1px solid #666"></span>
-      <span class="surname-label" title="${title}" style="font-style:italic;color:#999">${escHtml(label)}</span>
+      <span class="surname-dot" style="background:${color};border:1px solid var(--c-7)"></span>
+      <span class="surname-label" title="${title}" style="font-style:italic;color:var(--c-9)">${escHtml(label)}</span>
       <span class="surname-count">${count}</span>`;
   } else {
     div.innerHTML = `

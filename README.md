@@ -53,7 +53,7 @@ Counts, lifespans, family sizes, births per decade, most descendants and data co
 | | |
 |---|---|
 | Views | 2D chart, 2D force graph, 3D graph |
-| Editing | click a person or family; add parents, spouses, children; dates as fields (incl. `BET … AND`, `FROM … TO`) or free text |
+| Editing | click a person or family; add parents, spouses, children and siblings in a few keystrokes (Enter adds, Esc closes); type dates the way you write them — `31.7.1980`, `um 1900`, `1850–1860`, `Jul 31, 1980` — and they are stored as GEDCOM |
 | Undo | every edit, deletion, import and merge; `Ctrl+Z` / `Ctrl+Shift+Z` |
 | Media | photos, video, audio, PDFs and web links on people and families; portrait in the panel; see [Media](#media) |
 | Changes | field-level log of every edit since load or last save, which is exactly what a save writes |

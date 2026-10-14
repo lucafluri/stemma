@@ -170,7 +170,7 @@
 
     <div id="sidebar-buttons">
       <div class="sidebar-toggle" id="sort-time-3d-row" style="border-top:none;padding-top:2px;display:block">
-        <div style="font-size:11px;color:#888;margin-bottom:3px" data-i18n="sidebar.stratify3d">Stapeln nach (3D)</div>
+        <div style="font-size:11px;color:var(--c-9);margin-bottom:3px" data-i18n="sidebar.stratify3d">Stapeln nach (3D)</div>
         <select id="stratify-3d-select" class="sidebar-select"
                 data-i18n-title="sidebar.stratify3dTitle"
                 title="Wonach sich die Höhe im 3D-Bild richtet.">
@@ -184,12 +184,12 @@
           <input type="checkbox" id="show-timeline-toggle" checked>
           <span data-i18n="sidebar.showTimeline">Achse anzeigen</span>
         </label>
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px">
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--c-9);margin-bottom:3px">
           <span data-i18n="sidebar.timeSpread">Zeitachsen-Spreizung</span>
           <input type="number" id="time-spread-num" class="sidebar-num" min="0" max="40000" step="10" value="750">
         </div>
         <input type="range" id="time-spread-slider" min="0" max="12000" step="10" value="750"
-               style="width:100%;accent-color:#f2f2f2;cursor:pointer">
+               style="width:100%;accent-color:var(--accent);cursor:pointer">
       </div>
       <label class="sidebar-toggle" id="show-names-3d-row" style="border-top:none;padding-top:2px">
         <input type="checkbox" id="show-names-3d-toggle" checked>
@@ -251,7 +251,7 @@
         <span class="phys-label" data-i18n="nodeColors.famNodeSize">Familien-Knoten Größe</span>
         <span id="fam-node-size-val">7</span>
       </div>
-      <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:#f2f2f2;cursor:pointer;margin-bottom:4px">
+      <input type="range" id="fam-node-size" min="0" max="20" step="1" value="7" style="width:100%;accent-color:var(--accent);cursor:pointer;margin-bottom:4px">
       <button id="node-colors-reset" onclick="resetNodeColors()" data-i18n="nodeColors.reset">Zurücksetzen</button>
     </details>
 

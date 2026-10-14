@@ -12,6 +12,18 @@ import { initials } from './life.js';
 
 // ── Dates ───────────────────────────────────────────────────────────────────
 
+const _year = v => { const m = String(v || '').match(/\b(\d{3,4})\b/); return m ? +m[1] : null; };
+
+/** True when this is a birth or death date and the pair, both filled in, is the wrong way round. */
+function _deathBeforeBirth(wrap) {
+  const m = wrap?.id?.match(/^(.*)-(bdate|ddate)$/);
+  if (!m) return false;
+  const other = document.getElementById(`${m[1]}-${m[2] === 'bdate' ? 'ddate' : 'bdate'}`);
+  const val = el => parseLooseDate(el?.querySelector('.gd-text')?.value || '').value;
+  const b = _year(val(m[2] === 'bdate' ? wrap : other)), d = _year(val(m[2] === 'bdate' ? other : wrap));
+  return !!(b && d && d < b);
+}
+
 function _preview(input) {
   const wrap = input.closest('.gd-widget');
   const pv = wrap?.querySelector('.gd-preview');
@@ -20,6 +32,13 @@ function _preview(input) {
   const r = parseLooseDate(typed);
   pv.className = 'gd-preview';
   if (!typed) { pv.textContent = ''; return; }
+  // Somebody cannot die before they are born; say so the moment both are typed.
+  const order = _deathBeforeBirth(wrap);
+  if (order) {
+    pv.textContent = (r.ok && r.value !== typed ? '→ ' + r.value + ' · ' : '') + t('dateWidget.deathBeforeBirth');
+    pv.classList.add('gd-preview--warn');
+    return;
+  }
   if (!r.ok) {
     pv.textContent = t('dateWidget.keptAsTyped');
     pv.classList.add('gd-preview--warn');

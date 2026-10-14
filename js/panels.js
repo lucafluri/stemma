@@ -173,7 +173,7 @@ export function _quickAddParentFormHtml(personId) {
 
   const slotHtml = (slot, label, existing, defaultSurn) => existing
     ? `<div class="edit-label" style="margin-top:6px">${label}</div>
-       <div style="color:#888;font-size:11px;padding:4px 0">${escHtml(existing.name || existing.id)} ${t('detail.parentAlreadySet')}</div>`
+       <div style="color:var(--c-9);font-size:11px;padding:4px 0">${escHtml(existing.name || existing.id)} ${t('detail.parentAlreadySet')}</div>`
     : `<div class="edit-label" style="margin-top:6px">${label}</div>
        <div class="qa-row">
          <input class="edit-input" id="qa-parent-${slot}-givn" placeholder="${t('detail.firstName')}" aria-label="${t('detail.firstName')}">
@@ -204,7 +204,7 @@ export function confirmQuickAddParents(personId) {
   const mother = readSlot('mother');
   if (!father && !mother) {
     const el = document.getElementById('qa-parent-father-givn') || document.getElementById('qa-parent-mother-givn');
-    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    _flagEmpty(el);
     return;
   }
 
@@ -326,12 +326,12 @@ export function showFamDetail(id) {
   (fam.marriages || []).forEach((m, i) => {
     if (!m.date && !m.plac && !m.types?.length) return;
     let marrVal = fmtPlace(m.date, m.plac);
-    if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:#9f9f9f;font-size:11px">${escHtml(m.types.join(', '))}</span>`;
+    if (m.types?.length) marrVal += (marrVal ? ' &mdash; ' : '') + `<span style="color:var(--c-9);font-size:11px">${escHtml(m.types.join(', '))}</span>`;
     const label = (fam.marriages.length > 1) ? t('detail.marriageN', { n: i + 1 }) : t('detail.marriage');
     html += row(label, marrVal);
   });
   if (fam.div) {
-    const divTxt = `<span style="color:#787878">${t('tooltip.divorced', { date: fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : '' })}</span>`;
+    const divTxt = `<span style="color:var(--c-9)">${t('tooltip.divorced', { date: fam.divDate ? ' &mdash; ' + escHtml(fam.divDate) : '' })}</span>`;
     html += row(t('detail.status'), divTxt);
   }
 
@@ -475,7 +475,7 @@ export function fmtPlace(date, plac) {
 
 export function _buildFamEditSections(personId) {
   const i = state.individuals.get(personId);
-  if (!i || !i.fams.length) return `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyMarriages')}</div>`;
+  if (!i || !i.fams.length) return `<div style="color:var(--c-9);font-size:11px;padding:2px 0">${t('detail.emptyMarriages')}</div>`;
   return i.fams.map(famId => {
     const fam = state.families.get(famId);
     if (!fam) return '';
@@ -527,7 +527,7 @@ export function _renderPendingRelations() {
   const el = document.getElementById('ef-rel-list');
   if (!el) return;
   if (!state._pendingRelations.length) {
-    el.innerHTML = `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyRelations')}</div>`;
+    el.innerHTML = `<div style="color:var(--c-9);font-size:11px;padding:2px 0">${t('detail.emptyRelations')}</div>`;
     return;
   }
   const labels = { parent: t('detail.relationParent'), child: t('detail.relationChild'), spouse: t('detail.relationSpouse') };
@@ -550,8 +550,7 @@ export function addRelation() {
   const type = typeEl.value;
   const targetId = _resolvePersonInput(input.value, input);
   if (!targetId || targetId === state._editingId) {
-    input.style.borderColor = '#787878';
-    setTimeout(() => { input.style.borderColor = ''; }, 1200);
+    _flagEmpty(input);
     return;
   }
   if (state._pendingRelations.some(r => r.targetId === targetId && r.type === type)) return;
@@ -585,8 +584,7 @@ export function confirmNewPersonRelation() {
 
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
-    document.getElementById('ef-np-givn').style.borderColor = '#787878';
-    setTimeout(() => { document.getElementById('ef-np-givn').style.borderColor = ''; }, 1200);
+    _flagEmpty(document.getElementById('ef-np-givn'));
     return;
   }
 
@@ -723,15 +721,15 @@ export function showIndiEditForm(id) {
       <div class="edit-label">${t('detail.note')}</div>
       <textarea class="edit-textarea" id="ef-note">${escHtml(i.note)}</textarea>
     </div>
-    <div class="edit-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
+    <div class="edit-section" style="border-top:1px solid var(--c-5);padding-top:8px;margin-top:4px">
       <div class="edit-label">${t('detail.marriages')}</div>
       <div id="ef-fam-sections">${_buildFamEditSections(id)}</div>
     </div>
-    <div class="edit-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
+    <div class="edit-section" style="border-top:1px solid var(--c-5);padding-top:8px;margin-top:4px">
       <div class="edit-label">${t('detail.relations')}</div>
       <div id="ef-existing-rel-list" style="margin-bottom:4px"></div>
       <div id="ef-rel-list" style="margin-bottom:6px">
-        <div style="color:#555;font-size:11px;padding:2px 0">${t('detail.emptyNewRelations')}</div>
+        <div style="color:var(--c-9);font-size:11px;padding:2px 0">${t('detail.emptyNewRelations')}</div>
       </div>
       <div class="ef-rel-add-row">
         <input class="edit-input" id="ef-rel-person" data-person-picker="${escAttr(id)}" placeholder="${t('detail.searchPerson')}" autocomplete="off">
@@ -743,7 +741,7 @@ export function showIndiEditForm(id) {
         <button class="ef-rel-add-btn" onclick="addRelation()" title="${t('detail.addRelation')}">+</button>
       </div>
       <button class="ef-new-person-btn" onclick="toggleNewPersonSubform()">&#xff0b; ${t('detail.createNewPerson')}</button>
-      <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
+      <div id="ef-new-person-subform" style="display:none;margin-top:8px;padding:8px;background:var(--c-3);border:1px solid var(--c-5);border-radius:6px">
         <div class="edit-label" style="margin-bottom:6px">${t('detail.newPerson')}</div>
         <div style="display:flex;gap:6px;margin-bottom:6px">
           <input class="edit-input" id="ef-np-givn" placeholder="${t('detail.firstName')}" style="flex:1">
@@ -1090,7 +1088,7 @@ export function _readPersonVitals(prefix) {
 
 export function _inlineSpouseFormHtml(prefix) {
   return `<button type="button" class="ef-toggle-new-btn" onclick="_toggleInlineSpouseForm('${prefix}')" style="margin-top:8px">&#x2795; ${t('detail.addSpouse')}</button>
-    <div id="${prefix}-sp-form" style="display:none;margin-top:6px;padding:8px;background:#161616;border:1px solid #2b2b2b;border-radius:6px">
+    <div id="${prefix}-sp-form" style="display:none;margin-top:6px;padding:8px;background:var(--c-3);border:1px solid var(--c-5);border-radius:6px">
       ${_personNameSexHtml(prefix + '-sp')}
       ${_personVitalsHtml(prefix + '-sp')}
       <div class="edit-label" style="font-size:11px;margin-top:8px">${t('detail.marriageDate')}</div>
@@ -1274,7 +1272,7 @@ export function _famEditCreatePartner(slot) {
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
     const el = document.getElementById(`ef-${p}-givn`);
-    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+    _flagEmpty(el);
     return;
   }
   // Discard a stub from a previous "new person" click on this slot that never got saved
@@ -1358,7 +1356,7 @@ export function _famEditRenderChildren(f) {
   });
   el.innerHTML = (existing.length || pending.length)
     ? existing.join('') + pending.join('')
-    : `<div style="color:#555;font-size:11px;padding:2px 0">${t('detail.noChildren')}</div>`;
+    : `<div style="color:var(--c-9);font-size:11px;padding:2px 0">${t('detail.noChildren')}</div>`;
 }
 
 export function _famEditRemoveChild(cid) {
@@ -1382,7 +1380,7 @@ export function _famEditAddChild() {
   const id = _resolvePersonInput(val, inp);
   const f = state.families.get(state._editingId);
   if (!f) return;
-  if (!id || id === f.husb || id === f.wife) { inp.style.borderColor = '#787878'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
+  if (!id || id === f.husb || id === f.wife) { _flagEmpty(inp); return; }
   if (f.chil.includes(id) && !state._famEditRemovedChil.has(id)) return;
   if (state._famEditPendingChil.some(c => c.id === id)) return;
   const p = state.individuals.get(id);
@@ -1406,8 +1404,7 @@ export function _famEditCreateChild() {
   const sex  = document.getElementById('ef-fnc-sex')?.value || 'U';
   const fullName = (givn + ' ' + surn).trim();
   if (!fullName) {
-    document.getElementById('ef-fnc-givn').style.borderColor = '#787878';
-    setTimeout(() => { document.getElementById('ef-fnc-givn').style.borderColor = ''; }, 1200);
+    _flagEmpty(document.getElementById('ef-fnc-givn'));
     return;
   }
   const newId = _makeNewIndi(givn, surn, sex, _readPersonVitals('ef-fnc'));

@@ -943,7 +943,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
 /* ── TOOLTIP ── */
 #tooltip {
   position: fixed;
-  background: rgba(31, 31, 31, 0.97);
+  background: rgba(29, 34, 43, 0.97);
   border: 1px solid var(--c-6);
   border-radius: var(--r-sm);
   padding: 8px 10px;
@@ -962,7 +962,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
 #loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(28, 28, 28, 0.88);
+  background: rgba(19, 22, 28, 0.9);
   display: none;
   align-items: center;
   justify-content: center;
@@ -990,7 +990,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
   height: 36px;
   border-radius: 50%;
   border: 1px solid var(--c-6);
-  background: rgba(25, 25, 25, 0.9);
+  background: rgba(22, 26, 33, 0.92);
   color: var(--c-9);
   font-size: 16px;
   cursor: pointer;
@@ -1020,7 +1020,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
   height: 36px;
   border-radius: var(--r-md);
   border: 1px solid var(--c-6);
-  background: rgba(25, 25, 25, 0.9);
+  background: rgba(22, 26, 33, 0.92);
   color: var(--c-9);
   font-size: 18px;
   line-height: 1;
@@ -2003,7 +2003,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
   left: 50%;
   transform: translateX(-50%);
   z-index: 140;
-  background: rgba(20, 20, 20, 0.92);
+  background: rgba(19, 22, 28, 0.95);
   color: var(--c-9);
   border: 1px solid var(--c-6);
   border-radius: 20px;
@@ -2023,7 +2023,7 @@ button, summary, label, .clickable-name { touch-action: manipulation; }
   -webkit-tap-highlight-color: transparent;
 }
 #reopen-panel-pill:active {
-  background: rgba(46, 46, 46, 0.95);
+  background: rgba(38, 44, 54, 0.95);
 }
 
 /* The wordmark is the first thing that can go: the favicon beside it says the

@@ -1159,21 +1159,21 @@ export function onHover(evt, d) {
     if (i.birth.date) {
       html += `<div class="tt-detail">* ${escHtml(i.birth.date)}${i.birth.plac ? ', ' + escHtml(i.birth.plac) : ''}</div>`;
     } else if (state._estimatedYears && state._estimatedYears.has(d.id)) {
-      html += `<div class="tt-detail" style="color:#888">~${state._estimatedYears.get(d.id)} (${t('detail.estimated')})</div>`;
+      html += `<div class="tt-detail" style="color:var(--c-9)">~${state._estimatedYears.get(d.id)} (${t('detail.estimated')})</div>`;
     }
     if (i.deceased) {
       html += `<div class="tt-detail">† ${i.death.date ? escHtml(i.death.date) : t('tooltip.unknownDate')}</div>`;
     }
-    if (i.occu) html += `<div class="tt-detail" style="color:#9f9f9f">${escHtml(i.occu)}</div>`;
-    if (i.maidenName) html += `<div class="tt-detail" style="color:#888">${t('tooltip.born', { name: escHtml(i.maidenName) })}</div>`;
-    else if (i.surn) html += `<div class="tt-detail" style="color:#888">${t('tooltip.familyName', { name: escHtml(i.surn) })}</div>`;
+    if (i.occu) html += `<div class="tt-detail" style="color:var(--c-9)">${escHtml(i.occu)}</div>`;
+    if (i.maidenName) html += `<div class="tt-detail" style="color:var(--c-9)">${t('tooltip.born', { name: escHtml(i.maidenName) })}</div>`;
+    else if (i.surn) html += `<div class="tt-detail" style="color:var(--c-9)">${t('tooltip.familyName', { name: escHtml(i.surn) })}</div>`;
     const age = personAgeYears(d.id);
     if (age) {
       const ageStr = (age.approx ? '~' : '') + age.age;
       html += `<div class="tt-detail">${t(age.atDeath ? 'tooltip.ageAtDeath' : 'tooltip.age', { age: ageStr })}</div>`;
     }
     const genNum = generationNumbers().get(d.id);
-    if (genNum != null) html += `<div class="tt-detail" style="color:#888">${t('tooltip.generation', { n: genNum })}</div>`;
+    if (genNum != null) html += `<div class="tt-detail" style="color:var(--c-9)">${t('tooltip.generation', { n: genNum })}</div>`;
   } else {
     const f = d.data;
     const names = [f.husb, f.wife].filter(Boolean)
@@ -1181,7 +1181,7 @@ export function onHover(evt, d) {
     html = `<div class="tt-name">${t('tooltip.family')}</div>`;
     if (names) html += `<div class="tt-detail">${names}</div>`;
     if (f.marriages?.[0]?.date) html += `<div class="tt-detail">⚭ ${escHtml(f.marriages[0].date)}</div>`;
-    if (f.div) html += `<div class="tt-detail" style="color:#787878">${t('tooltip.divorced', { date: f.divDate ? ' ' + escHtml(f.divDate) : '' })}</div>`;
+    if (f.div) html += `<div class="tt-detail" style="color:var(--c-9)">${t('tooltip.divorced', { date: f.divDate ? ' ' + escHtml(f.divDate) : '' })}</div>`;
     html += `<div class="tt-detail">${f.chil.length} ${f.chil.length === 1 ? t('tooltip.child') : t('tooltip.children')}</div>`;
   }
   tt.innerHTML = html;
@@ -1297,7 +1297,7 @@ export function renderPresetList() {
   }
 
   if (!names.length && !Object.keys(BUILTIN_PRESETS).length) {
-    container.innerHTML = `<div style="color:#555;font-size:11px;font-style:italic;padding:2px 4px">${t('physics.noPresets')}</div>`;
+    container.innerHTML = `<div style="color:var(--c-9);font-size:11px;font-style:italic;padding:2px 4px">${t('physics.noPresets')}</div>`;
   }
 }
 
