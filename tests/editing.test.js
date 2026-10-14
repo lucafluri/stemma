@@ -54,13 +54,28 @@ async function test(name, fn) {
     });
   }
 
-  await test('what the fields can hold opens as fields, anything else as text', () => {
-    assert.strictEqual(widget('BET 1850 AND 1860').dataset.mode, 'parts');
+  await test('a date always opens as one text field; the fields are one click away', () => {
+    assert.strictEqual(widget('BET 1850 AND 1860').dataset.mode, 'text');
     assert.strictEqual(widget('1700/01').dataset.mode, 'text');
+    const el = widget('BET 1850 AND 1860');
+    Io._gdToggleMode('w');
+    assert.strictEqual(el.dataset.mode, 'parts');
+    assert.strictEqual(el.querySelector('.gd-year2').value, '1860');
+  });
+
+  await test('what is typed in the text field is understood', () => {
+    const el = widget('');
+    const put = v => { el.querySelector('.gd-text').value = v; return Io._gedcomDateValue('w'); };
+    assert.strictEqual(put('31.7.1980'), '31 JUL 1980');
+    assert.strictEqual(put('um 1900'), 'ABT 1900');
+    assert.strictEqual(put('1850-1860'), 'BET 1850 AND 1860');
+    assert.strictEqual(put('1700/01'), '1700/01', 'dual dating is kept as written');
+    assert.strictEqual(put('31.2.1980'), '31.2.1980', 'an impossible date is kept, not invented');
   });
 
   await test('a range is built from both dates', () => {
     const el = widget('');
+    Io._gdToggleMode('w');
     el.querySelector('.gd-prefix').value = 'BET';
     el.querySelector('.gd-year:not(.gd-year2)').value = '1850';
     el.querySelector('.gd-year2').value = '1860';
@@ -69,6 +84,7 @@ async function test(name, fn) {
 
   await test('"between" with only one end is written as the open-ended date it means', () => {
     const el = widget('');
+    Io._gdToggleMode('w');
     el.querySelector('.gd-prefix').value = 'BET';
     el.querySelector('.gd-year:not(.gd-year2)').value = '1850';
     assert.strictEqual(Io._gedcomDateValue('w'), 'AFT 1850');
@@ -76,13 +92,15 @@ async function test(name, fn) {
 
   await test('free text is written as typed', () => {
     const el = widget('');
-    Io._gdToggleMode('w');
     el.querySelector('.gd-text').value = '  INT 1900   (per census) ';
     assert.strictEqual(Io._gedcomDateValue('w'), 'INT 1900 (per census)');
   });
 
   await test('switching to text carries the fields over, and back again', () => {
     const el = widget('ABT 3 MAR 1850');
+    assert.strictEqual(el.querySelector('.gd-text').value, 'ABT 3 MAR 1850');
+    Io._gdToggleMode('w');
+    assert.strictEqual(el.querySelector('.gd-year:not(.gd-year2)').value, '1850');
     Io._gdToggleMode('w');
     assert.strictEqual(el.querySelector('.gd-text').value, 'ABT 3 MAR 1850');
     el.querySelector('.gd-text').value = 'FROM 1900 TO 1910';

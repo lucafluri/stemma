@@ -4899,3 +4899,53 @@ body.view-3d #color-mode-btn { display: none; }
   #view-switch { right: 56px; }
   #focus-bar { max-width: calc(100% - 16px); width: auto; }
 }
+
+/* ── Date entry ─────────────────────────────────────────────────── */
+.gd-text { font-family: var(--mono); font-size: 13px; }
+.gd-preview { min-height: 0; font-size: 12px; font-family: var(--mono); margin-top: 3px; }
+.gd-preview:empty { display: none; }
+.gd-preview--ok { color: var(--accent-text); }
+.gd-preview--warn { color: var(--warn-bright); font-family: inherit; }
+
+/* ── Add relative ───────────────────────────────────────────────── */
+.qa-bar { margin-bottom: 14px; }
+.qa-bar-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; color: var(--c-9); margin-bottom: 8px; }
+.qa-bar-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.qa-bar-btn {
+  height: 34px; padding: 0 4px; border: 1px dashed var(--c-7); background: transparent; color: var(--c-11);
+  border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.qa-bar-btn:hover { background: var(--c-3); color: var(--c-13); }
+.qa-bar-btn.active { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.qa-form { margin-top: 8px; padding: 10px; background: var(--c-3); border: 1px solid var(--c-5); border-radius: 8px; }
+.qa-title { margin-bottom: 8px; }
+.qa-sub { font-size: 11px; margin: 8px 0 3px; }
+.qa-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.qa-row > * { flex: 1; min-width: 0; }
+.qa-field { display: block; margin-bottom: 6px; }
+.qa-more { margin-top: 8px; }
+.qa-more > summary { cursor: pointer; color: var(--c-9); font-size: 12px; padding: 2px 0; }
+.qa-more > summary:hover { color: var(--c-12); }
+.qa-feedback { min-height: 0; margin-top: 8px; color: var(--accent-text); font-size: 12px; }
+.qa-feedback:empty { display: none; }
+.qa-actions { display: flex; gap: 6px; margin-top: 10px; }
+.qa-actions > button { flex: 1; padding: 7px; }
+.edit-input--missing { border-color: var(--warn) !important; box-shadow: 0 0 0 2px rgba(224, 182, 79, .25); }
+
+/* The phone sheet is short: keep its footer to two thin rows so the form above
+   it gets the room. */
+@media (max-width: 700px) {
+  #detail-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 6px 12px 10px; }
+  #detail-buttons > #btn-ancestors, #detail-buttons > #btn-descendants,
+  #detail-buttons > #btn-both, #detail-buttons > #btn-focus-2d { grid-column: span 1; }
+  #detail-buttons .highlight-btn { padding: 8px 2px; font-size: 11px; }
+  #detail-edit-bar { padding: 4px 12px; }
+  #detail-content { padding: 12px; }
+}
+.qa-bar-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#rail-tabs button { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#minimap { left: auto; bottom: auto; right: 12px; top: 60px; }
+#rail-tabs button { flex: 0 1 auto; padding: 0 8px; }
+#rail-tabs { justify-content: space-between; }
+#rail-tabs { gap: 2px; }
+#rail-tabs button { padding: 0 6px; text-overflow: clip; }

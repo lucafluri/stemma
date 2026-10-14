@@ -29,6 +29,20 @@ export function showIndiDetail(id) {
 
   let html = issueBannerHtml(id);
 
+  // Add a relative: one click from the read-only view, at the top where it is
+  // reached without scrolling past the whole record first.
+  html += `<div class="qa-bar">
+    <div class="qa-bar-label">${t('detail.addRelative')}</div>
+    <div class="qa-bar-row">
+      ${['parent', 'spouse', 'child', 'sibling'].map(k =>
+        `<button class="qa-bar-btn" id="qa-${k}-toggle" onclick="toggleQuickAdd('${k}')">&#xff0b; ${t(_QUICK_ADD_LABELS[k])}</button>`).join('')}
+    </div>
+    ${_quickAddFormHtml('parent', id)}
+    ${_quickAddFormHtml('spouse', id)}
+    ${_quickAddFormHtml('child', id)}
+    ${_quickAddFormHtml('sibling', id)}
+  </div>`;
+
   // What the timeline does not already say. Birth and death are in it.
   const sexLabel = indi.sex === 'M' ? t('detail.male') : indi.sex === 'F' ? t('detail.female') : t('detail.unknown');
   html += `<div class="detail-facts">`;
@@ -84,18 +98,6 @@ export function showIndiDetail(id) {
 
   html += mediaSectionHtml(id);
 
-  // Quick-add relative — one click from the read-only view, no need to enter edit mode
-  html += `<div class="detail-section" style="border-top:1px solid #2e2e2e;padding-top:8px;margin-top:4px">
-    <div class="ef-rel-add-row">
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('parent')">&#xff0b; ${t('detail.addParent')}</button>
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('spouse')">&#xff0b; ${t('detail.addSpouse')}</button>
-      <button class="ef-new-person-btn" style="width:auto;flex:1;margin-top:0" onclick="toggleQuickAdd('child')">&#xff0b; ${t('detail.addChild')}</button>
-    </div>
-    ${_quickAddFormHtml('parent', id)}
-    ${_quickAddFormHtml('spouse', id)}
-    ${_quickAddFormHtml('child', id)}
-  </div>`;
-
   _setPanelContent(html);
   document.getElementById('delete-confirm-bar').style.display = 'none';
   document.getElementById('detail-edit-bar').style.display = 'flex';
@@ -108,28 +110,51 @@ export function showIndiDetail(id) {
   if (state.currentView === '3d') _setOrbitTarget3D(id);
 }
 
-export const _QUICK_ADD_LABELS = { parent: 'detail.addParent', spouse: 'detail.addSpouse', child: 'detail.addChild' };
+export const _QUICK_ADD_LABELS = { parent: 'detail.addParent', spouse: 'detail.addSpouse', child: 'detail.addChild', sibling: 'detail.addSibling' };
+
+// Whom a new child belongs to when the person has had more than one partner.
+function _partnerChoiceHtml(personId) {
+  const i = state.individuals.get(personId);
+  const fams = (i?.fams || []).map(fid => state.families.get(fid)).filter(Boolean);
+  if (fams.length < 2) return '';
+  const opts = fams.map(f => {
+    const other = f.husb === personId ? f.wife : f.husb;
+    const name = other ? (state.individuals.get(other)?.name || other) : t('detail.unknownPartner');
+    return `<option value="${escAttr(f.id)}">${escHtml(name)}</option>`;
+  }).join('');
+  return `<label class="qa-field"><span class="edit-label">${t('detail.withPartner')}</span>
+    <select class="edit-select" id="qa-child-fam">${opts}</select></label>`;
+}
 
 export function _quickAddFormHtml(type, personId) {
   if (type === 'parent') return _quickAddParentFormHtml(personId);
-  const defaultSurn = type === 'child' ? (state.individuals.get(personId)?.surn || '') : '';
-  return `<div id="qa-${type}-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
-    <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t(_QUICK_ADD_LABELS[type]) })}</div>
-    <div style="display:flex;gap:6px;margin-bottom:6px">
-      <input class="edit-input" id="qa-${type}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
-      <input class="edit-input" id="qa-${type}-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr(defaultSurn)}">
+  const me = state.individuals.get(personId);
+  const prefix = `qa-${type}`;
+  const defaultSurn = (type === 'child' || type === 'sibling') ? (me?.surn || '') : '';
+  // A partner is most likely the other sex; everyone else is left for the name
+  // (or the person) to decide.
+  const defaultSex = type === 'spouse' ? (me?.sex === 'M' ? 'F' : me?.sex === 'F' ? 'M' : 'U') : 'U';
+  const sexOpts = [['U', t('detail.sexPlaceholder')], ['M', t('detail.male')], ['F', t('detail.female')]]
+    .map(([v, l]) => `<option value="${v}"${v === defaultSex ? ' selected' : ''}>${l}</option>`).join('');
+  return `<div id="${prefix}-form" class="qa-form" style="display:none">
+    <div class="edit-label qa-title">${t('detail.newLabel', { type: t(_QUICK_ADD_LABELS[type]) })}</div>
+    ${type === 'child' ? _partnerChoiceHtml(personId) : ''}
+    <div class="qa-row">
+      <input class="edit-input" id="${prefix}-givn" placeholder="${t('detail.firstName')}" aria-label="${t('detail.firstName')}">
+      <input class="edit-input" id="${prefix}-surn" placeholder="${t('detail.familyName')}" aria-label="${t('detail.familyName')}" value="${escAttr(defaultSurn)}">
     </div>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <select class="edit-select" id="qa-${type}-sex">
-        <option value="U">${t('detail.sexPlaceholder')}</option>
-        <option value="M">${t('detail.male')}</option>
-        <option value="F">${t('detail.female')}</option>
-      </select>
+    <div class="qa-row">
+      <select class="edit-select qa-sex" id="${prefix}-sex" aria-label="${t('detail.sex')}"${defaultSex !== 'U' ? ' data-auto="1"' : ''}>${sexOpts}</select>
     </div>
-    ${type === 'child' ? _personVitalsHtml('qa-child') + _inlineSpouseFormHtml('qa-child') : ''}
-    <div style="display:flex;gap:6px;margin-top:8px">
-      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; ${t('detail.add')}</button>
-      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('${type}')">${t('detail.cancel')}</button>
+    ${_personVitalsHtml(prefix)}
+    ${type === 'spouse' ? `<div class="edit-label qa-sub">${t('detail.marriageDate')}</div>
+      ${_gedcomDateWidget(prefix + '-mdate', '')}
+      <input class="edit-input" id="${prefix}-mplac" autocomplete="off" placeholder="${t('detail.marriagePlace')}" style="margin-top:4px">` : ''}
+    ${type === 'child' || type === 'sibling' ? _inlineSpouseFormHtml(prefix) : ''}
+    <div class="qa-feedback" id="${prefix}-feedback" role="status" aria-live="polite"></div>
+    <div class="qa-actions">
+      <button class="edit-save-btn" onclick="confirmQuickAddRelative('${escJs(personId)}','${type}')">&#x2713; ${t('detail.add')}</button>
+      <button class="edit-cancel-btn" onclick="toggleQuickAdd('${type}')">${type === 'spouse' ? t('detail.cancel') : t('detail.done')}</button>
     </div>
   </div>`;
 }
@@ -141,8 +166,8 @@ export function _quickAddParentFormHtml(personId) {
   const wife = fam?.wife ? state.individuals.get(fam.wife) : null;
 
   if (husb && wife) {
-    return `<div id="qa-parent-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
-      <div style="color:#888;font-size:11px">${t('detail.bothParentsSet')}</div>
+    return `<div id="qa-parent-form" class="qa-form" style="display:none">
+      <div class="detail-muted">${t('detail.bothParentsSet')}</div>
     </div>`;
   }
 
@@ -150,19 +175,19 @@ export function _quickAddParentFormHtml(personId) {
     ? `<div class="edit-label" style="margin-top:6px">${label}</div>
        <div style="color:#888;font-size:11px;padding:4px 0">${escHtml(existing.name || existing.id)} ${t('detail.parentAlreadySet')}</div>`
     : `<div class="edit-label" style="margin-top:6px">${label}</div>
-       <div style="display:flex;gap:6px;margin-bottom:4px">
-         <input class="edit-input" id="qa-parent-${slot}-givn" placeholder="${t('detail.firstName')}" style="flex:1">
-         <input class="edit-input" id="qa-parent-${slot}-surn" placeholder="${t('detail.familyName')}" style="flex:1" value="${escAttr(defaultSurn)}">
+       <div class="qa-row">
+         <input class="edit-input" id="qa-parent-${slot}-givn" placeholder="${t('detail.firstName')}" aria-label="${t('detail.firstName')}">
+         <input class="edit-input" id="qa-parent-${slot}-surn" placeholder="${t('detail.familyName')}" aria-label="${t('detail.familyName')}" value="${escAttr(defaultSurn)}">
        </div>
        ${_gedcomDateWidget('qa-parent-' + slot + '-bdate', '')}`;
 
-  return `<div id="qa-parent-form" style="display:none;margin-top:8px;padding:8px;background:#1b1b1b;border:1px solid #2b2b2b;border-radius:6px">
-    <div class="edit-label" style="margin-bottom:6px">${t('detail.newLabel', { type: t('detail.addParent') })}</div>
+  return `<div id="qa-parent-form" class="qa-form" style="display:none">
+    <div class="edit-label qa-title">${t('detail.newLabel', { type: t('detail.addParent') })}</div>
     ${slotHtml('father', t('detail.relationVater'), husb, i?.surn || '')}
     ${slotHtml('mother', t('detail.relationMutter'), wife, '')}
-    <div style="display:flex;gap:6px;margin-top:8px">
-      <button class="edit-save-btn" style="flex:1;padding:5px" onclick="confirmQuickAddParents('${escJs(personId)}')">&#x2713; ${t('detail.add')}</button>
-      <button class="edit-cancel-btn" style="flex:1;padding:5px" onclick="toggleQuickAdd('parent')">${t('detail.cancel')}</button>
+    <div class="qa-actions">
+      <button class="edit-save-btn" onclick="confirmQuickAddParents('${escJs(personId)}')">&#x2713; ${t('detail.add')}</button>
+      <button class="edit-cancel-btn" onclick="toggleQuickAdd('parent')">${t('detail.cancel')}</button>
     </div>
   </div>`;
 }
@@ -201,54 +226,87 @@ export function confirmQuickAddParents(personId) {
 }
 
 export function toggleQuickAdd(type) {
-  for (const t of ['parent', 'spouse', 'child']) {
-    const sf = document.getElementById(`qa-${t}-form`);
+  for (const k of ['parent', 'spouse', 'child', 'sibling']) {
+    const sf = document.getElementById(`qa-${k}-form`);
+    const btn = document.getElementById(`qa-${k}-toggle`);
     if (!sf) continue;
-    if (t === type) {
-      const visible = sf.style.display !== 'none';
-      sf.style.display = visible ? 'none' : 'block';
-      if (!visible) document.getElementById(`qa-${t}-givn`)?.focus();
+    if (k === type) {
+      const open = sf.style.display === 'none';
+      sf.style.display = open ? 'block' : 'none';
+      btn?.classList.toggle('active', open);
+      btn?.setAttribute('aria-expanded', String(open));
+      if (open) {
+        const first = document.getElementById(`qa-${k}-givn`) || document.getElementById('qa-parent-father-givn') || document.getElementById('qa-parent-mother-givn');
+        first?.focus();
+        sf.scrollIntoView?.({ block: 'nearest' });
+      }
     } else {
       sf.style.display = 'none';
+      btn?.classList.remove('active');
+      btn?.setAttribute('aria-expanded', 'false');
     }
   }
 }
 
+const _flagEmpty = el => {
+  if (!el) return;
+  el.classList.add('edit-input--missing');
+  el.focus();
+  setTimeout(() => el.classList.remove('edit-input--missing'), 1200);
+};
+
 export function confirmQuickAddRelative(personId, type) {
-  const givn = document.getElementById(`qa-${type}-givn`)?.value.trim() || '';
-  const surn = document.getElementById(`qa-${type}-surn`)?.value.trim() || '';
-  const sex  = document.getElementById(`qa-${type}-sex`)?.value || 'U';
+  const prefix = `qa-${type}`;
+  const givn = document.getElementById(`${prefix}-givn`)?.value.trim() || '';
+  const surn = document.getElementById(`${prefix}-surn`)?.value.trim() || '';
+  const sex  = document.getElementById(`${prefix}-sex`)?.value || 'U';
 
   const fullName = (givn + ' ' + surn).trim();
-  if (!fullName) {
-    const el = document.getElementById(`qa-${type}-givn`);
-    if (el) { el.style.borderColor = '#787878'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
-    return;
-  }
+  if (!fullName) { _flagEmpty(document.getElementById(`${prefix}-givn`)); return; }
 
   recordUndo(t('history.addRelative', { what: state.individuals.get(personId)?.name || personId }));
-  const extra = type === 'child' ? _readPersonVitals('qa-child') : {};
-  const newId = _makeNewIndi(givn, surn, sex, extra);
+  const newId = _makeNewIndi(givn, surn, sex, _readPersonVitals(prefix));
+  const fresh = state.individuals.get(newId);
 
-  // The UI is phrased from the viewed person's perspective ("add a spouse/child to
-  // this person"), but _applyRelation's `type` describes personId's relation TO the
-  // target — so "add a child" means personId is the PARENT of the new person.
-  // ("Add parent" is handled separately by confirmQuickAddParents.)
-  const relType = type === 'child' ? 'parent' : 'spouse';
-  _applyRelation(personId, { targetId: newId, type: relType });
+  if (type === 'child') {
+    // With more than one partner the form asks whose child it is; with one (or
+    // none) it is that family.
+    const chosen = state.families.get(document.getElementById('qa-child-fam')?.value || '');
+    const fam = chosen || _findOrCreateFamAsParent(personId);
+    fam.chil.push(newId);
+    fresh.famc.push(fam.id);
+  } else if (type === 'sibling') {
+    // A sibling is one more child in the family this person is a child of
+    // (made, without parents yet, if they have none).
+    const fam = _findOrCreateFamAsChild(personId);
+    fam.chil.push(newId);
+    fresh.famc.push(fam.id);
+  } else {
+    // "Add a spouse": _applyRelation's `type` is the viewed person's relation TO
+    // the target, which for a spouse is symmetrical.
+    _applyRelation(personId, { targetId: newId, type: 'spouse' });
+    const fam = [...(state.individuals.get(personId)?.fams || [])].reverse()
+      .map(fid => state.families.get(fid)).find(f => f && (f.husb === newId || f.wife === newId));
+    const mDate = _gedcomDateValue(`${prefix}-mdate`);
+    const mPlac = (document.getElementById(`${prefix}-mplac`)?.value || '').trim();
+    if (fam && (mDate || mPlac)) fam.marriages[0] = { ...(fam.marriages[0] || { types: [] }), date: mDate, plac: mPlac };
+  }
 
-  if (type === 'child') _attachInlineSpouse(newId, _readInlineSpouse('qa-child'));
+  if (type !== 'spouse') _attachInlineSpouse(newId, _readInlineSpouse(prefix));
 
   _fullRebuildGraph({ warm: true });
-  state.selectedIndiId = newId;
-  state._editingId    = newId;
-  state._editingType  = 'INDI';
-  // Deliberately NOT _isNewRecord = true: the relation was already committed above
-  // (not staged), so cancelling the new person's own edit form must not delete them
-  // and leave the family record pointing at a dangling id.
-  state._isNewRecord = false;
-  document.getElementById('detail-name').textContent = fullName;
-  showIndiEditForm(newId);
+  showIndiDetail(personId);
+  flashNode(newId);
+
+  const note = t('detail.addedNote', { name: fullName });
+  document.getElementById('status').textContent = note;
+  // Children and siblings come in runs: put the form straight back, empty and
+  // focused, so the next name is one Enter away.
+  if (type === 'child' || type === 'sibling') {
+    toggleQuickAdd(type);
+    const fb = document.getElementById(`${prefix}-feedback`);
+    if (fb) fb.textContent = '✓ ' + note;
+  }
 }
 
 export function showFamDetail(id) {
@@ -643,7 +701,7 @@ export function showIndiEditForm(id) {
       <input type="checkbox" id="ef-dead"${i.deceased?' checked':''} onchange="_toggleDeathFields(this.checked)">
       ${t('detail.deceased')}
     </label>
-    <div id="ef-death-fields" style="display:${i.deceased ? 'block' : 'none'}">
+    <div id="ef-death-fields">
       <div class="edit-section">
         <div class="edit-label">${t('detail.deathDate')}</div>
         ${_gedcomDateWidget('ef-ddate', i.death.date)}
@@ -715,11 +773,19 @@ export function showIndiEditForm(id) {
     </div>`);
 
   _renderExistingRelations(id);
+  // Straight into the first field: for a new person the name is the first thing
+  // typed, and for an edit it is the likeliest thing to fix.
+  const first = document.getElementById('ef-givn');
+  if (first && !_isMobile()) { first.focus(); first.select?.(); }
 }
 
+// The death fields are always there (so a date can just be typed, which ticks
+// the box); unticking the box is the statement that nobody died, so it empties
+// them rather than leaving a date that would tick it again.
 export function _toggleDeathFields(checked) {
-  const el = document.getElementById('ef-death-fields');
-  if (el) el.style.display = checked ? 'block' : 'none';
+  if (checked) return;
+  _resetGedcomDateWidget('ef-ddate');
+  for (const id of ['ef-dplac', 'ef-dcaus']) { const el = document.getElementById(id); if (el) el.value = ''; }
 }
 
 export function commitIndiEdit() {
@@ -740,7 +806,9 @@ export function commitIndiEdit() {
   i.sex        = document.getElementById('ef-sex').value;
   i.birth.date = _gedcomDateValue('ef-bdate');
   setPlace(i.birth, document.getElementById('ef-bplac').value);
-  i.deceased   = document.getElementById('ef-dead').checked;
+  // Typing a death date or place is the answer to "deceased?" on its own.
+  i.deceased   = document.getElementById('ef-dead').checked
+    || !!_gedcomDateValue('ef-ddate') || !!document.getElementById('ef-dplac').value.trim();
   if (i.deceased) {
     i.death.date = _gedcomDateValue('ef-ddate');
     setPlace(i.death, document.getElementById('ef-dplac').value);
@@ -986,18 +1054,21 @@ export function _personNameSexHtml(prefix, defaultSurn = '') {
 }
 
 export function _personVitalsHtml(prefix) {
-  return `<div class="edit-label" style="font-size:11px;margin-top:4px">${t('detail.birthDate')}</div>
+  return `<div class="edit-label qa-sub">${t('detail.birthDate')}</div>
     ${_gedcomDateWidget(prefix + '-bdate', '')}
     <input class="edit-input" id="${prefix}-bplac" autocomplete="off" placeholder="${t('detail.birthPlace')}" style="margin-top:4px">
-    <label class="edit-checkbox-row" style="margin-top:6px">
-      <input type="checkbox" id="${prefix}-dead" onchange="document.getElementById('${prefix}-death-fields').style.display=this.checked?'block':'none'">
-      ${t('detail.deceased')}
-    </label>
-    <div id="${prefix}-death-fields" style="display:none;margin-top:4px">
-      <div class="edit-label" style="font-size:11px">${t('detail.deathDate')}</div>
-      ${_gedcomDateWidget(prefix + '-ddate', '')}
-      <input class="edit-input" id="${prefix}-dplac" autocomplete="off" placeholder="${t('detail.deathPlace')}" style="margin-top:4px">
-    </div>`;
+    <details class="qa-more" id="${prefix}-more">
+      <summary>${t('detail.deathMore')}</summary>
+      <label class="edit-checkbox-row">
+        <input type="checkbox" id="${prefix}-dead">
+        ${t('detail.deceased')}
+      </label>
+      <div id="${prefix}-death-fields">
+        <div class="edit-label qa-sub">${t('detail.deathDate')}</div>
+        ${_gedcomDateWidget(prefix + '-ddate', '')}
+        <input class="edit-input" id="${prefix}-dplac" autocomplete="off" placeholder="${t('detail.deathPlace')}" style="margin-top:4px">
+      </div>
+    </details>`;
 }
 
 export function _readPersonVitals(prefix) {
@@ -1005,10 +1076,14 @@ export function _readPersonVitals(prefix) {
     birthDate: _gedcomDateValue(prefix + '-bdate'),
     birthPlac: (document.getElementById(`${prefix}-bplac`)?.value || '').trim(),
   };
-  if (document.getElementById(`${prefix}-dead`)?.checked) {
+  // A death date or place is an answer to "deceased?" — nobody should have to
+  // tick a box to say so as well.
+  const deathDate = _gedcomDateValue(prefix + '-ddate');
+  const deathPlac = (document.getElementById(`${prefix}-dplac`)?.value || '').trim();
+  if (document.getElementById(`${prefix}-dead`)?.checked || deathDate || deathPlac) {
     extra.deceased = true;
-    extra.deathDate = _gedcomDateValue(prefix + '-ddate');
-    extra.deathPlac = (document.getElementById(`${prefix}-dplac`)?.value || '').trim();
+    extra.deathDate = deathDate;
+    extra.deathPlac = deathPlac;
   }
   return extra;
 }
@@ -1049,8 +1124,8 @@ export function _resetPersonFormFields(prefix) {
   _resetGedcomDateWidget(`${prefix}-mdate`); // no-op unless prefix is a spouse block
   const dead = document.getElementById(`${prefix}-dead`);
   if (dead) dead.checked = false;
-  const df = document.getElementById(`${prefix}-death-fields`);
-  if (df) df.style.display = 'none';
+  const more = document.getElementById(`${prefix}-more`);
+  if (more) more.open = false;
 }
 
 export function _attachInlineSpouse(personId, spouse) {

@@ -1,3 +1,4 @@
+import { parseLooseDate } from './dates.js';
 import { state } from './state.js';
 import { lsGet, lsRemove, lsSet } from './settings.js';
 import { AUTO_FOCUS_THRESHOLD, perf, placeTopbarMenu } from './constants.js';
@@ -616,7 +617,10 @@ export function _gedcomDateWidget(fieldId, value) {
     `<input class="gd-day${sfx}" type="number" min="1" max="31" placeholder="${t('dateWidget.dayPlaceholder')}" value="${d}" title="${t('dateWidget.day')}">` +
     `<select class="gd-month${sfx}"><option value="">${t('dateWidget.monthPlaceholder')}</option>${monthOpts(m)}</select>` +
     `<input class="gd-year${sfx}" type="number" min="1" max="2200" placeholder="${t('dateWidget.yearPlaceholder')}" value="${y}" title="${t('dateWidget.year')}">`;
-  return `<div class="gd-widget" id="${fieldId}" data-orig="${escAttr(f.raw)}" data-mode="${f.exact ? 'parts' : 'text'}">` +
+  // Opens as one text field: that is the quickest way to type a date, whatever
+  // it looks like. The three fields stay one click away (the ▦ button) for
+  // anyone who prefers them, and for ranges built from pieces.
+  return `<div class="gd-widget" id="${fieldId}" data-orig="${escAttr(f.raw)}" data-mode="text">` +
     `<div class="gd-row gd-parts">` +
       `<select class="gd-prefix" onchange="_gdPrefixChange('${fieldId}')">${prefixOpts}</select>` +
       dateInputs('', f.day, f.month, f.year) +
@@ -627,9 +631,10 @@ export function _gedcomDateWidget(fieldId, value) {
       dateInputs('2', f.day2, f.month2, f.year2).replace(/class="gd-(day|month|year)2"/g, 'class="gd-$12 gd-$1"') +
     `</div>` +
     `<div class="gd-row gd-text-row">` +
-      `<input class="gd-text edit-input" type="text" value="${escAttr(f.raw)}" placeholder="${t('dateWidget.textPlaceholder')}" spellcheck="false">` +
+      `<input class="gd-text edit-input" type="text" value="${escAttr(f.raw)}" placeholder="${t('dateWidget.smartPlaceholder')}" spellcheck="false" autocomplete="off" aria-describedby="${fieldId}-preview">` +
       `<button type="button" class="gd-mode-btn" onclick="_gdToggleMode('${fieldId}')" title="${t('dateWidget.asFields')}">&#x25A6;</button>` +
     `</div>` +
+    `<div class="gd-preview" id="${fieldId}-preview" aria-live="polite"></div>` +
     `</div>`;
 }
 
@@ -666,7 +671,9 @@ export function _gdToggleMode(fieldId) {
   const el = document.getElementById(fieldId);
   if (!el) return;
   if (el.dataset.mode === 'text') {
-    const f = _parseGedcomDate(el.querySelector('.gd-text')?.value || '');
+    const typed = el.querySelector('.gd-text')?.value || '';
+    const loose = parseLooseDate(typed);
+    const f = _parseGedcomDate(loose.ok ? loose.value : typed);
     if (!f.exact && f.raw) {
       // Not something the fields can hold; say so rather than drop half of it.
       const txt = el.querySelector('.gd-text');
@@ -690,7 +697,11 @@ export function _gedcomDateValue(fieldId) {
   const orig = el.dataset.orig || '';
   let value;
   if (el.dataset.mode === 'text') {
-    value = (el.querySelector('.gd-text')?.value || '').replace(/\s+/g, ' ').trim();
+    const typed = (el.querySelector('.gd-text')?.value || '').replace(/\s+/g, ' ').trim();
+    // Shorthand ("31.7.1980", "um 1900") becomes GEDCOM; anything not understood
+    // is kept exactly as typed.
+    const loose = parseLooseDate(typed);
+    value = loose.ok ? loose.value : typed;
   } else {
     value = _gdComposeAll(_gdFields(el));
   }
@@ -706,10 +717,12 @@ export function _resetGedcomDateWidget(fieldId) {
   const el = document.getElementById(fieldId);
   if (!el) return;
   el.dataset.orig = '';
-  el.dataset.mode = 'parts';
+  el.dataset.mode = 'text';
   _gdFill(el, {});
   const txt = el.querySelector('.gd-text');
   if (txt) txt.value = '';
+  const pv = el.querySelector('.gd-preview');
+  if (pv) { pv.textContent = ''; pv.className = 'gd-preview'; }
 }
 
 // ── Escaping ─────────────────────────────────────────────────────────────────

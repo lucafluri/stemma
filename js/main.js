@@ -1,6 +1,7 @@
 import * as ChangesMod from './changes.js';
 import * as CheckMod from './check.js';
 import * as DesignDMod from './design-d.js';
+import './entry.js';
 import * as ColorsMod from './colors.js';
 import * as GedcomIoMod from './gedcom-io.js';
 import * as GraphDataMod from './graph-data.js';
