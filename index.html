@@ -70,7 +70,13 @@
     <!-- Only ever visible on a phone, where the drawer covers the screen and
          the backdrop left to dismiss it is a strip too thin to aim at. -->
     <button id="sidebar-close-btn" onclick="toggleSidebar()" data-i18n-title="import.close" data-i18n-label="import.close" title="Schliessen" aria-label="Schliessen">&#x2715;</button>
-    <input type="text" id="search-input" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Name suchen...">
+    <div id="rail-head">
+      <input type="text" id="search-input" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Name suchen...">
+      <!-- People and view options never share the sidebar: this swaps one for the other. -->
+      <button id="options-btn" onclick="toggleViewOptions()" aria-pressed="false" data-i18n-title="design.viewOptions" data-i18n-label="design.viewOptions" title="Ansichtsoptionen" aria-label="Ansichtsoptionen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+      </button>
+    </div>
     <div id="search-results"></div>
     <div id="rail-tabs" role="tablist" data-i18n-label="design.rail" aria-label="Personen">
       <button role="tab" id="rt-surnames" aria-selected="true" onclick="railTab('surnames')" data-i18n="design.surnames">Familiennamen</button>
@@ -94,8 +100,11 @@
     <div id="rail-issues" class="rail-pane" style="display:none"></div>
     <button id="rail-new" class="rail-new" onclick="addNewPerson()">&#xff0b; <span data-i18n="sidebar.newPerson">Neue Person</span></button>
 
-    <details id="sidebar-more">
-      <summary data-i18n="design.viewOptions">Ansichtsoptionen</summary>
+    <div id="sidebar-more" style="display:none">
+      <div class="rail-options-head">
+        <span class="rail-options-title" data-i18n="design.viewOptions">Ansichtsoptionen</span>
+        <button class="rail-options-back" onclick="toggleViewOptions(false)" data-i18n="design.backToPeople">← Personen</button>
+      </div>
     <div id="focus-panel" style="display:none">
       <div class="sidebar-label"><span data-i18n="focus.title">Fokus</span></div>
       <div id="focus-current">
@@ -595,7 +604,7 @@
       </label>
       <button class="sidebar-btn" onclick="resetAllSettings()" data-i18n="settings.reset">Alles zurücksetzen</button>
     </details>
-    </details>
+    </div>
   </div>
 
   <div id="graph-wrapper">

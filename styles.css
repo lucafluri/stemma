@@ -4852,10 +4852,6 @@ body.relation-picking * { cursor: crosshair !important; }
   color: var(--c-11); border-radius: 6px; cursor: pointer;
 }
 .rail-new:hover { background: var(--c-3); color: var(--c-13); }
-#sidebar-more { flex-shrink: 0; border-top: 1px solid var(--c-5); padding-top: 4px; }
-#sidebar-more > summary { color: var(--c-9); }
-#sidebar-more > #focus-panel, #sidebar-more > #sidebar-buttons { margin-top: 6px; }
-
 /* ── Canvas furniture ──────────────────────────────────────────── */
 #color-mode-btn {
   position: absolute; top: 12px; right: 56px; z-index: 5; height: 38px; padding: 0 12px;
@@ -4959,24 +4955,28 @@ body.view-3d #color-mode-btn { display: none; }
 #rail-gens, #rail-issues { max-height: min(46vh, 420px); overflow-y: auto; }
 .rail-new { margin-top: 4px; }
 
-#sidebar-more {
-  margin-top: auto;               /* sits at the foot of a short sidebar, flows after the list in a tall one */
-  padding: 0;
-  border: 1px solid var(--c-5);
-  border-radius: 8px;
-  background: var(--c-3);
+/* Two modes, never both: people (tabs + list) or view options. */
+#rail-head { display: flex; gap: 6px; align-items: center; }
+#rail-head #search-input { flex: 1; min-width: 0; width: auto; }
+#options-btn {
+  flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--c-6); background: var(--c-4); color: var(--c-10); border-radius: var(--r-sm); cursor: pointer;
 }
-#sidebar-more > summary {
-  margin: 0; padding: 10px 12px; border-radius: 8px;
-  font-size: 13px; font-weight: 600; color: var(--c-11);
+#options-btn:hover { background: var(--c-5); color: var(--c-13); }
+#options-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+
+#sidebar.options-mode > #rail-tabs,
+#sidebar.options-mode > .rail-pane,
+#sidebar.options-mode > .rail-new { display: none !important; }
+
+.rail-options-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--c-5); margin-bottom: 4px;
 }
-#sidebar-more > summary::before { display: none; }
-#sidebar-more > summary::after {
-  content: '▾'; margin-left: auto; color: var(--c-9); transition: transform var(--t);
+.rail-options-title { font-size: 13px; font-weight: 600; color: var(--c-13); }
+.rail-options-back {
+  border: 0; background: transparent; color: var(--accent-text); cursor: pointer; font-size: 12px; padding: 4px 6px; border-radius: 5px;
 }
-#sidebar-more:not([open]) > summary::after { transform: rotate(-90deg); }
-#sidebar-more > summary:hover { background: var(--c-4); }
-#sidebar-more[open] > summary { border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--c-5); background: var(--c-4); color: var(--c-13); }
-#sidebar-more > :not(summary) { margin-left: 12px; margin-right: 12px; }
-#sidebar-more > summary + * { margin-top: 12px; }
-#sidebar-more > :last-child { margin-bottom: 12px; }
+.rail-options-back:hover { background: var(--c-4); }
+#sidebar-more { display: flex; flex-direction: column; gap: 8px; }
+

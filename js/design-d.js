@@ -184,11 +184,22 @@ function refreshRail() {
   }, 250);
 }
 
-// Opening the view options brings them into view — they open below the people
-// list, which can be taller than the sidebar.
-$('sidebar-more')?.addEventListener('toggle', e => {
-  if (e.target.open) e.target.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
-});
+// People or view options, never both. The sidebar used to stack them and
+// squeezed one into the other; now the gear next to the search swaps them.
+export function toggleViewOptions(force) {
+  const sb = $('sidebar');
+  if (!sb) return;
+  const on = typeof force === 'boolean' ? force : !sb.classList.contains('options-mode');
+  sb.classList.toggle('options-mode', on);
+  const opts = $('sidebar-more');
+  if (opts) opts.style.display = on ? '' : 'none';
+  const btn = $('options-btn');
+  if (btn) { btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', String(on)); }
+  sb.scrollTop = 0;
+  try { localStorage.setItem('stemma.viewOptionsOpen', on ? '1' : ''); } catch { /* private window */ }
+}
+
+try { if (localStorage.getItem('stemma.viewOptionsOpen')) toggleViewOptions(true); } catch { /* ignore */ }
 
 // ── Minimap ─────────────────────────────────────────────────────────────────
 const MM_W = 150, MM_H = 100;
