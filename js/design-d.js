@@ -9,8 +9,8 @@ import { personLabel, searchPeople } from './search.js';
 import { nodeBaseColor } from './colors.js';
 import { setView } from './render-3d.js';
 import { setTreeLayout } from './tree-layout.js';
-import { closeMapView, openMapView } from './map-view.js';
-import { closeStatsTool, openStatsTool } from './stats.js';
+import { openMapView } from './map-view.js';
+import { openStatsTool } from './stats.js';
 import { openRelationTool } from './relations.js';
 
 const $ = id => document.getElementById(id);
@@ -20,19 +20,10 @@ export function currentDesignView() {
   return state.treeLayout ? 'chart' : 'force';
 }
 
-// Map and Statistics are dialogs over the chart, so a switch made from inside
-// one has to put the other away first.
-function closeViewDialogs() {
-  for (const [id, close] of [['map-modal', closeMapView], ['stats-modal', closeStatsTool]]) {
-    if ($(id)?.style.display !== 'none') close();
-  }
-}
-
+// Chart, Force and 3D are the three ways of looking at the tree. Map,
+// Statistics and the relationship finder are tools — they live in the Tools
+// menu (and the command palette), not here.
 export function selectDesignView(v) {
-  closeViewDialogs();
-  if (v === 'map') return openMapView();
-  if (v === 'stats') return openStatsTool();
-  if (v === 'relations') return openRelationTool();
   if (v === '3d') { if (state.currentView !== '3d') setView('3d'); }
   else {
     if (state.currentView !== '2d') setView('2d');
@@ -54,11 +45,6 @@ export function toggleSpouseFamily() {
 
 export function syncDesignChrome() {
   const cur = currentDesignView();
-  document.querySelectorAll('.view-switch-clone button').forEach(b => {
-    const on = b.dataset.view === (b.closest('#map-panel') ? 'map' : 'stats');
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-pressed', String(on));
-  });
   document.querySelectorAll('#view-switch button').forEach(b => {
     b.classList.toggle('active', b.dataset.view === cur);
     b.setAttribute('aria-pressed', String(b.dataset.view === cur));
@@ -275,9 +261,9 @@ function commands() {
     { label: t('design.chart'), hint: 'view', run: () => selectDesignView('chart') },
     { label: t('design.force'), hint: 'view', run: () => selectDesignView('force') },
     { label: '3D', hint: 'view', run: () => selectDesignView('3d') },
-    { label: t('map.title'), hint: 'view', run: () => selectDesignView('map') },
-    { label: t('stats.title'), hint: 'view', run: () => selectDesignView('stats') },
-    { label: t('topbar.relation'), hint: 'view', run: () => selectDesignView('relations') },
+    { label: t('topbar.relation'), run: () => openRelationTool() },
+    { label: t('map.title'), run: () => openMapView() },
+    { label: t('stats.title'), run: () => openStatsTool() },
     { label: t('find.title'), run: W('openFindTool') },
     { label: t('check.title'), run: () => openCheckTool() },
     { label: t('places.title'), run: W('openPlacesTool') },
@@ -369,18 +355,4 @@ if (typeof MutationObserver !== 'undefined') {
   schedule();
   // Per frame is cheap: paintMinimap() returns early on an unchanged signature.
   (function loop() { paintMinimap(); requestAnimationFrame(loop); })();
-}
-
-// The same switcher inside the Map and Statistics dialogs, so they read as
-// views and not as something to dismiss before going anywhere else.
-const _src = $('view-switch');
-if (_src) {
-  for (const sel of ['#map-panel .modal-header', '#stats-panel .modal-header']) {
-    const head = document.querySelector(sel);
-    if (!head) continue;
-    const clone = _src.cloneNode(true);
-    clone.removeAttribute('id');
-    clone.classList.add('view-switch-clone');
-    head.insertBefore(clone, head.querySelector('h2')?.nextSibling || null);
-  }
 }

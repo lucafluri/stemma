@@ -4698,18 +4698,17 @@ body.relation-picking * { cursor: crosshair !important; }
 /* Chart nodes: flat dark card; the surname colour is the left bar. */
 #graph-svg .indi-box.is-selected { stroke: var(--accent); stroke-width: 1.6; }
 
-#view-switch, .view-switch-clone {
+#view-switch {
   display: flex; flex-wrap: wrap; padding: 3px; gap: 0;
   background: var(--c-3); border: 1px solid var(--c-5); border-radius: 8px;
 }
-#view-switch button, .view-switch-clone button {
+#view-switch button {
   height: 30px; padding: 0 12px; border: 0; border-radius: 5px;
   background: transparent; color: var(--c-9); cursor: pointer; font-size: 13px;
 }
-#view-switch button:hover, .view-switch-clone button:hover { color: var(--c-12); }
-#view-switch button.active, .view-switch-clone button.active { background: var(--c-5); color: var(--c-13); }
+#view-switch button:hover { color: var(--c-12); }
+#view-switch button.active { background: var(--c-5); color: var(--c-13); }
 #view-switch { position: absolute; top: 12px; left: 12px; z-index: 5; }
-.view-switch-clone { margin: 0 auto; }
 #reset-view-btn { top: 12px; }
 
 #focus-bar {
@@ -4889,7 +4888,6 @@ body.view-3d #color-mode-btn { display: none; }
 #detail-buttons { padding: 8px 16px 12px; }
 #detail-buttons > #btn-clear-hl { display: none; }
 #detail-buttons > #btn-focus-2d { grid-column: 1 / -1; }
-@media (max-width: 900px) { .view-switch-clone { display: none; } }
 @media (max-width: 700px) {
   #color-mode-btn, #minimap { display: none !important; }
   #view-switch { right: 56px; }
@@ -4980,3 +4978,22 @@ body.view-3d #color-mode-btn { display: none; }
 .rail-options-back:hover { background: var(--c-4); }
 #sidebar-more { display: flex; flex-direction: column; gap: 8px; }
 
+
+
+/* ── Tools menu: grouped, with a line of what each one does ────── */
+#tools-dropdown { min-width: 300px; padding: 4px 0; }
+#tools-dropdown .tools-group {
+  padding: 8px 14px 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--c-9);
+}
+#tools-dropdown .tools-group:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--c-5); padding-top: 10px; }
+#tools-dropdown button {
+  display: flex; align-items: flex-start; gap: 12px; border-bottom: none;
+  padding: 8px 14px; color: var(--c-12); white-space: normal;
+}
+#tools-dropdown .tool-icon { flex: none; margin-top: 1px; color: var(--c-9); }
+#tools-dropdown button:hover .tool-icon { color: var(--accent-text); }
+#tools-dropdown .tool-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#tools-dropdown .tool-name { font-weight: 500; }
+#tools-dropdown .tool-desc { font-size: 12px; color: var(--c-9); line-height: 1.35; }
+#tools-dropdown button:hover { background: var(--c-4); color: var(--c-13); }

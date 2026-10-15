@@ -48,13 +48,33 @@
        tree. One slot in the bar instead of one per tool. -->
   <div id="tools-wrap" style="display:none">
     <button id="tools-btn" onclick="toggleToolsMenu(event)" data-i18n-title="topbar.toolsTitle" title="Werkzeuge" aria-haspopup="true" aria-expanded="false">&#x1F527; <span class="btn-label" data-i18n="topbar.tools">Werkzeuge</span> <span class="tools-caret">&#x25BE;</span></button>
-    <div id="tools-dropdown">
-      <button onclick="closeToolsMenu();openRelationTool()" data-i18n-title="topbar.relationTitle" title="Verwandtschaft berechnen">&#x1F517; <span data-i18n="topbar.relation">Verwandtschaft</span></button>
-      <button onclick="closeToolsMenu();openFindTool()" data-i18n-title="find.titleLong" title="Personen suchen und filtern">&#x1F50E; <span data-i18n="find.title">Personen suchen</span></button>
-      <button onclick="closeToolsMenu();openCheckTool()" data-i18n-title="check.titleLong" title="Unmögliche Daten, fehlerhafte Verknüpfungen und mögliche Doppel finden">&#x2705; <span data-i18n="check.title">Daten prüfen</span></button>
-      <button onclick="closeToolsMenu();openPlacesTool()" data-i18n-title="topbar.placesTitle" title="Ortsnamen vereinheitlichen">&#x1F4CD; <span data-i18n="places.title">Ortsnamen vereinheitlichen</span></button>
-      <button onclick="closeToolsMenu();openMapView()" data-i18n-title="map.titleLong" title="Orte auf der Karte, über die Zeit">&#x1F5FA; <span data-i18n="map.title">Karte</span></button>
-      <button onclick="closeToolsMenu();openStatsTool()" data-i18n-title="stats.titleLong" title="Kennzahlen über den ganzen Stammbaum">&#x1F4CA; <span data-i18n="stats.title">Statistik</span></button>
+    <div id="tools-dropdown" role="menu">
+      <div class="tools-group" role="presentation" data-i18n="topbar.toolsExplore">Erkunden</div>
+      <button role="menuitem" onclick="closeToolsMenu();openRelationTool()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7a2.5 2.5 0 1 0 0 .01M17 17a2.5 2.5 0 1 0 0 .01M17 7a2.5 2.5 0 1 0 0 .01"/><path d="M9.2 8.2 14.8 15.8M9.5 7h5"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="topbar.relation"></span><span class="tool-desc" data-i18n="topbar.relationTitle"></span></span>
+      </button>
+      <button role="menuitem" onclick="closeToolsMenu();openMapView()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 4-6 2v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="map.title"></span><span class="tool-desc" data-i18n="map.titleLong"></span></span>
+      </button>
+      <button role="menuitem" onclick="closeToolsMenu();openStatsTool()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-7"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="stats.title"></span><span class="tool-desc" data-i18n="stats.titleLong"></span></span>
+      </button>
+      <div class="tools-group" role="presentation" data-i18n="topbar.toolsClean">Aufräumen</div>
+      <button role="menuitem" onclick="closeToolsMenu();openFindTool()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="find.title"></span><span class="tool-desc" data-i18n="find.titleLong"></span></span>
+      </button>
+      <button role="menuitem" onclick="closeToolsMenu();openCheckTool()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-5"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="check.title"></span><span class="tool-desc" data-i18n="check.titleLong"></span></span>
+      </button>
+      <button role="menuitem" onclick="closeToolsMenu();openPlacesTool()">
+        <svg class="tool-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21Z"/><circle cx="12" cy="10.5" r="2.3"/></svg>
+        <span class="tool-text"><span class="tool-name" data-i18n="places.title"></span><span class="tool-desc" data-i18n="topbar.placesDesc"></span></span>
+      </button>
     </div>
   </div>
   <select id="lang-switcher" onchange="setLanguage(this.value)" aria-label="Language">
@@ -638,9 +658,6 @@
       <button data-view="chart" onclick="selectDesignView('chart')" data-i18n="design.chart">Diagramm</button>
       <button data-view="force" onclick="selectDesignView('force')" data-i18n="design.force">Kraft</button>
       <button data-view="3d" onclick="selectDesignView('3d')">3D</button>
-      <button data-view="map" onclick="selectDesignView('map')" data-i18n="design.map">Karte</button>
-      <button data-view="stats" onclick="selectDesignView('stats')" data-i18n="design.stats">Statistik</button>
-      <button data-view="relations" onclick="selectDesignView('relations')" data-i18n="design.relations">Verwandtschaft</button>
     </div>
     <button id="color-mode-btn" onclick="toggleColorMode()" data-i18n-title="sidebar.colorToggle" title="Farbe der Personen"></button>
     <canvas id="minimap" width="150" height="100" aria-hidden="true"></canvas>
