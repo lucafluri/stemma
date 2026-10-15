@@ -184,6 +184,12 @@ function refreshRail() {
   }, 250);
 }
 
+// Opening the view options brings them into view — they open below the people
+// list, which can be taller than the sidebar.
+$('sidebar-more')?.addEventListener('toggle', e => {
+  if (e.target.open) e.target.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+});
+
 // ── Minimap ─────────────────────────────────────────────────────────────────
 const MM_W = 150, MM_H = 100;
 let _mmSig = '', _mmBox = null;

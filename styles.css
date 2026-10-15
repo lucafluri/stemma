@@ -4826,7 +4826,7 @@ body.relation-picking * { cursor: crosshair !important; }
 #rail-tabs button:hover { color: var(--c-12); }
 #rail-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 #rt-issues-n { font-family: var(--mono); }
-.rail-pane { display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.rail-pane { display: flex; flex-direction: column; gap: 2px; }
 #rail-surnames { gap: 6px; }
 .rail-group-head, .rail-person, .rail-issue, .rail-link {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
@@ -4949,3 +4949,34 @@ body.view-3d #color-mode-btn { display: none; }
 #rail-tabs { justify-content: space-between; }
 #rail-tabs { gap: 2px; }
 #rail-tabs button { padding: 0 6px; text-overflow: clip; }
+
+
+/* ── Sidebar sections: people on top, view options below ────────
+   The sidebar scrolls as a whole. Nothing in it may shrink to make room for
+   something else — the people list used to be squeezed to zero height when the
+   view options were open, and its rows spilled over the controls beneath. */
+#sidebar > * { flex-shrink: 0; }
+#rail-gens, #rail-issues { max-height: min(46vh, 420px); overflow-y: auto; }
+.rail-new { margin-top: 4px; }
+
+#sidebar-more {
+  margin-top: auto;               /* sits at the foot of a short sidebar, flows after the list in a tall one */
+  padding: 0;
+  border: 1px solid var(--c-5);
+  border-radius: 8px;
+  background: var(--c-3);
+}
+#sidebar-more > summary {
+  margin: 0; padding: 10px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; color: var(--c-11);
+}
+#sidebar-more > summary::before { display: none; }
+#sidebar-more > summary::after {
+  content: '▾'; margin-left: auto; color: var(--c-9); transition: transform var(--t);
+}
+#sidebar-more:not([open]) > summary::after { transform: rotate(-90deg); }
+#sidebar-more > summary:hover { background: var(--c-4); }
+#sidebar-more[open] > summary { border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--c-5); background: var(--c-4); color: var(--c-13); }
+#sidebar-more > :not(summary) { margin-left: 12px; margin-right: 12px; }
+#sidebar-more > summary + * { margin-top: 12px; }
+#sidebar-more > :last-child { margin-bottom: 12px; }
